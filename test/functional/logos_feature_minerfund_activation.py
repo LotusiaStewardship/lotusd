@@ -128,7 +128,7 @@ JUDGES_SCRIPTS = [
     "76a9149208ecc785c92968481a92aee7024b77e54d27dc88ac",
 ]
 RUTH_SCRIPTS = [
-    "76a9149208ecc785c92968481a92aee7024b77e54d27dc88ac",
+    "76a914d7756030f4292b70cb70dc4df231b14109c6806188ac",
 ]
 
 class MinerFundActivationTest(BitcoinTestFramework):
