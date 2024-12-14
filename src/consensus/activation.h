@@ -39,4 +39,8 @@ bool IsJoshuaEnabled(const Consensus::Params &params,
 bool IsJudgesEnabled(const Consensus::Params &params,
                           const CBlockIndex *pindexPrev);
 
+/** Check if December 21st, 2024 protocol upgrade has activated. */
+bool IsRuthEnabled(const Consensus::Params &params,
+                          const CBlockIndex *pindexPrev);
+
 #endif // BITCOIN_CONSENSUS_ACTIVATION_H

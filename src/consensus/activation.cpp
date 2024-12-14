@@ -72,3 +72,12 @@ bool IsJudgesEnabled(const Consensus::Params &params,
     return pindexPrev->GetMedianTimePast() >=
            gArgs.GetArg("-judgesactivationtime", params.judgesActivationTime);
 }
+
+bool IsRuthEnabled(const Consensus::Params &params,
+                          const CBlockIndex *pindexPrev) {
+    if (pindexPrev == nullptr) {
+        return false;
+    }
+    return pindexPrev->GetMedianTimePast() >=
+           gArgs.GetArg("-ruthactivationtime", params.ruthActivationTime);
+}
