@@ -140,6 +140,10 @@ Consensus::CoinbaseAddresses AddressSets = {
     .judges =
         {
             "lotus_16PSJMaps9sQg7aBQgyY1RdHb2fZYdmWhQPbgus75"
+        },
+    .ruth =
+        {
+            "lotus_16PSJMaps9sQg7aBQgyY1RdHb2fZYdmWhQPbgus75"
         }
 };
 } // namespace RewardAddresses

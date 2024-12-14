@@ -426,7 +426,8 @@ void SetupServerArgs(NodeContext &node) {
         // TODO remove after the December 2021 upgrade
         "-exodusactivationtime", "-leviticusactivationtime",
         "-numbersactivationtime", "-deuteronomyactivationtime",
-        "-joshuaactivationtime", "-judgesactivationtime"};
+        "-joshuaactivationtime", "-judgesactivationtime",
+        "-ruthactivationtime"};
 
     // Set all of the args and their help
     // When adding new options to the categories, please keep and ensure
