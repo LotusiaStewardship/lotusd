@@ -7,10 +7,15 @@ on:
         required: true
         type: string
 
+# Global defaults for all jobs
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-lotus-qt:
     name: 🖼️ Build lotus-qt
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     outputs:
       build_status: ${{ job.status }}
 

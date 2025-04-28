@@ -6,11 +6,16 @@ on:
         required: true
         type: string
 
+# Global defaults for all jobs
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # Package artifacts
   package-artifacts:
     name: 📦 Package Artifacts
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     outputs:
       package_status: ${{ job.status }}
 
@@ -66,7 +71,7 @@ jobs:
   # Create the Git tag
   create-tag:
     name: 🏷️ Create Git Tag
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     outputs:
       tag_created: ${{ steps.create-tag.outputs.tag_created }}
 

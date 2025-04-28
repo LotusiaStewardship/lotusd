@@ -26,7 +26,7 @@ jobs:
   # Check current version
   version-check:
     name: 🔍 Check Version
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     outputs:
       current_version: ${{ steps.get-version.outputs.version }}
       should_bump: ${{ steps.check-bump.outputs.should_bump }}

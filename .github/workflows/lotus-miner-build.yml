@@ -8,10 +8,15 @@ on:
         required: true
         type: string
 
+# Global defaults for all jobs
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-lotus-gpu-miner:
     name: 🔥 Build lotus-gpu-miner
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     outputs:
       build_status: ${{ job.status }}
 
