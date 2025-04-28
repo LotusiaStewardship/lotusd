@@ -45,10 +45,14 @@ WORKDIR /lotus-source
 COPY . .
 
 # Build the binary
-RUN mkdir build && \
-    cd build && \
-    cmake .. && \
-    make lotusd -j$(nproc)
+RUN mkdir build
+RUN cd build && cmake ..
+RUN cd build && make lotusd -j$(nproc)
+RUN cd build && make lotus-cli -j$(nproc)
+RUN cd build && make lotus-seeder -j$(nproc)
+RUN cd build && make lotus-tx -j$(nproc)
+RUN cd build && make lotus-wallet -j$(nproc)
+RUN cd build && make lotus-qt -j$(nproc)
 
 # Runtime stage
 FROM ubuntu:24.04
@@ -85,11 +89,11 @@ RUN mkdir -p /opt/lotus/bin /opt/lotus/lib /opt/lotus/include
 
 # Copy built binaries from builder stage
 COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/
-# COPY --from=builder /lotus-source/build/src/lotus-cli /opt/lotus/bin/
+COPY --from=builder /lotus-source/build/src/lotus-cli /opt/lotus/bin/
 COPY --from=builder /lotus-source/build/src/lotus-qt /opt/lotus/bin/
-# COPY --from=builder /lotus-source/build/src/lotus-seeder /opt/lotus/bin/
-# COPY --from=builder /lotus-source/build/src/lotus-tx /opt/lotus/bin/
-# COPY --from=builder /lotus-source/build/src/lotus-wallet /opt/lotus/bin/
+COPY --from=builder /lotus-source/build/src/lotus-seeder /opt/lotus/bin/
+COPY --from=builder /lotus-source/build/src/lotus-tx /opt/lotus/bin/
+COPY --from=builder /lotus-source/build/src/lotus-wallet /opt/lotus/bin/
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*

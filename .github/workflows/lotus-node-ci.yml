@@ -220,11 +220,11 @@ jobs:
           
           # Copy each binary from the run stage
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
-          # docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
-          # docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
-          # docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
-          # docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
           
           # Create a tarball of all binaries
           cd ./artifacts
