@@ -1,0 +1,108 @@
+name: Lotus Node CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/lotus-node
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      # Move the cache to prevent it from growing indefinitely
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      
+      # Basic test to verify the image works
+      - name: Test Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker pull ghcr.io/${{ github.repository_owner }}/lotus-node:sha-${SHORT_SHA}
+          docker run --name lotus-test -d ghcr.io/${{ github.repository_owner }}/lotus-node:sha-${SHORT_SHA} -printtoconsole -server
+          sleep 10
+          docker logs lotus-test | grep -q "lotus" && echo "Container started successfully" || (echo "Container failed to start properly" && exit 1)
+          docker rm -f lotus-test
+
+  # deploy:
+  #   needs: build
+  #   if: github.event_name != 'pull_request'
+  #   runs-on: ubuntu-latest
+    
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v3
+      
+  #     - name: Set up SSH
+  #       uses: webfactory/ssh-agent@v0.7.0
+  #       with:
+  #         ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+      
+  #     - name: Update docker-compose file
+  #       run: |
+  #         # Ensure proper image format if no explicit registry was specified
+  #         if grep -q "image: lotus-node:" docker-compose.yml; then
+  #           sed -i 's|image: lotus-node:.*|image: ghcr.io/${{ github.repository_owner }}/lotus-node:latest|g' docker-compose.yml
+  #         fi
+          
+  #         # Update image reference in docker-compose.yml to use GitHub Container Registry with correct format
+  #         if grep -q "image: ghcr.io/lotus-node:" docker-compose.yml; then
+  #           sed -i 's|image: ghcr.io/lotus-node:.*|image: ghcr.io/${{ github.repository_owner }}/lotus-node:latest|g' docker-compose.yml
+  #         fi
+      
+  #     - name: Deploy to production
+  #       if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+  #       run: |
+  #         mkdir -p ~/.ssh
+  #         ssh-keyscan ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+  #         scp docker-compose.yml ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/data/lotus/
+  #         ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "cd /data/lotus && docker-compose pull && docker-compose up -d"
