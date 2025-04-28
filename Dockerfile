@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y \
     libqt5dbus5 \
     qttools5-dev \
     qttools5-dev-tools \
+    libprotobuf-dev \
+    protobuf-compiler \
     curl \
     wget \
     git \
@@ -71,6 +73,7 @@ RUN apt-get update && apt-get install -y \
     libqt5core5a \
     libqt5gui5 \
     libqt5dbus5 \
+    libprotobuf23 \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
