@@ -48,7 +48,7 @@ COPY . .
 RUN mkdir build && \
     cd build && \
     cmake .. && \
-    make lotusd -j32
+    make lotusd -j$(nproc)
 
 # Runtime stage
 FROM ubuntu:24.04
