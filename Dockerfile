@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
     libdb++-dev \
     libminiupnpc-dev \
     libnng-dev \
+    libjemalloc-dev \
+    pkg-config \
+    libsqlite3-dev \
     curl \
     wget \
     git \
@@ -47,6 +50,8 @@ RUN apt-get update && apt-get install -y \
     libatomic1 \
     curl \
     libminiupnpc17 \
+    libjemalloc2 \
+    libsqlite3-0 \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
