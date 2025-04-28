@@ -1,4 +1,8 @@
-[![Lotus Logo](share/pixmaps/lotuslogo.png "Lotus")](https://lotusia.org)
+<p align="center">
+  <a href="https://lotusia.org">
+    <img src="share/pixmaps/lotuslogo.png" alt="Lotus" title="Lotus" width="60%" style="max-width: 500px; height: auto;">
+  </a>
+</p>
 
 # Lotus: Digital Currency for Human Relationships
 
