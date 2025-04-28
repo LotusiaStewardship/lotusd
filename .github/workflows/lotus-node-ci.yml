@@ -150,7 +150,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
-      # Build main lotusd image with detailed logging
+      # Build main lotusd image with explicit local loading
       - name: Build main lotusd Docker image
         uses: docker/build-push-action@v4
         if: github.event_name != 'pull_request'
@@ -164,7 +164,8 @@ jobs:
             ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          load: true # This ensures the image is loaded locally
+          load: true
+          outputs: type=docker
       
       # Move the cache
       - name: Move cache
@@ -196,30 +197,63 @@ jobs:
             echo "This means the build or push step likely failed."
           fi
       
-      # Extract binary from the image with fallback
+      # Extract binary using robust method
       - name: Extract lotusd from Docker image
         if: github.event_name != 'pull_request'
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          VERSION="${{ steps.get-version.outputs.version }}"
           mkdir -p ./artifacts
           
-          # Try to extract from the Docker image, but don't fail if image doesn't exist yet
-          set +e  # Don't exit on error
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA} 2>/dev/null)
-          EXTRACT_EXIT_CODE=$?
-          set -e  # Resume exit on error
+          # Try multiple image references to find one that works
+          FOUND_IMAGE=false
           
-          if [ $EXTRACT_EXIT_CODE -eq 0 ]; then
-            # Image exists, extract binary
-            docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
-            docker rm -v $CONTAINER_ID
-            echo "Successfully extracted binary from Docker image"
-          else
-            # Image doesn't exist yet, create placeholder binary
-            echo "Docker image not found. This is normal during initial setup."
-            echo "Future builds will extract the actual binary."
+          # Check for image in local Docker cache first
+          echo "Checking for image in local Docker cache..."
+          for IMAGE_REF in "ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}" "ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:${VERSION}" "ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:latest"; do
+            echo "Trying image: ${IMAGE_REF}"
+            if docker image inspect ${IMAGE_REF} &>/dev/null; then
+              echo "Found image locally: ${IMAGE_REF}"
+              CONTAINER_ID=$(docker create ${IMAGE_REF})
+              docker cp ${CONTAINER_ID}:/opt/lotus/bin/lotusd ./artifacts/
+              docker rm -v ${CONTAINER_ID}
+              echo "Successfully extracted binary from local Docker image"
+              FOUND_IMAGE=true
+              break
+            fi
+          done
+          
+          # If not found locally, try pulling from registry
+          if [ "$FOUND_IMAGE" = "false" ]; then
+            echo "Image not found locally, trying to pull from registry..."
+            for IMAGE_REF in "ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}" "ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:${VERSION}" "ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:latest"; do
+              echo "Trying to pull: ${IMAGE_REF}"
+              if docker pull ${IMAGE_REF} &>/dev/null; then
+                echo "Successfully pulled image: ${IMAGE_REF}"
+                CONTAINER_ID=$(docker create ${IMAGE_REF})
+                docker cp ${CONTAINER_ID}:/opt/lotus/bin/lotusd ./artifacts/
+                docker rm -v ${CONTAINER_ID}
+                echo "Successfully extracted binary from pulled Docker image"
+                FOUND_IMAGE=true
+                break
+              fi
+            done
+          fi
+          
+          # If still not found, create placeholder
+          if [ "$FOUND_IMAGE" = "false" ]; then
+            echo "WARNING: Docker image not found locally or in registry."
+            echo "Creating placeholder binary..."
             touch ./artifacts/lotusd
             chmod +x ./artifacts/lotusd
+          fi
+          
+          # Check file size to confirm it's not empty
+          FILE_SIZE=$(stat -c%s "./artifacts/lotusd" 2>/dev/null || echo "0")
+          echo "Binary file size: ${FILE_SIZE} bytes"
+          if [ "$FILE_SIZE" -lt 1000 ]; then
+            echo "WARNING: Extracted binary is very small (${FILE_SIZE} bytes)!"
+            echo "This might indicate a problem with the extraction process."
           fi
       
       # Upload binary as artifact
@@ -1279,7 +1313,7 @@ jobs:
             touch ./artifacts/lotus-binaries-${{ steps.get-version.outputs.version }}.tar.gz
           fi
       
-      # Generate beautiful release notes
+      # Generate comprehensive release notes with component-specific details
       - name: Generate release notes
         id: generate-notes
         run: |
@@ -1297,6 +1331,50 @@ jobs:
             COMPARE_URL="https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${VERSION}"
           fi
           
+          # Get component-specific commits
+          echo "Analyzing component-specific commits..."
+          
+          # Define components and their main directories
+          declare -A COMPONENTS=(
+            ["lotusd"]="src/,src/bitcoind/,src/rpc/"
+            ["lotus-cli"]="src/,src/bitcoin-cli/,src/rpc/"
+            ["lotus-tx"]="src/,src/bitcoin-tx/"
+            ["lotus-wallet"]="src/,src/wallet/"
+            ["lotus-qt"]="src/,src/qt/"
+            ["lotus-seeder"]="src/,src/seeder/"
+            ["lotus-gpu-miner"]="gpuminer/"
+          )
+          
+          COMPONENT_COMMITS=""
+          for component in "${!COMPONENTS[@]}"; do
+            paths=${COMPONENTS[$component]}
+            IFS=',' read -ra PATH_ARRAY <<< "$paths"
+            
+            component_changelog=""
+            for path in "${PATH_ARRAY[@]}"; do
+              if [ -n "$PREV_TAG" ]; then
+                path_commits=$(git log --pretty=format:"- %s by %an" ${PREV_TAG}..HEAD -- "$path" 2>/dev/null)
+              else
+                path_commits=$(git log --pretty=format:"- %s by %an" -10 -- "$path" 2>/dev/null)
+              fi
+              
+              if [ -n "$path_commits" ] && [ -z "$component_changelog" ]; then
+                component_changelog="$path_commits"
+              elif [ -n "$path_commits" ]; then
+                component_changelog="$component_changelog"$'\n'"$path_commits"
+              fi
+            done
+            
+            # Remove duplicate entries
+            component_changelog=$(echo "$component_changelog" | sort | uniq)
+            
+            if [ -n "$component_changelog" ]; then
+              COMPONENT_COMMITS="$COMPONENT_COMMITS"$'\n\n'"### $component Changes"$'\n'"$component_changelog"
+            else
+              COMPONENT_COMMITS="$COMPONENT_COMMITS"$'\n\n'"### $component Changes"$'\n'"- No specific changes"
+            fi
+          done
+          
           # Create release notes file
           cat > release_notes.md << EOF
           # 🚀 Lotus Core v${VERSION} Release
@@ -1305,8 +1383,17 @@ jobs:
 
           ## 📦 Binaries and Docker Images
 
-          ### Binary Packages
-          * [Combined Binary Package](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.tar.gz) - Complete package of all Lotus binaries
+          ### Individual Binary Packages
+          * [**lotusd**](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotusd-${VERSION}-linux-x86_64.tar.gz) - The main Lotus full node daemon
+          * [**lotus-cli**](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-cli-${VERSION}-linux-x86_64.tar.gz) - Command-line interface for controlling the daemon
+          * [**lotus-tx**](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-tx-${VERSION}-linux-x86_64.tar.gz) - Transaction utility for offline transaction creation and manipulation
+          * [**lotus-seeder**](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-seeder-${VERSION}-linux-x86_64.tar.gz) - DNS seeder for the Lotus network
+          * [**lotus-wallet**](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-wallet-${VERSION}-linux-x86_64.tar.gz) - Wallet utility for managing funds
+          * [**lotus-qt**](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-qt-${VERSION}-linux-x86_64.tar.gz) - Desktop GUI wallet with full node capabilities
+          * [**lotus-gpu-miner**](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-gpu-miner-${VERSION}-linux-x86_64.tar.gz) - GPU-accelerated miner for Lotus
+
+          ### Combined Package
+          * [Combined Binary Package](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.tar.gz) - Complete package containing all binaries listed above
 
           ### Docker Images
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-node) - Main Lotus daemon
@@ -1321,18 +1408,66 @@ jobs:
 
           ${COMPARE_URL:+[View all changes](${COMPARE_URL})}
 
-          ### Changelog
+          ### Overall Changelog
           ${CHANGELOG}
+          
+          ## Component-Specific Changes
+          ${COMPONENT_COMMITS}
 
           ## 💡 Installation Instructions
 
-          ### Docker Installation
+          ### Main Node Installation
           \`\`\`bash
           # Pull the Lotus node image
           docker pull ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
 
           # Run a Lotus node
           docker run -d --name lotus-node -p 10605:10605 -p 10604:10604 -v lotus-data:/root/.lotus ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
+          \`\`\`
+
+          ### CLI Tool Installation
+          \`\`\`bash
+          # Pull the CLI image
+          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}
+
+          # Run a command using the CLI (example: getinfo)
+          docker run --rm --network=host ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION} -rpcuser=user -rpcpassword=pass getinfo
+          \`\`\`
+
+          ### Network Seeder Installation
+          \`\`\`bash
+          # Pull the seeder image
+          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION}
+
+          # Run the seeder
+          docker run -d --name lotus-seeder -p 53:53/udp ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION} -h seed.lotusia.org -n ns.seed.lotusia.org -m admin@lotusia.org
+          \`\`\`
+
+          ### Transaction Utility Installation
+          \`\`\`bash
+          # Pull the transaction utility image
+          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-tx:${VERSION}
+
+          # Create a raw transaction example
+          docker run --rm ghcr.io/${REPO_OWNER_LC}/lotus-tx:${VERSION} -create=inputs=txid:vout:sequence:scriptSig,outputs=data:value
+          \`\`\`
+
+          ### Wallet Utility Installation
+          \`\`\`bash
+          # Pull the wallet utility image
+          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-wallet:${VERSION}
+
+          # Run the wallet utility
+          docker run -d --name lotus-wallet -v wallet-data:/root/.lotus ghcr.io/${REPO_OWNER_LC}/lotus-wallet:${VERSION}
+          \`\`\`
+
+          ### Desktop GUI Installation
+          \`\`\`bash
+          # For desktop GUI, a local X11 setup is required
+          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-qt:${VERSION}
+
+          # Run the GUI wallet (requires X11 forwarding)
+          docker run --rm -e DISPLAY=\$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix ghcr.io/${REPO_OWNER_LC}/lotus-qt:${VERSION}
           \`\`\`
 
           ### GPU Miner Installation
