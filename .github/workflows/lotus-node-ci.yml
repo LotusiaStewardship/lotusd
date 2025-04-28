@@ -26,6 +26,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
       
+      # Set lowercase repository owner name for Docker
+      - name: Set lowercase repository owner
+        id: lowercase_repo_owner
+        run: |
+          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
@@ -38,7 +44,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v4
         with:
-          images: ghcr.io/${{ github.repository_owner }}/lotus-node
+          images: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -60,15 +66,15 @@ jobs:
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
       # Basic test to verify the image works
       - name: Test Docker image
         if: github.event_name != 'pull_request'
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          docker pull ghcr.io/${{ github.repository_owner }}/lotus-node:sha-${SHORT_SHA}
-          docker run --name lotus-test -d ghcr.io/${{ github.repository_owner }}/lotus-node:sha-${SHORT_SHA} -printtoconsole -server
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}
+          docker run --name lotus-test -d ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA} -printtoconsole -server
           sleep 10
           docker logs lotus-test | grep -q "lotus" && echo "Container started successfully" || (echo "Container failed to start properly" && exit 1)
           docker rm -f lotus-test
@@ -81,7 +87,7 @@ jobs:
           mkdir -p ./artifacts
           
           # Create a temporary container to copy files from
-          CONTAINER_ID=$(docker create ghcr.io/${{ github.repository_owner }}/lotus-node:sha-${SHORT_SHA})
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA})
           
           # Copy each binary from the builder stage
           docker cp $CONTAINER_ID:/lotus-source/build/src/lotusd ./artifacts/
