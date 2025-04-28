@@ -663,23 +663,34 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
-      # Extract binary from the image
+      # Extract binary and kernels from the image
       - name: Extract lotus-gpu-miner from Docker image
         if: github.event_name != 'pull_request'
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          mkdir -p ./artifacts
+          mkdir -p ./artifacts/kernels
+          
+          # Create container
           CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${SHORT_SHA})
+          
+          # Extract GPU miner binary
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
+          
+          # Extract required kernels folder
+          docker cp $CONTAINER_ID:/opt/lotus/kernels ./artifacts/
+          
+          # Remove container
           docker rm -v $CONTAINER_ID
       
-      # Upload binary as artifact
+      # Upload binary and kernels as artifact
       - name: Upload lotus-gpu-miner as artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: lotus-gpu-miner-${{ steps.get-version.outputs.version }}
-          path: ./artifacts/lotus-gpu-miner
+          path: |
+            ./artifacts/lotus-gpu-miner
+            ./artifacts/kernels/
           retention-days: 14
 
   # Combine all artifacts into a single tarball
@@ -747,11 +758,26 @@ jobs:
         run: |
           chmod +x ./artifacts/*
       
-      # Create tarball of all binaries
+      # Create tarball of all binaries and kernels
       - name: Create tarball
         run: |
           cd ./artifacts
-          tar -czvf lotus-binaries-${{ steps.get-version.outputs.version }}.tar.gz lotus*
+          
+          # Create a directory structure to ensure kernels are next to the binary
+          mkdir -p gpu-miner-package/kernels
+          
+          # Copy lotus binaries to the root of the tarball
+          cp lotus* gpu-miner-package/
+          
+          # Copy kernels folder for the GPU miner
+          cp -r kernels/* gpu-miner-package/kernels/
+          
+          # Create the tarball from the prepared directory
+          tar -czvf lotus-binaries-${{ steps.get-version.outputs.version }}.tar.gz gpu-miner-package/
+          
+          # Clean up temporary directory
+          rm -rf gpu-miner-package
+          
           cd ..
       
       # Upload combined artifact
