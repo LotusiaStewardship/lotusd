@@ -3990,7 +3990,7 @@ static bool ContextualCheckBlock(const CBlock &block,
     // Enforce rule that the coinbase transaction's first output must contain an OP_RETURN
     // followed by a prefix and the serialized block height.
     // This rule applies to all blocks except the genesis block (height 0).
-    if (nHeight >= 1) {
+    if (nHeight > 1) {
         // Get the coinbase transaction's first output scriptPubKey
         const CScript &scriptPubKey = block.vtx[0]->vout[0].scriptPubKey;
         
@@ -4001,9 +4001,11 @@ static bool ContextualCheckBlock(const CBlock &block,
         
         // Script must start with OP_RETURN
         if (!scriptPubKey.GetOp(pc, opcode) || opcode != OP_RETURN) {
-            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
-                                "bad-cb-missing-opreturn",
-                                "coinbase must start with OP_RETURN");
+            LogPrintf("WARNING: coinbase missing OP_RETURN -> Some miner is mining on pre 8.3.4 version ! Allowing it for now.\n");
+            return true;
+            // return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+            //                     "bad-cb-missing-opreturn",
+            //                     "coinbase must start with OP_RETURN");
         }
         
         // Skip the prefix data (we don't validate it)
