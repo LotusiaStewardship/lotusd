@@ -53,7 +53,7 @@ jobs:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 4: Mining Components
+  # Group 3d: Mining Components
   build-miner:
     name: ⛏️ Mining Components
     needs: [ version-management ]
