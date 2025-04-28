@@ -1,14 +1,4 @@
-# This is a reference to the specialized Dockerfiles
-# To build the main lotus node image:
-#   docker build -f dockerfiles/Dockerfile.lotusd -t lotus-node .
-# For other components:
-#   docker build -f dockerfiles/Dockerfile.lotus-cli -t lotus-cli .
-#   docker build -f dockerfiles/Dockerfile.lotus-seeder -t lotus-seeder .
-#   docker build -f dockerfiles/Dockerfile.lotus-tx -t lotus-tx .
-#   docker build -f dockerfiles/Dockerfile.lotus-wallet -t lotus-wallet .
-#   docker build -f dockerfiles/Dockerfile.lotus-qt -t lotus-qt .
-
-# Default to the main node image
+# Build stage
 FROM ubuntu:24.04 AS builder
 
 # Install build dependencies
@@ -27,16 +17,6 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     flatbuffers-compiler \
     libflatbuffers-dev \
-    qtbase5-dev \
-    qt5-qmake \
-    libqt5gui5 \
-    libqt5core5a \
-    libqt5dbus5 \
-    qttools5-dev \
-    qttools5-dev-tools \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libqrencode-dev \
     curl \
     wget \
     git \
@@ -54,7 +34,7 @@ WORKDIR /lotus-source
 # Copy the source code
 COPY . .
 
-# Build the binaries
+# Build the binary
 RUN mkdir build
 WORKDIR /lotus-source/build
 RUN cmake ..
@@ -84,9 +64,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
-RUN mkdir -p /opt/lotus/bin /opt/lotus/lib /opt/lotus/include
+RUN mkdir -p /opt/lotus/bin /opt/lotus/lib
 
-# Copy built binaries from builder stage
+# Copy built binary from builder stage
 COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/
 
 # Set permissions
@@ -98,9 +78,6 @@ ENV LD_LIBRARY_PATH="/opt/lotus/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
 
 # Create data directory
 RUN mkdir -p /root/.lotus
-
-# Make sure the library is in the system's library path
-RUN echo "/usr/lib/x86_64-linux-gnu" > /etc/ld.so.conf.d/lotus.conf && ldconfig
 
 # Expose commonly used ports
 # P2P network
@@ -115,4 +92,4 @@ WORKDIR /root
 
 # Default command to run the node daemon
 ENTRYPOINT ["/opt/lotus/bin/lotusd"]
-CMD ["-reindex", "-printtoconsole", "-datadir=/root/.lotus", "-addnode=116.103.232.62", "-addnode=69.234.67.246", "-addnode=146.70.211.96", "-addnode=70.92.25.116", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-rpcuser=lotus", "-rpcpassword=lkdjflheoiueiiir", "-rpcallowip=10.128.0.0/16", "-rpcbind=0.0.0.0:58525", "-rpcport=58525", "-rpcallowip=127.0.0.1", "-rpcthreads=8", "-disablewallet=0"]
+CMD ["-reindex", "-printtoconsole", "-datadir=/root/.lotus", "-addnode=116.103.232.62", "-addnode=69.234.67.246", "-addnode=146.70.211.96", "-addnode=70.92.25.116", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-rpcuser=lotus", "-rpcpassword=lkdjflheoiueiiir", "-rpcallowip=10.128.0.0/16", "-rpcbind=0.0.0.0:58525", "-rpcport=58525", "-rpcallowip=127.0.0.1", "-rpcthreads=8", "-disablewallet=0"] 
