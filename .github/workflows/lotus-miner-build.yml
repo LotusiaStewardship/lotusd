@@ -54,6 +54,7 @@ jobs:
           context: .
           file: dockerfiles/Dockerfile.lotus-gpu-miner
           push: true
+          load: true  # Load into local Docker also for extraction
           tags: |
             ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
             ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
@@ -67,32 +68,37 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
-      # Extract binary and kernels from the image with fallback
+      # Wait briefly for the image to be available
+      - name: Wait for image to be available
+        if: github.event_name != 'pull_request'
+        run: |
+          sleep 10
+      
+      # Extract binary and kernels from the image
       - name: Extract lotus-gpu-miner from Docker image
         if: github.event_name != 'pull_request'
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           mkdir -p ./artifacts/kernels
           
-          # Try to extract from the Docker image, but don't fail if image doesn't exist yet
-          set +e  # Don't exit on error
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${SHORT_SHA} 2>/dev/null)
-          EXTRACT_EXIT_CODE=$?
-          set -e  # Resume exit on error
+          # Create a container from the local image
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }})
           
-          if [ $EXTRACT_EXIT_CODE -eq 0 ]; then
-            # Image exists, extract binary and kernels
-            docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
-            docker cp $CONTAINER_ID:/opt/lotus/kernels ./artifacts/
-            docker rm -v $CONTAINER_ID
-            echo "Successfully extracted binary and kernels from Docker image"
-          else
-            # Image doesn't exist yet, create placeholder binary and kernels folder
-            echo "Docker image not found. This is normal during initial setup."
-            echo "Future builds will extract the actual binary and kernels."
-            touch ./artifacts/lotus-gpu-miner
-            chmod +x ./artifacts/lotus-gpu-miner
-            mkdir -p ./artifacts/kernels
+          # Extract the binary and kernels
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/kernels ./artifacts/
+          docker rm -v $CONTAINER_ID
+          
+          # Verify the files were extracted
+          ls -la ./artifacts/
+          ls -la ./artifacts/kernels/
+          
+          # Check the binary file size to make sure it's not empty
+          filesize=$(stat -c%s "./artifacts/lotus-gpu-miner" 2>/dev/null || echo "0")
+          echo "Binary file size: $filesize bytes"
+          
+          if [ "$filesize" -eq 0 ]; then
+            echo "Error: Extracted binary file is empty"
+            exit 1
           fi
       
       # Upload binary and kernels as artifact
