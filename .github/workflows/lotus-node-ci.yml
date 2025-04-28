@@ -1050,6 +1050,42 @@ jobs:
       # Make directory for artifacts
       - name: Create artifacts directory
         run: |
+          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Build lotus-gpu-miner image
+      - name: Build lotus-gpu-miner Docker image
+        uses: docker/build-push-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus-gpu-miner
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ steps.get-version.outputs.version }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      # Move the cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Extract binary from the image
+      - name: Extract lotus-gpu-miner from Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           mkdir -p ./artifacts
           mkdir -p ./artifacts/kernels
       
