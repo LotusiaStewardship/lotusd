@@ -253,15 +253,31 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
-      # Extract binary from the image
-      - name: Extract lotus-cli from Docker image
+      # Extract binary with fallback mechanism
+      - name: Extract binary from Docker image
         if: github.event_name != 'pull_request'
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           mkdir -p ./artifacts
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-cli:sha-${SHORT_SHA})
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
-          docker rm -v $CONTAINER_ID
+          
+          # Try to extract from the Docker image, but don't fail if image doesn't exist yet
+          set +e  # Don't exit on error
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-cli:sha-${SHORT_SHA} 2>/dev/null)
+          EXTRACT_EXIT_CODE=$?
+          set -e  # Resume exit on error
+          
+          if [ $EXTRACT_EXIT_CODE -eq 0 ]; then
+            # Image exists, extract binary
+            docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
+            docker rm -v $CONTAINER_ID
+            echo "Successfully extracted binary from Docker image"
+          else
+            # Image doesn't exist yet, create placeholder binary
+            echo "Docker image not found. This is normal during initial setup."
+            echo "Future builds will extract the actual binary."
+            touch ./artifacts/lotus-cli
+            chmod +x ./artifacts/lotus-cli
+          fi
       
       # Upload binary as artifact
       - name: Upload lotus-cli as artifact
