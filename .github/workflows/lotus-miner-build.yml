@@ -30,6 +30,17 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
+    - name: Prepare buildx cache directories
+      run: |
+        # Create cache directories with appropriate permissions
+        sudo mkdir -p /tmp/.buildx-cache /tmp/.buildx-cache-new
+        sudo chmod -R 777 /tmp/.buildx-cache /tmp/.buildx-cache-new
+
+        # If the index.json file doesn't exist, create an empty one
+        if [ ! -f "/tmp/.buildx-cache/index.json" ]; then
+          echo '{}' > /tmp/.buildx-cache/index.json
+        fi
+
     - name: Cache Docker layers
       uses: actions/cache@v3
       with:
