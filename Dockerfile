@@ -1,6 +1,38 @@
+# Build stage
+FROM ubuntu:24.04 AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    libssl-dev \
+    libzmq3-dev \
+    libboost-all-dev \
+    libevent-dev \
+    libdb++-dev \
+    libminiupnpc-dev \
+    libnng-dev \
+    curl \
+    wget \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory for the source code
+WORKDIR /lotus-source
+
+# Copy the source code (you need to have your source in the same directory as Dockerfile)
+COPY . .
+
+# Build the binary
+RUN mkdir build && \
+    cd build && \
+    cmake .. && \
+    make lotusd -j32
+
+# Runtime stage
 FROM ubuntu:24.04
 
-# Install dependencies
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     libgomp1 \
     libssl3 \
@@ -22,24 +54,18 @@ RUN apt-get update && apt-get install -y \
 # Create directory structure
 RUN mkdir -p /opt/lotus/bin /opt/lotus/lib /opt/lotus/include
 
-# Copy node binaries and libraries
-COPY bin/* /opt/lotus/bin/
-# COPY lib/* /opt/lotus/lib/
-# COPY include/* /opt/lotus/include/
+# Copy built binary from builder stage
+COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*
 
 # Add to PATH and library path
 ENV PATH="/opt/lotus/bin:${PATH}"
-# Set LD_LIBRARY_PATH without using the variable in its own definition
 ENV LD_LIBRARY_PATH="/opt/lotus/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
 
 # Create data directory
 RUN mkdir -p /root/.lotus
-
-# Fix library issues - directly use system libraries instead of creating symlinks
-# This avoids the symbol lookup error with boost::filesystem
 
 # Make sure the library is in the system's library path
 RUN echo "/usr/lib/x86_64-linux-gnu" > /etc/ld.so.conf.d/lotus.conf && ldconfig
