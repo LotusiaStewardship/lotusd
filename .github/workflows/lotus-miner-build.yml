@@ -17,7 +17,7 @@ jobs:
   # Build the GPU miner component
   build-lotus-gpu-miner:
     name: 🔥 Build lotus-gpu-miner
-    runs-on: [ self-hosted ]
+    runs-on: [ ubuntu-latest ]
     outputs:
       build_status: ${{ job.status }}
 
