@@ -222,7 +222,7 @@ jobs:
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
-          # docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
           
