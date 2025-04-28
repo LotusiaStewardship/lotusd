@@ -1,4 +1,4 @@
-name: Lotus Version Revert
+name: ⏮️ Lotus Version Revert
 
 on:
   workflow_call:
@@ -14,6 +14,7 @@ on:
       
 jobs:
   revert-version-bump:
+    name: 🔄 Revert Version Bump
     runs-on: ubuntu-latest
     if: inputs.build_failures == 'true'
     

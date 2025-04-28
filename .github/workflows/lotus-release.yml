@@ -1,4 +1,4 @@
-name: Lotus Release
+name: 🚀 Lotus Release
 
 on:
   workflow_call:
@@ -11,6 +11,7 @@ on:
 jobs:
   # Combine all artifacts into a single tarball
   package-artifacts:
+    name: 📦 Package Artifacts
     runs-on: ubuntu-latest
     
     steps:
@@ -124,6 +125,7 @@ jobs:
 
   # Create the Git tag for the release
   create-tag:
+    name: 🏷️ Create Git Tag
     needs: [package-artifacts]
     runs-on: ubuntu-latest
     outputs:
@@ -166,6 +168,7 @@ jobs:
   
   # Create the GitHub release with beautiful formatting
   create-release:
+    name: 🎁 Publish GitHub Release
     needs: [create-tag, package-artifacts]
     runs-on: ubuntu-latest
     if: |

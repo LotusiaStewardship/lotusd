@@ -1,4 +1,4 @@
-name: Lotus GUI Build
+name: 🖥️ Lotus GUI Build
 
 on:
   workflow_call:
@@ -11,6 +11,7 @@ on:
 jobs:
   # Build the Qt GUI wallet
   build-lotus-qt:
+    name: 🖼️ Build lotus-qt
     runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
