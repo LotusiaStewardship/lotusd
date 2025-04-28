@@ -276,9 +276,18 @@ jobs:
         {
           "manifests": [],
           "mediaType": "application/vnd.oci.image.index.v1+json",
-          "schemaVersion": 2
+          "schemaVersion": 2,
+          "tags": ["latest"]
         }
         EOF
+
+    - name: Cache Docker layers
+      uses: actions/cache@v3
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-lotus-tx-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-lotus-tx-
 
     - name: Set lowercase repository owner
       id: lowercase_repo_owner
@@ -293,52 +302,62 @@ jobs:
         username: ${{ github.repository_owner }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Build lotus-tx image
+    # Build lotus-tx image with explicit local loading first
     - name: Build lotus-tx Docker image
       uses: docker/build-push-action@v4
       if: github.event_name != 'pull_request'
       with:
         context: .
         file: dockerfiles/Dockerfile.lotus-tx
-        push: true
+        push: false # Don't push to registry yet
+        load: true # Load into local Docker daemon
         tags: |
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${{ github.sha }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:${{ inputs.version }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:latest
         cache-from: type=local,src=/tmp/.buildx-cache
         cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+        outputs: type=docker
+
+    # Extract binary using local image first
+    - name: Extract lotus-tx from Docker image
+      if: github.event_name != 'pull_request'
+      run: |
+        mkdir -p ./artifacts
+
+        echo "Extracting from local Docker image..."
+        # Extract from the local Docker image
+        CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${{ github.sha }})
+        docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
+        docker rm -v $CONTAINER_ID
+        echo "Successfully extracted binary from Docker image"
+
+        # Verify file exists and has content
+        FILE_SIZE=$(stat -c%s "./artifacts/lotus-tx" 2>/dev/null || echo "0")
+        echo "Binary file size: ${FILE_SIZE} bytes"
+        if [ "$FILE_SIZE" -lt 1000 ]; then
+          echo "WARNING: Extracted binary is very small (${FILE_SIZE} bytes)!"
+        fi
+
+    # Now push to registry after successful extraction
+    - name: Push Docker images to registry
+      if: github.event_name != 'pull_request'
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: dockerfiles/Dockerfile.lotus-tx
+        push: true # Now we push to registry
+        tags: |
+          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${{ github.sha }}
+          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:${{ inputs.version }}
+          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:latest
+        cache-from: type=local,src=/tmp/.buildx-cache
 
     # Move the cache
     - name: Move cache
       run: |
         rm -rf /tmp/.buildx-cache
         mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
-
-    # Extract binary from the image with fallback
-    - name: Extract lotus-tx from Docker image
-      if: github.event_name != 'pull_request'
-      run: |
-        SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-        mkdir -p ./artifacts
-
-        # Try to extract from the Docker image, but don't fail if image doesn't exist yet
-        set +e  # Don't exit on error
-        CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${SHORT_SHA} 2>/dev/null)
-        EXTRACT_EXIT_CODE=$?
-        set -e  # Resume exit on error
-
-        if [ $EXTRACT_EXIT_CODE -eq 0 ]; then
-          # Image exists, extract binary
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
-          docker rm -v $CONTAINER_ID
-          echo "Successfully extracted binary from Docker image"
-        else
-          # Image doesn't exist yet, create placeholder binary
-          echo "Docker image not found. This is normal during initial setup."
-          echo "Future builds will extract the actual binary."
-          touch ./artifacts/lotus-tx
-          chmod +x ./artifacts/lotus-tx
-        fi
 
     # Upload binary as artifact
     - name: Upload lotus-tx as artifact
