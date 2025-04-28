@@ -15,22 +15,25 @@ RUN apt-get update && apt-get install -y \
     libjemalloc-dev \
     pkg-config \
     libsqlite3-dev \
+    flatbuffers-compiler \
+    libflatbuffers-dev \
+    qtbase5-dev \
+    qt5-qmake \
+    libqt5gui5 \
+    libqt5core5a \
+    libqt5dbus5 \
+    qttools5-dev \
+    qttools5-dev-tools \
     curl \
     wget \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Build and install flatbuffers from source
-WORKDIR /tmp
-RUN git clone https://github.com/google/flatbuffers.git && \
-    cd flatbuffers && \
-    git checkout v2.0.0 && \
-    mkdir -p build && \
-    cd build && \
-    cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release .. && \
-    make -j$(nproc) && \
-    make install && \
-    ldconfig
+# Create CMake configuration file for Flatbuffers
+RUN mkdir -p /usr/lib/cmake/flatbuffers && \
+    echo 'set(FLATBUFFERS_INCLUDE_DIR "/usr/include")' > /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
+    echo 'set(FLATBUFFERS_LIBRARIES "/usr/lib/x86_64-linux-gnu/libflatbuffers.a")' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
+    echo 'set(FLATBUFFERS_FOUND TRUE)' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake
 
 # Set working directory for the source code
 WORKDIR /lotus-source
@@ -64,13 +67,13 @@ RUN apt-get update && apt-get install -y \
     libminiupnpc17 \
     libjemalloc2 \
     libsqlite3-0 \
+    libflatbuffers-dev \
+    libqt5core5a \
+    libqt5gui5 \
+    libqt5dbus5 \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
-
-# Copy Flatbuffers libraries from builder
-COPY --from=builder /usr/local/lib/libflatbuffers.a /usr/local/lib/
-COPY --from=builder /usr/local/include/flatbuffers /usr/local/include/flatbuffers
 
 # Create directory structure
 RUN mkdir -p /opt/lotus/bin /opt/lotus/lib /opt/lotus/include
