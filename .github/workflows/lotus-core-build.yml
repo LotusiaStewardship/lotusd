@@ -17,7 +17,7 @@ jobs:
   # Build the core daemon
   build-lotusd:
     name: 🚀 Build lotusd
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 
@@ -123,7 +123,7 @@ jobs:
   # Build the CLI for interacting with the node
   build-lotus-cli:
     name: 🖥️ Build lotus-cli
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 
@@ -227,7 +227,7 @@ jobs:
   # Build the transaction utility
   build-lotus-tx:
     name: 💰 Build lotus-tx
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 

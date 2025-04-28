@@ -17,7 +17,7 @@ jobs:
   # Build the lotus node
   build-lotus-node:
     name: 🚀 Build lotus-node
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 
