@@ -17,7 +17,24 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     flatbuffers-compiler \
     libflatbuffers-dev \
+    qtbase5-dev \
+    qt5-qmake \
+    libqt5gui5 \
+    libqt5core5a \
+    libqt5dbus5 \
+    qttools5-dev \
+    qttools5-dev-tools \
+    libprotobuf-dev \
+    protobuf-compiler \
+    libqrencode-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Create CMake configuration file for Flatbuffers
+RUN mkdir -p /usr/lib/cmake/flatbuffers && \
+    echo 'set(FLATBUFFERS_INCLUDE_DIR "/usr/include")' > /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
+    echo 'set(FLATBUFFERS_LIBRARIES "/usr/lib/x86_64-linux-gnu/libflatbuffers.a")' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
+    echo 'set(FLATBUFFERS_FOUND TRUE)' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake
+
 
 # Create CMake configuration file for Flatbuffers
 RUN mkdir -p /usr/lib/cmake/flatbuffers && \
