@@ -46,13 +46,14 @@ COPY . .
 
 # Build the binary
 RUN mkdir build
-RUN cd build && cmake ..
-RUN cd build && make lotusd -j$(nproc)
-RUN cd build && make lotus-cli -j$(nproc)
-RUN cd build && make lotus-seeder -j$(nproc)
-RUN cd build && make lotus-tx -j$(nproc)
-RUN cd build && make lotus-wallet -j$(nproc)
-RUN cd build && make lotus-qt -j$(nproc)
+WORKDIR /lotus-source/build
+RUN cmake ..
+RUN make lotusd -j$(nproc)
+RUN make lotus-cli -j$(nproc)
+RUN make lotus-seeder -j$(nproc)
+RUN make lotus-tx -j$(nproc)
+RUN make lotus-wallet -j$(nproc)
+RUN make lotus-qt -j$(nproc)
 
 # Runtime stage
 FROM ubuntu:24.04
