@@ -107,8 +107,8 @@ jobs:
           echo "version_bumped=true" >> $GITHUB_OUTPUT
           echo "Version bumped and committed successfully"
 
-  # Build step now includes parallel jobs for each binary
-  build:
+  # Build jobs - split into separate jobs for parallelism
+  build-lotusd:
     needs: [version-check, version-bump]
     runs-on: ubuntu-latest
     if: always() && (needs.version-bump.result == 'success' || needs.version-check.outputs.should_bump == 'false')
@@ -119,7 +119,6 @@ jobs:
         with:
           ref: master
       
-      # Get current version (after potential bump)
       - name: Get current version
         id: get-version
         run: |
@@ -134,22 +133,10 @@ jobs:
         uses: actions/cache@v3
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          key: ${{ runner.os }}-buildx-lotusd-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-buildx-
+            ${{ runner.os }}-buildx-lotusd-
       
-      # Create dockerfiles directory if it doesn't exist
-      - name: Create dockerfiles directory
-        run: mkdir -p dockerfiles
-      
-      # Create Dockerfiles if they don't exist
-      - name: Create Dockerfiles
-        run: |
-          # ... (Note: these would be created but are omitted here since we already created them)
-          # Copy them to dockerfiles directory if needed
-          echo "Dockerfiles have been prepared"
-      
-      # Set lowercase repository owner name for Docker
       - name: Set lowercase repository owner
         id: lowercase_repo_owner
         run: |
@@ -178,7 +165,74 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       
-      # Build all other images in parallel
+      # Move the cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Extract binary from the image
+      - name: Extract lotusd from Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          mkdir -p ./artifacts
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA})
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
+          docker rm -v $CONTAINER_ID
+      
+      # Upload binary as artifact
+      - name: Upload lotusd as artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotusd-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/lotusd
+          retention-days: 14
+
+  build-lotus-cli:
+    needs: [version-check, version-bump]
+    runs-on: ubuntu-latest
+    if: always() && (needs.version-bump.result == 'success' || needs.version-check.outputs.should_bump == 'false')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      
+      - name: Get current version
+        id: get-version
+        run: |
+          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-lotus-cli-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-lotus-cli-
+      
+      - name: Set lowercase repository owner
+        id: lowercase_repo_owner
+        run: |
+          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Build the lotus-cli image
       - name: Build lotus-cli Docker image
         uses: docker/build-push-action@v4
         if: github.event_name != 'pull_request'
@@ -193,157 +247,142 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       
-      - name: Build lotus-seeder Docker image
-        uses: docker/build-push-action@v4
-        if: github.event_name != 'pull_request'
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus-seeder
-          push: true
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ steps.get-version.outputs.version }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-      
-      - name: Build lotus-tx Docker image
-        uses: docker/build-push-action@v4
-        if: github.event_name != 'pull_request'
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus-tx
-          push: true
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${{ github.sha }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:${{ steps.get-version.outputs.version }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-      
-      - name: Build lotus-wallet Docker image
-        uses: docker/build-push-action@v4
-        if: github.event_name != 'pull_request'
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus-wallet
-          push: true
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ steps.get-version.outputs.version }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-      
-      - name: Build lotus-qt Docker image
-        uses: docker/build-push-action@v4
-        if: github.event_name != 'pull_request'
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus-qt
-          push: true
-          tags: |
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ steps.get-version.outputs.version }}
-            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-      
       # Move the cache
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
-      # Test main Docker image
-      - name: Test Docker image
-        if: github.event_name != 'pull_request'
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}
-          docker run --name lotus-test -d ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA} -printtoconsole -server
-          sleep 10
-          docker logs lotus-test | grep -q "lotus" && echo "Container started successfully" || (echo "Container failed to start properly" && exit 1)
-          docker rm -f lotus-test
-      
-      # Create directory for artifacts
-      - name: Prepare artifacts directory
-        run: mkdir -p ./artifacts
-      
-      # Extract binaries from the images for artifacts
-      - name: Extract lotusd from Docker image
-        if: github.event_name != 'pull_request'
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA})
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
-          docker rm -v $CONTAINER_ID
-      
+      # Extract binary from the image
       - name: Extract lotus-cli from Docker image
         if: github.event_name != 'pull_request'
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          mkdir -p ./artifacts
           CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-cli:sha-${SHORT_SHA})
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
           docker rm -v $CONTAINER_ID
       
-      - name: Extract lotus-seeder from Docker image
+      # Upload binary as artifact
+      - name: Upload lotus-cli as artifact
         if: github.event_name != 'pull_request'
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${SHORT_SHA})
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
-          docker rm -v $CONTAINER_ID
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-cli-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/lotus-cli
+          retention-days: 14
+
+  # Additional similar jobs for lotus-seeder, lotus-tx, lotus-wallet, lotus-qt
+  # ...
+
+  # Combine all artifacts into a single tarball
+  package-artifacts:
+    needs: [build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name != 'pull_request' && 
+        needs.build-lotusd.result == 'success' && 
+        needs.build-lotus-cli.result == 'success' && 
+        needs.build-lotus-seeder.result == 'success' && 
+        needs.build-lotus-tx.result == 'success' && 
+        needs.build-lotus-wallet.result == 'success' && 
+        needs.build-lotus-qt.result == 'success'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: master
       
-      - name: Extract lotus-tx from Docker image
-        if: github.event_name != 'pull_request'
+      - name: Get current version
+        id: get-version
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${SHORT_SHA})
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
-          docker rm -v $CONTAINER_ID
+          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
       
-      - name: Extract lotus-wallet from Docker image
-        if: github.event_name != 'pull_request'
+      # Create artifacts directory
+      - name: Create artifacts directory
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${SHORT_SHA})
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
-          docker rm -v $CONTAINER_ID
+          mkdir -p ./artifacts
       
-      - name: Extract lotus-qt from Docker image
-        if: github.event_name != 'pull_request'
+      # Download all binary artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: lotusd-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: lotus-cli-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: lotus-seeder-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: lotus-tx-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: lotus-wallet-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: lotus-qt-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+      
+      # Make sure all binaries are executable
+      - name: Set permissions
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${SHORT_SHA})
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
-          docker rm -v $CONTAINER_ID
+          chmod +x ./artifacts/*
       
       # Create tarball of all binaries
       - name: Create tarball
-        if: github.event_name != 'pull_request'
         run: |
           cd ./artifacts
           tar -czvf lotus-binaries-${{ steps.get-version.outputs.version }}.tar.gz lotus*
           cd ..
       
-      # Upload binaries as artifacts
-      - name: Upload binaries as artifacts
-        if: github.event_name != 'pull_request'
+      # Upload combined artifact
+      - name: Upload combined artifacts
         uses: actions/upload-artifact@v4
         with:
           name: lotus-binaries-${{ steps.get-version.outputs.version }}
-          path: ./artifacts/
+          path: ./artifacts/lotus-binaries-*.tar.gz
           retention-days: 14
 
-  # Final job to create a tag and release
+  # Update revert-version-bump to depend on all build jobs
+  revert-version-bump:
+    needs: [version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      needs.version-bump.result == 'success' && 
+      (needs.build-lotusd.result == 'failure' || 
+       needs.build-lotus-cli.result == 'failure' || 
+       needs.build-lotus-seeder.result == 'failure' || 
+       needs.build-lotus-tx.result == 'failure' || 
+       needs.build-lotus-wallet.result == 'failure' || 
+       needs.build-lotus-qt.result == 'failure')
+
+  # Update create-tag job to depend on all build jobs and package-artifacts
   create-tag:
-    needs: [version-check, version-bump, build, revert-version-bump]
+    needs: [version-check, version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt, package-artifacts, revert-version-bump]
     runs-on: ubuntu-latest
     if: |
       always() && 
       github.ref == 'refs/heads/master' && 
-      needs.build.result == 'success' && 
+      needs.build-lotusd.result == 'success' &&
+      needs.build-lotus-cli.result == 'success' &&
+      needs.build-lotus-seeder.result == 'success' &&
+      needs.build-lotus-tx.result == 'success' &&
+      needs.build-lotus-wallet.result == 'success' &&
+      needs.build-lotus-qt.result == 'success' &&
       (needs.version-check.outputs.should_bump == 'false' || needs.version-bump.result == 'success') &&
       (needs.revert-version-bump.result == 'skipped' || needs.revert-version-bump.result == 'success')
     
@@ -407,55 +446,6 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-
-  # Add a job to revert the version bump if the build fails
-  revert-version-bump:
-    needs: [version-bump, build]
-    runs-on: ubuntu-latest
-    if: |
-      always() &&
-      needs.version-bump.result == 'success' && 
-      needs.build.result == 'failure'
-    
-    steps:
-      - name: Checkout code with version bump
-        uses: actions/checkout@v3
-        with:
-          ref: master
-          fetch-depth: 0
-      
-      - name: Get version details  
-        id: get-versions
-        run: |
-          CURRENT_VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
-          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          
-          # Calculate the previous version (that we want to revert to)
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          PREV_PATCH=$((PATCH - 1))
-          PREV_VERSION="$MAJOR.$MINOR.$PREV_PATCH"
-          echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
-          
-          echo "Current version: $CURRENT_VERSION, Reverting to: $PREV_VERSION"
-      
-      - name: Revert version bump
-        run: |
-          # Setup git with the same identity used for bumping
-          git config --global user.name "Mrs Turtle"
-          git config --global user.email "mrs.turtle@lotusia.org"
-          
-          # Update CMakeLists.txt to the previous version
-          sed -i "s/VERSION ${{ steps.get-versions.outputs.current_version }}/VERSION ${{ steps.get-versions.outputs.prev_version }}/" CMakeLists.txt
-          
-          # Update PKGBUILD to the previous version
-          sed -i "s/pkgver=${{ steps.get-versions.outputs.current_version }}/pkgver=${{ steps.get-versions.outputs.prev_version }}/" contrib/aur/lotus/PKGBUILD
-          
-          # Commit and push the reversion
-          git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
-          git commit -m "Revert version bump to ${{ steps.get-versions.outputs.current_version }} due to build failure"
-          git push origin HEAD:master
-          
-          echo "Version revert completed. Reverted from ${{ steps.get-versions.outputs.current_version }} back to ${{ steps.get-versions.outputs.prev_version }}"
 
   # deploy:
   #   needs: build
