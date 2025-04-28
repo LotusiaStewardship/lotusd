@@ -163,9 +163,7 @@ jobs:
           "manifests": [],
           "mediaType": "application/vnd.oci.image.index.v1+json",
           "schemaVersion": 2,
-          "annotations": {
-            "org.opencontainers.image.ref.name": "latest"
-          }
+          "tags": ["latest"]
         }
         EOF
 
@@ -204,6 +202,7 @@ jobs:
       if: github.event_name != 'pull_request'
       run: |
         SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+        VERSION="${{ inputs.version }}"
         mkdir -p ./artifacts
 
         echo "Extracting from local Docker image..."
