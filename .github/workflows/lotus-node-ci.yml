@@ -24,6 +24,9 @@ jobs:
   # Check the current version first but don't modify it yet
   version-check:
     runs-on: ubuntu-latest
+    # Run after version-bump, or run immediately if version-bump is skipped
+    needs: version-bump
+    if: always()
     outputs:
       current_version: ${{ steps.get-version.outputs.version }}
       should_bump: ${{ steps.check-bump.outputs.should_bump }}
@@ -33,6 +36,8 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          # If version was bumped, we need to fetch the latest changes
+          ref: master
       
       - name: Get current version
         id: get-version
