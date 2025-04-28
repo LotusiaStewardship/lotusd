@@ -72,6 +72,52 @@ jobs:
           sleep 10
           docker logs lotus-test | grep -q "lotus" && echo "Container started successfully" || (echo "Container failed to start properly" && exit 1)
           docker rm -f lotus-test
+      
+      # Extract binaries from the image for artifacts and releases
+      - name: Extract binaries from Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          mkdir -p ./artifacts
+          
+          # Create a temporary container to copy files from
+          CONTAINER_ID=$(docker create ghcr.io/${{ github.repository_owner }}/lotus-node:sha-${SHORT_SHA})
+          
+          # Copy each binary from the builder stage
+          docker cp $CONTAINER_ID:/lotus-source/build/src/lotusd ./artifacts/
+          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-cli ./artifacts/
+          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-qt ./artifacts/
+          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-seeder ./artifacts/
+          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-tx ./artifacts/
+          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-wallet ./artifacts/
+          
+          # Create a tarball of all binaries
+          cd ./artifacts
+          tar -czvf lotus-binaries-${SHORT_SHA}.tar.gz lotus*
+          cd ..
+          
+          # Remove the container
+          docker rm -v $CONTAINER_ID
+      
+      # Upload binaries as artifacts
+      - name: Upload binaries as artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v3
+        with:
+          name: lotus-binaries
+          path: ./artifacts/
+          retention-days: 14
+      
+      # Create GitHub Release and upload binaries if this is a tag
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./artifacts/lotus-binaries-*.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
 
   # deploy:
   #   needs: build
