@@ -20,6 +20,7 @@ on:
 defaults:
   run:
     shell: bash
+  runs-on: [ self-hosted ]
 
 jobs:
   revert-version-bump:

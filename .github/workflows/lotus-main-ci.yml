@@ -16,6 +16,7 @@ on:
 defaults:
   run:
     shell: bash
+  runs-on: [ self-hosted ]
 
 jobs:
   # ======= STEP 1: VERSION MANAGEMENT =======
