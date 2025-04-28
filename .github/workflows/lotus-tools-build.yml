@@ -35,10 +35,14 @@ jobs:
         sudo mkdir -p /tmp/.buildx-cache /tmp/.buildx-cache-new
         sudo chmod -R 777 /tmp/.buildx-cache /tmp/.buildx-cache-new
 
-        # Create empty index.json if it doesn't exist
-        if [ ! -f "/tmp/.buildx-cache/index.json" ]; then
-          echo '{}' > /tmp/.buildx-cache/index.json
-        fi
+        # Create a properly formatted index.json file for buildx
+        cat > /tmp/.buildx-cache/index.json << 'EOF'
+        {
+          "manifests": [],
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "schemaVersion": 2
+        }
+        EOF
 
     - name: Cache Docker layers
       uses: actions/cache@v3
@@ -153,10 +157,14 @@ jobs:
         sudo mkdir -p /tmp/.buildx-cache /tmp/.buildx-cache-new
         sudo chmod -R 777 /tmp/.buildx-cache /tmp/.buildx-cache-new
 
-        # Create empty index.json if it doesn't exist
-        if [ ! -f "/tmp/.buildx-cache/index.json" ]; then
-          echo '{}' > /tmp/.buildx-cache/index.json
-        fi
+        # Create a properly formatted index.json file for buildx
+        cat > /tmp/.buildx-cache/index.json << 'EOF'
+        {
+          "manifests": [],
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "schemaVersion": 2
+        }
+        EOF
 
     - name: Cache Docker layers
       uses: actions/cache@v3
