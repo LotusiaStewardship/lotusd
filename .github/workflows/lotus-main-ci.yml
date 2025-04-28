@@ -17,7 +17,6 @@ on:
 defaults:
   run:
     shell: bash
-  runs-on: [ self-hosted ]
 
 jobs:
   # Check the current version first
