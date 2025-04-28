@@ -17,16 +17,6 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     flatbuffers-compiler \
     libflatbuffers-dev \
-    qtbase5-dev \
-    qt5-qmake \
-    libqt5gui5 \
-    libqt5core5a \
-    libqt5dbus5 \
-    qttools5-dev \
-    qttools5-dev-tools \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libqrencode-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create CMake configuration file for Flatbuffers
@@ -52,30 +42,13 @@ FROM ubuntu:24.04
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    libssl-dev \
-    libzmq3-dev \
-    libboost-all-dev \
-    libevent-dev \
-    libdb++-dev \
-    libminiupnpc-dev \
-    libnng-dev \
-    libjemalloc-dev \
-    pkg-config \
-    libsqlite3-dev \
-    flatbuffers-compiler \
-    libflatbuffers-dev \
-    qtbase5-dev \
-    qt5-qmake \
-    libqt5gui5 \
-    libqt5core5a \
-    libqt5dbus5 \
-    qttools5-dev \
-    qttools5-dev-tools \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libqrencode-dev \
+    libssl3 \
+    libzmq5 \
+    libboost-system1.83.0 \
+    libboost-filesystem1.83.0 \
+    libboost-thread1.83.0 \
+    libevent-2.1-7 \
+    libdb5.3++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
