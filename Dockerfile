@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y \
     libjemalloc-dev \
     pkg-config \
     libsqlite3-dev \
+    flatbuffers-compiler \
+    libflatbuffers-dev \
     curl \
     wget \
     git \
@@ -52,6 +54,7 @@ RUN apt-get update && apt-get install -y \
     libminiupnpc17 \
     libjemalloc2 \
     libsqlite3-0 \
+    libflatbuffers1 \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
