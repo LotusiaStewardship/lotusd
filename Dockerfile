@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     qttools5-dev-tools \
     libprotobuf-dev \
     protobuf-compiler \
+    libqrencode-dev \
     curl \
     wget \
     git \
@@ -74,6 +75,7 @@ RUN apt-get update && apt-get install -y \
     libqt5gui5 \
     libqt5dbus5 \
     libprotobuf-dev \
+    libqrencode4 \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
