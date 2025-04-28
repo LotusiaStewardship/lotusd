@@ -55,118 +55,9 @@ jobs:
             fi
           fi
 
-  # First build and test the code to make sure it works
-  build:
-    needs: version-check
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-      
-      # Set lowercase repository owner name for Docker
-      - name: Set lowercase repository owner
-        id: lowercase_repo_owner
-        run: |
-          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-      
-      - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
-            type=raw,value=${{ needs.version-check.outputs.current_version }},enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
-      
-      - name: Build Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-      
-      # Move the cache
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
-      
-      # Test Docker image
-      - name: Test Docker image
-        if: github.event_name != 'pull_request'
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}
-          docker run --name lotus-test -d ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA} -printtoconsole -server
-          sleep 10
-          docker logs lotus-test | grep -q "lotus" && echo "Container started successfully" || (echo "Container failed to start properly" && exit 1)
-          docker rm -f lotus-test
-      
-      # Extract binaries from the image for artifacts
-      - name: Extract binaries from Docker image
-        if: github.event_name != 'pull_request'
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          mkdir -p ./artifacts
-          
-          # Create a temporary container to copy files from
-          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA})
-          
-          # Copy each binary
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
-          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
-          
-          # Create a tarball of all binaries
-          cd ./artifacts
-          tar -czvf lotus-binaries-${{ needs.version-check.outputs.current_version }}.tar.gz lotus*
-          cd ..
-          
-          # Remove the container
-          docker rm -v $CONTAINER_ID
-      
-      # Upload binaries as artifacts
-      - name: Upload binaries as artifacts
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: lotus-binaries-${{ needs.version-check.outputs.current_version }}
-          path: ./artifacts/
-          retention-days: 14
-
   # After successful build, bump the version if needed
   version-bump:
-    needs: [version-check, build]
+    needs: [version-check]
     runs-on: ubuntu-latest
     # Only run on the master branch, not on pull requests or tags, and only if we should bump
     if: github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
@@ -216,9 +107,131 @@ jobs:
           echo "version_bumped=true" >> $GITHUB_OUTPUT
           echo "Version bumped and committed successfully"
 
+  # Now build the code with the updated version
+  build:
+    needs: [version-check, version-bump]
+    runs-on: ubuntu-latest
+    # Run this step even if version-bump was skipped (when should_bump is false)
+    if: always() && (needs.version-bump.result == 'success' || needs.version-check.outputs.should_bump == 'false')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        # Always get the latest code with the potentially bumped version
+        with:
+          ref: master
+      
+      # Get current version (after potential bump)
+      - name: Get current version
+        id: get-version
+        run: |
+          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      # Set lowercase repository owner name for Docker
+      - name: Set lowercase repository owner
+        id: lowercase_repo_owner
+        run: |
+          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+            type=raw,value=${{ steps.get-version.outputs.version }},enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      # Move the cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Test Docker image
+      - name: Test Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}
+          docker run --name lotus-test -d ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA} -printtoconsole -server
+          sleep 10
+          docker logs lotus-test | grep -q "lotus" && echo "Container started successfully" || (echo "Container failed to start properly" && exit 1)
+          docker rm -f lotus-test
+      
+      # Extract binaries from the image for artifacts
+      - name: Extract binaries from Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          mkdir -p ./artifacts
+          
+          # Create a temporary container to copy files from
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA})
+          
+          # Copy each binary
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
+          
+          # Create a tarball of all binaries - use the current version from the files
+          cd ./artifacts
+          tar -czvf lotus-binaries-${{ steps.get-version.outputs.version }}.tar.gz lotus*
+          cd ..
+          
+          # Remove the container
+          docker rm -v $CONTAINER_ID
+      
+      # Upload binaries as artifacts - use the current version
+      - name: Upload binaries as artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-binaries-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+          retention-days: 14
+
   # Final job to create a tag and release
   create-tag:
-    needs: [version-check, build, version-bump]
+    needs: [version-check, version-bump, build]
     runs-on: ubuntu-latest
     if: |
       always() && 
@@ -266,12 +279,12 @@ jobs:
           git push origin "v$VERSION"
           echo "Created and pushed tag v$VERSION"
       
-      # Download artifacts
+      # Download artifacts using the current version from the files
       - name: Download artifacts
         if: steps.check-tag.outputs.should_tag == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: lotus-binaries-${{ needs.version-check.outputs.current_version }}
+          name: lotus-binaries-${{ steps.get-version.outputs.version }}
           path: ./artifacts
       
       # Create GitHub Release
