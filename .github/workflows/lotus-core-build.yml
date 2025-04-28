@@ -162,7 +162,10 @@ jobs:
         {
           "manifests": [],
           "mediaType": "application/vnd.oci.image.index.v1+json",
-          "schemaVersion": 2
+          "schemaVersion": 2,
+          "annotations": {
+            "org.opencontainers.image.ref.name": "latest"
+          }
         }
         EOF
 
