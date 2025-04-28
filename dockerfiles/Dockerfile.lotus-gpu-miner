@@ -17,11 +17,11 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Set working directory
 WORKDIR /lotus-source
 
-# Copy the source code (assuming GPU miner is in src/gpu-miner)
+# Copy the source code
 COPY . .
 
-# Build the Rust application
-WORKDIR /lotus-source/src/gpu-miner
+# Build the Rust application (correct path to gpuminer directory)
+WORKDIR /lotus-source/gpuminer
 RUN cargo build --release
 
 # Runtime stage
@@ -36,8 +36,10 @@ RUN apt-get update && apt-get install -y \
 # Create directory structure
 RUN mkdir -p /opt/lotus/bin
 
-# Copy built binary from builder stage
-COPY --from=builder /lotus-source/src/gpu-miner/target/release/lotus-gpu-miner /opt/lotus/bin/
+# Copy built binary from builder stage (adjust binary name if needed)
+COPY --from=builder /lotus-source/gpuminer/target/release/lotus-gpu-miner /opt/lotus/bin/
+# If the binary name is different, replace the line above with the correct name
+# For example: COPY --from=builder /lotus-source/gpuminer/target/release/gpuminer /opt/lotus/bin/lotus-gpu-miner
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*
