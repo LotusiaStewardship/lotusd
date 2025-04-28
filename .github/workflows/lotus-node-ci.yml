@@ -600,17 +600,10 @@ jobs:
           path: ./artifacts/lotus-qt
           retention-days: 14
 
-  # Combine all artifacts into a single tarball
-  package-artifacts:
-    needs: [build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt]
+  build-lotus-gpu-miner:
+    needs: [version-check, version-bump]
     runs-on: ubuntu-latest
-    if: always() && github.event_name != 'pull_request' && 
-        needs.build-lotusd.result == 'success' && 
-        needs.build-lotus-cli.result == 'success' && 
-        needs.build-lotus-seeder.result == 'success' && 
-        needs.build-lotus-tx.result == 'success' && 
-        needs.build-lotus-wallet.result == 'success' && 
-        needs.build-lotus-qt.result == 'success'
+    if: always() && (needs.version-bump.result == 'success' || needs.version-check.outputs.should_bump == 'false')
     
     steps:
       - name: Checkout code
@@ -625,10 +618,93 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
       
-      # Create artifacts directory
-      - name: Create artifacts directory
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-lotus-gpu-miner-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-lotus-gpu-miner-
+      
+      - name: Set lowercase repository owner
+        id: lowercase_repo_owner
         run: |
+          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Build lotus-gpu-miner image
+      - name: Build lotus-gpu-miner Docker image
+        uses: docker/build-push-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus-gpu-miner
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ steps.get-version.outputs.version }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      # Move the cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Extract binary from the image
+      - name: Extract lotus-gpu-miner from Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           mkdir -p ./artifacts
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${SHORT_SHA})
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
+          docker rm -v $CONTAINER_ID
+      
+      # Upload binary as artifact
+      - name: Upload lotus-gpu-miner as artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-gpu-miner-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/lotus-gpu-miner
+          retention-days: 14
+
+  # Combine all artifacts into a single tarball
+  package-artifacts:
+    needs: [build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt, build-lotus-gpu-miner]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name != 'pull_request'
+    
+    steps:
+      # Get version number
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      
+      - name: Get current version
+        id: get-version
+        run: |
+          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+      
+      # Make directory for artifacts
+      - name: Create artifacts directory
+        run: mkdir -p ./artifacts
       
       # Download all binary artifacts
       - uses: actions/download-artifact@v4
@@ -661,6 +737,11 @@ jobs:
           name: lotus-qt-${{ steps.get-version.outputs.version }}
           path: ./artifacts/
       
+      - uses: actions/download-artifact@v4
+        with:
+          name: lotus-gpu-miner-${{ steps.get-version.outputs.version }}
+          path: ./artifacts/
+      
       # Make sure all binaries are executable
       - name: Set permissions
         run: |
@@ -681,9 +762,9 @@ jobs:
           path: ./artifacts/lotus-binaries-*.tar.gz
           retention-days: 14
 
-  # Update revert-version-bump to depend on all build jobs
+  # Update revert-version-bump to depend on the GPU miner job
   revert-version-bump:
-    needs: [version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt]
+    needs: [version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt, build-lotus-gpu-miner]
     runs-on: ubuntu-latest
     if: |
       always() &&
@@ -693,7 +774,8 @@ jobs:
        needs.build-lotus-seeder.result == 'failure' || 
        needs.build-lotus-tx.result == 'failure' || 
        needs.build-lotus-wallet.result == 'failure' || 
-       needs.build-lotus-qt.result == 'failure')
+       needs.build-lotus-qt.result == 'failure' ||
+       needs.build-lotus-gpu-miner.result == 'failure')
     
     steps:
       - name: Checkout code with version bump
@@ -735,9 +817,9 @@ jobs:
           
           echo "Version revert completed. Reverted from ${{ steps.get-versions.outputs.current_version }} back to ${{ steps.get-versions.outputs.prev_version }}"
 
-  # Update create-tag job to depend on all build jobs and package-artifacts
+  # Update create-tag job to depend on all build jobs including GPU miner
   create-tag:
-    needs: [version-check, version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt, package-artifacts, revert-version-bump]
+    needs: [version-check, version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt, build-lotus-gpu-miner, package-artifacts, revert-version-bump]
     runs-on: ubuntu-latest
     if: |
       always() && 
@@ -748,6 +830,7 @@ jobs:
       needs.build-lotus-tx.result == 'success' &&
       needs.build-lotus-wallet.result == 'success' &&
       needs.build-lotus-qt.result == 'success' &&
+      needs.build-lotus-gpu-miner.result == 'success' &&
       (needs.version-check.outputs.should_bump == 'false' || needs.version-bump.result == 'success') &&
       (needs.revert-version-bump.result == 'skipped' || needs.revert-version-bump.result == 'success')
     
