@@ -15,7 +15,7 @@ defaults:
 jobs:
   build-lotus-seeder:
     name: 🌱 Build lotus-seeder
-    runs-on: [ self-hosted ]
+    runs-on: [ ubuntu-latest ]
     outputs:
       build_status: ${{ job.status }}
 
@@ -77,7 +77,7 @@ jobs:
 
   build-lotus-wallet:
     name: 💼 Build lotus-wallet
-    runs-on: [ self-hosted ]
+    runs-on: [ ubuntu-latest ]
     outputs:
       build_status: ${{ job.status }}
 

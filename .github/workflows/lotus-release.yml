@@ -15,7 +15,7 @@ jobs:
   # Package artifacts
   package-artifacts:
     name: 📦 Package Artifacts
-    runs-on: [ self-hosted ]
+    runs-on: [ ubuntu-latest ]
     outputs:
       package_status: ${{ job.status }}
 
@@ -71,7 +71,7 @@ jobs:
   # Create the Git tag
   create-tag:
     name: 🏷️ Create Git Tag
-    runs-on: [ self-hosted ]
+    runs-on: [ ubuntu ]
     outputs:
       tag_created: ${{ steps.create-tag.outputs.tag_created }}
 
