@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y \
     libminiupnpc17 \
     libjemalloc2 \
     libsqlite3-0 \
-    libflatbuffers1 \
+    libflatbuffers-dev \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
