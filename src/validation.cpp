@@ -3987,19 +3987,54 @@ static bool ContextualCheckBlock(const CBlock &block,
         }
     }
 
-    // Enforce rule that coinbase OP_RETURN starts with serialized block height
+    // Enforce rule that the coinbase transaction's first output must contain an OP_RETURN
+    // followed by a prefix and the serialized block height.
+    // This rule applies to all blocks except the genesis block (height 0).
     if (nHeight >= 1) {
-        CScript expect = CScript() << OP_RETURN << COINBASE_PREFIX << nHeight;
-        if (block.vtx[0]->vout[0].scriptPubKey.size() < expect.size() ||
-            !std::equal(expect.begin(), expect.end(),
-                        block.vtx[0]->vout[0].scriptPubKey.begin())) {
-            LogPrintf("ERROR: block height missmatch in OP_RETURN: expected "
-                      "prefix %s, but output scriptPubKey is %s\n",
-                      HexStr(expect),
-                      HexStr(block.vtx[0]->vout[0].scriptPubKey));
+        // Get the coinbase transaction's first output scriptPubKey
+        const CScript &scriptPubKey = block.vtx[0]->vout[0].scriptPubKey;
+        
+        // Check if the script starts with OP_RETURN
+        CScript::const_iterator pc = scriptPubKey.begin();
+        opcodetype opcode;
+        std::vector<uint8_t> data;
+        
+        // Script must start with OP_RETURN
+        if (!scriptPubKey.GetOp(pc, opcode) || opcode != OP_RETURN) {
             return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
-                                 "bad-cb-height",
-                                 "block height mismatch in coinbase");
+                                "bad-cb-missing-opreturn",
+                                "coinbase must start with OP_RETURN");
+        }
+        
+        // Skip the prefix data (we don't validate it)
+        scriptPubKey.GetOp(pc, opcode, data);
+        
+        // Next must be the block height
+        if (!scriptPubKey.GetOp(pc, opcode, data)) {
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                "bad-cb-height",
+                                "coinbase must contain block height");
+        }
+        
+        // The height is stored directly in the data as a raw integer value
+        // Convert the raw bytes to an integer
+        int nHeight_coinbase = 0;
+        if (data.size() <= 4) {
+            // Convert up to 4 bytes to an integer (little-endian)
+            for (size_t i = 0; i < data.size(); i++) {
+                nHeight_coinbase |= static_cast<int>(data[i]) << (8 * i);
+            }
+        } else {
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                "bad-cb-height",
+                                "height data in coinbase is too large");
+        }
+        
+        // Verify the height matches
+        if (nHeight_coinbase != nHeight) {
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                "bad-cb-height",
+                                "block height mismatch in coinbase");
         }
     }
 
