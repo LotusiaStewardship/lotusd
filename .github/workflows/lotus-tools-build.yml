@@ -17,7 +17,7 @@ jobs:
   # Build the DNS seeder utility
   build-lotus-seeder:
     name: 🌱 Build lotus-seeder
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 
@@ -116,7 +116,7 @@ jobs:
   # Build the wallet utility
   build-lotus-wallet:
     name: 💼 Build lotus-wallet
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 
