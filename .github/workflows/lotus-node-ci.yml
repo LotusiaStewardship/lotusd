@@ -8,14 +8,12 @@ on:
     branches: [ main, master ]
 
 jobs:
-  version-bump:
+  # Check the current version first but don't modify it yet
+  version-check:
     runs-on: ubuntu-latest
-    # Only run on the master branch, not on pull requests or tags
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     outputs:
       current_version: ${{ steps.get-version.outputs.version }}
-      new_version: ${{ steps.bump-version.outputs.new_version }}
-      version_bumped: ${{ steps.commit.outputs.version_bumped }}
+      should_bump: ${{ steps.check-bump.outputs.should_bump }}
     
     steps:
       - name: Checkout code
@@ -31,7 +29,6 @@ jobs:
           echo "Current version: $VERSION"
       
       # Determine if we should bump the version
-      # For example, we could check if there are significant changes since the last tag
       - name: Check if version bump is needed
         id: check-bump
         run: |
@@ -41,7 +38,7 @@ jobs:
           
           if [[ "$LATEST_TAG" == "none" ]]; then
             # No tags exist yet, definitely bump
-            echo "BUMP_NEEDED=true" >> $GITHUB_ENV
+            echo "should_bump=true" >> $GITHUB_OUTPUT
             echo "Version bump needed: No tags exist yet"
           else
             # Count commits since last tag
@@ -50,98 +47,22 @@ jobs:
             
             if [[ "$COMMITS_SINCE_TAG" -gt 5 ]]; then
               # If more than 5 commits since last tag, bump the version
-              echo "BUMP_NEEDED=true" >> $GITHUB_ENV
+              echo "should_bump=true" >> $GITHUB_OUTPUT
               echo "Version bump needed: $COMMITS_SINCE_TAG commits since last tag"
             else
-              echo "BUMP_NEEDED=false" >> $GITHUB_ENV
+              echo "should_bump=false" >> $GITHUB_OUTPUT
               echo "Version bump not needed: Only $COMMITS_SINCE_TAG commits since last tag"
             fi
           fi
-      
-      # Bump the patch version (8.3.4 -> 8.3.5)
-      - name: Bump version
-        id: bump-version
-        if: env.BUMP_NEEDED == 'true'
-        run: |
-          # Extract version components
-          CURRENT_VERSION="${{ steps.get-version.outputs.version }}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          
-          # Increment patch version
-          PATCH=$((PATCH + 1))
-          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "Current: $CURRENT_VERSION -> New: $NEW_VERSION"
-          
-          # Update CMakeLists.txt
-          sed -i "s/VERSION $CURRENT_VERSION/VERSION $NEW_VERSION/" CMakeLists.txt
-          
-          # Update PKGBUILD
-          sed -i "s/pkgver=$CURRENT_VERSION/pkgver=$NEW_VERSION/" contrib/aur/lotus/PKGBUILD
-      
-      # Commit and push the version changes
-      - name: Commit version bump
-        id: commit
-        if: env.BUMP_NEEDED == 'true'
-        run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
-          
-          git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
-          git commit -m "Bump version to ${{ steps.bump-version.outputs.new_version }}"
-          
-          # Push directly to master - make sure branch protection allows this
-          git push origin HEAD:master
-          
-          echo "version_bumped=true" >> $GITHUB_OUTPUT
-          echo "Version bumped and committed successfully"
 
-  version-check:
-    runs-on: ubuntu-latest
-    # Run after version-bump, or run immediately if version-bump is skipped
-    needs: version-bump
-    if: always()
-    outputs:
-      version: ${{ steps.get-version.outputs.version }}
-      should_tag: ${{ steps.check-tag.outputs.should_tag }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          # If version was bumped, we need to fetch the latest changes
-          ref: master
-      
-      - name: Get current version
-        id: get-version
-        run: |
-          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
-      
-      - name: Check if tag exists
-        id: check-tag
-        run: |
-          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
-          if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION"; then
-            echo "should_tag=false" >> $GITHUB_OUTPUT
-            echo "Tag v$VERSION already exists"
-          else
-            echo "should_tag=true" >> $GITHUB_OUTPUT
-            echo "Tag v$VERSION does not exist yet"
-          fi
-
+  # First build and test the code to make sure it works
   build:
-    runs-on: ubuntu-latest
     needs: version-check
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          # If a version bump occurred, we need to fetch the latest changes
-          ref: master
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -179,7 +100,7 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,format=short
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
-            type=raw,value=${{ needs.version-check.outputs.version }},enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+            type=raw,value=${{ needs.version-check.outputs.current_version }},enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
       
       - name: Build Docker image
         uses: docker/build-push-action@v4
@@ -191,13 +112,13 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       
-      # Move the cache to prevent it from growing indefinitely
+      # Move the cache
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
-      # Basic test to verify the image works
+      # Test Docker image
       - name: Test Docker image
         if: github.event_name != 'pull_request'
         run: |
@@ -208,7 +129,7 @@ jobs:
           docker logs lotus-test | grep -q "lotus" && echo "Container started successfully" || (echo "Container failed to start properly" && exit 1)
           docker rm -f lotus-test
       
-      # Extract binaries from the image for artifacts and releases
+      # Extract binaries from the image for artifacts
       - name: Extract binaries from Docker image
         if: github.event_name != 'pull_request'
         run: |
@@ -218,7 +139,7 @@ jobs:
           # Create a temporary container to copy files from
           CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA})
           
-          # Copy each binary from the run stage
+          # Copy each binary
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
           docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
@@ -228,7 +149,7 @@ jobs:
           
           # Create a tarball of all binaries
           cd ./artifacts
-          tar -czvf lotus-binaries-${{ needs.version-check.outputs.version }}.tar.gz lotus*
+          tar -czvf lotus-binaries-${{ needs.version-check.outputs.current_version }}.tar.gz lotus*
           cd ..
           
           # Remove the container
@@ -239,47 +160,128 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: lotus-binaries-${{ needs.version-check.outputs.version }}
+          name: lotus-binaries-${{ needs.version-check.outputs.current_version }}
           path: ./artifacts/
           retention-days: 14
 
-  create-tag:
+  # After successful build, bump the version if needed
+  version-bump:
     needs: [version-check, build]
     runs-on: ubuntu-latest
-    if: ${{ needs.version-check.outputs.should_tag == 'true' && github.ref == 'refs/heads/master' }}
+    # Only run on the master branch, not on pull requests or tags, and only if we should bump
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
+    outputs:
+      new_version: ${{ steps.bump-version.outputs.new_version }}
+      version_bumped: ${{ steps.commit.outputs.version_bumped }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      # Bump the patch version (8.3.4 -> 8.3.5)
+      - name: Bump version
+        id: bump-version
+        run: |
+          # Extract version components
+          CURRENT_VERSION="${{ needs.version-check.outputs.current_version }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          # Increment patch version
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Current: $CURRENT_VERSION -> New: $NEW_VERSION"
+          
+          # Update CMakeLists.txt
+          sed -i "s/VERSION $CURRENT_VERSION/VERSION $NEW_VERSION/" CMakeLists.txt
+          
+          # Update PKGBUILD
+          sed -i "s/pkgver=$CURRENT_VERSION/pkgver=$NEW_VERSION/" contrib/aur/lotus/PKGBUILD
+      
+      # Commit and push the version changes
+      - name: Commit version bump
+        id: commit
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          
+          git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
+          git commit -m "Bump version to ${{ steps.bump-version.outputs.new_version }}"
+          
+          # Push directly to master - make sure branch protection allows this
+          git push origin HEAD:master
+          
+          echo "version_bumped=true" >> $GITHUB_OUTPUT
+          echo "Version bumped and committed successfully"
+
+  # Final job to create a tag and release
+  create-tag:
+    needs: [version-check, build, version-bump]
+    runs-on: ubuntu-latest
+    if: |
+      always() && 
+      github.ref == 'refs/heads/master' && 
+      needs.build.result == 'success' && 
+      (needs.version-check.outputs.should_bump == 'false' || needs.version-bump.result == 'success')
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           ref: master
+          fetch-depth: 0
+      
+      - name: Get current version (post-bump)
+        id: get-version
+        run: |
+          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+      
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
+          if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION"; then
+            echo "should_tag=false" >> $GITHUB_OUTPUT
+            echo "Tag v$VERSION already exists"
+          else
+            echo "should_tag=true" >> $GITHUB_OUTPUT
+            echo "Tag v$VERSION does not exist yet"
+          fi
       
       - name: Set up Git identity
+        if: steps.check-tag.outputs.should_tag == 'true'
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
       
       - name: Create and push tag
+        if: steps.check-tag.outputs.should_tag == 'true'
         run: |
-          VERSION=${{ needs.version-check.outputs.version }}
+          VERSION=${{ steps.get-version.outputs.version }}
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin "v$VERSION"
           echo "Created and pushed tag v$VERSION"
       
       # Download artifacts
       - name: Download artifacts
+        if: steps.check-tag.outputs.should_tag == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: lotus-binaries-${{ needs.version-check.outputs.version }}
+          name: lotus-binaries-${{ needs.version-check.outputs.current_version }}
           path: ./artifacts
       
       # Create GitHub Release
       - name: Create Release
+        if: steps.check-tag.outputs.should_tag == 'true'
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ needs.version-check.outputs.version }}
-          name: Release v${{ needs.version-check.outputs.version }}
+          tag_name: v${{ steps.get-version.outputs.version }}
+          name: Release v${{ steps.get-version.outputs.version }}
           files: ./artifacts/lotus-binaries-*.tar.gz
           draft: false
           prerelease: false
