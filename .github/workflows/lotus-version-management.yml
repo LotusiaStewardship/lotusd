@@ -1,4 +1,4 @@
-name: Lotus Version Management
+name: 📊 Lotus Version Management
 
 on:
   workflow_call:
@@ -19,6 +19,7 @@ on:
 jobs:
   # Check the current version first but don't modify it yet
   version-check:
+    name: 🔍 Check Version
     runs-on: ubuntu-latest
     outputs:
       current_version: ${{ steps.get-version.outputs.version }}
@@ -66,6 +67,7 @@ jobs:
 
   # After successful build, bump the version if needed
   version-bump:
+    name: 📈 Bump Version
     needs: [version-check]
     runs-on: ubuntu-latest
     # Only run on the master branch, not on pull requests or tags, and only if we should bump
@@ -118,6 +120,7 @@ jobs:
 
   # Handle version reversion in case of build failures
   revert-version-bump:
+    name: 🔄 Prepare Revert
     needs: [version-check, version-bump]
     runs-on: ubuntu-latest
     if: |

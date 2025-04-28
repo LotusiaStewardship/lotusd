@@ -1,4 +1,4 @@
-name: Lotus Tools Build
+name: 🔧 Lotus Tools Build
 
 on:
   workflow_call:
@@ -11,6 +11,7 @@ on:
 jobs:
   # Build the DNS seeder utility
   build-lotus-seeder:
+    name: 🌱 Build lotus-seeder
     runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
@@ -103,6 +104,7 @@ jobs:
 
   # Build the wallet utility
   build-lotus-wallet:
+    name: 💼 Build lotus-wallet
     runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}

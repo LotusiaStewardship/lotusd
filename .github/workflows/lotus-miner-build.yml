@@ -1,4 +1,4 @@
-name: Lotus Miner Build
+name: ⛏️ Lotus Miner Build
 
 on:
   workflow_call:
@@ -11,6 +11,7 @@ on:
 jobs:
   # Build the GPU miner component
   build-lotus-gpu-miner:
+    name: 🔥 Build lotus-gpu-miner
     runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}

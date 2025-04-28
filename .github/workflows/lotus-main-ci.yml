@@ -1,4 +1,9 @@
-name: Lotus Main CI
+name: 🌸 Lotus Main CI
+
+# Add concurrency to prevent multiple workflows running simultaneously
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -10,11 +15,13 @@ on:
 jobs:
   # First, check the current version
   version-management:
+    name: 📊 Version Check
     uses: ./.github/workflows/lotus-version-management.yml
     secrets: inherit
     
-  # Then build all the binaries in parallel
+  # Build all components in parallel with better naming
   build-core:
+    name: 🏗️ Build Core
     needs: [version-management]
     if: |
       always() && 
@@ -26,6 +33,7 @@ jobs:
     secrets: inherit
 
   build-tools:
+    name: 🔧 Build Tools
     needs: [version-management]
     if: |
       always() && 
@@ -37,6 +45,7 @@ jobs:
     secrets: inherit
 
   build-gui:
+    name: 🖥️ Build GUI
     needs: [version-management]
     if: |
       always() && 
@@ -48,6 +57,7 @@ jobs:
     secrets: inherit
 
   build-miner:
+    name: ⛏️ Build Miner
     needs: [version-management]
     if: |
       always() && 
@@ -60,6 +70,7 @@ jobs:
 
   # Revert version bump if any builds failed
   revert-version:
+    name: ⏮️ Revert Version
     needs: [version-management, build-core, build-tools, build-gui, build-miner]
     if: |
       always() && 
@@ -76,6 +87,7 @@ jobs:
 
   # Finally, package and release all artifacts
   create-release:
+    name: 🚀 Create Release
     needs: [version-management, build-core, build-tools, build-gui, build-miner, revert-version]
     if: |
       always() && 
