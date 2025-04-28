@@ -1,8 +1,9 @@
 name: 🌸 Lotus Main CI
 
-# Add concurrency to prevent multiple workflows running simultaneously
+# Allow multiple workflows to run in parallel
+# Each workflow will be identified by its unique run ID
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 on:
