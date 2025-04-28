@@ -4007,14 +4007,14 @@ static bool ContextualCheckBlock(const CBlock &block,
         // Empty script
         if (scriptPubKey.empty()) {
             LogPrintf("DEBUG: Empty scriptPubKey\n");
-            return strictChecking ? false : true;
+            return !strictChecking;
         }
         
         // Check for OP_RETURN
         if (scriptPubKey[0] != 0x6a) { // 0x6a is OP_RETURN
             LogPrintf("DEBUG: Script does not start with OP_RETURN. First byte: 0x%02x\n", 
                      scriptPubKey[0]);
-            return strictChecking ? false : true;
+            return !strictChecking;
         }
         
         LogPrintf("DEBUG: Found OP_RETURN at position 0\n");
@@ -4023,7 +4023,7 @@ static bool ContextualCheckBlock(const CBlock &block,
         size_t pos = 1;
         if (pos >= scriptPubKey.size()) {
             LogPrintf("DEBUG: No data after OP_RETURN\n");
-            return strictChecking ? false : true;
+            return !strictChecking;
         }
         
         // Parse prefix length and data
@@ -4033,7 +4033,7 @@ static bool ContextualCheckBlock(const CBlock &block,
         
         if (pos + prefixLen > scriptPubKey.size()) {
             LogPrintf("DEBUG: Not enough bytes for prefix data\n");
-            return strictChecking ? false : true;
+            return !strictChecking;
         }
         
         std::vector<uint8_t> prefixData(scriptPubKey.begin() + pos, 
@@ -4045,7 +4045,7 @@ static bool ContextualCheckBlock(const CBlock &block,
         if (prefixLen != COINBASE_PREFIX.size() || prefixData != COINBASE_PREFIX) {
             LogPrintf("DEBUG: Prefix data doesn't match expected COINBASE_PREFIX. Expected: %s, Got: %s\n",
                       HexStr(COINBASE_PREFIX), prefixHex);
-            return strictCheckingCoinbaseShame ? false : true;
+            return !strictCheckingCoinbaseShame;
         }
         
         // Move position past prefix data
@@ -4054,7 +4054,7 @@ static bool ContextualCheckBlock(const CBlock &block,
         // Parse height length and data
         if (pos >= scriptPubKey.size()) {
             LogPrintf("DEBUG: No height length byte found\n");
-            return strictChecking ? false : true;
+            return !strictChecking;
         }
         
         uint8_t heightLen = scriptPubKey[pos++];
@@ -4063,7 +4063,7 @@ static bool ContextualCheckBlock(const CBlock &block,
         
         if (pos + heightLen > scriptPubKey.size() || heightLen > 3) {
             LogPrintf("DEBUG: Not enough bytes for height data or height too large\n");
-            return strictChecking ? false : true;
+            return !strictChecking;
         }
         
         std::vector<uint8_t> heightData(scriptPubKey.begin() + pos, 
@@ -4084,7 +4084,7 @@ static bool ContextualCheckBlock(const CBlock &block,
         if (nHeight_coinbase != nHeight) {
             LogPrintf("WARNING: block height mismatch in coinbase: coinbase=%d (hex: %s) vs. block=%d.\n", 
                       nHeight_coinbase, heightHex, nHeight);
-            return strictChecking ? false : true;
+            return !strictChecking;
         }
     }
 
