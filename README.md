@@ -1,8 +1,4 @@
-<p align="center">
-  <a href="https://lotusia.org">
-    <img src="share/pixmaps/lotuslogo.png" alt="Lotus" title="Lotus" width="60%" style="max-width: 500px; height: auto;">
-  </a>
-</p>
+[![Lotus Logo](share/pixmaps/lotuslogo.png "Lotus")](https://www.lotus.org)
 
 <p align="center">
   <a href="https://github.com/LotusiaStewardship/lotusd">
@@ -36,26 +32,11 @@
   </a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml">
-    <img src="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml/badge.svg?branch=master" alt="CI Status">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/releases/latest">
-    <img src="https://img.shields.io/github/v/release/Boblepointu/lotusd" alt="Latest Release">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/Boblepointu/lotusd" alt="License">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/issues">
-    <img src="https://img.shields.io/github/issues/Boblepointu/lotusd" alt="Issues">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/network/members">
-    <img src="https://img.shields.io/github/forks/Boblepointu/lotusd" alt="Forks">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/stargazers">
-    <img src="https://img.shields.io/github/stars/Boblepointu/lotusd" alt="Stars">
-  </a>
-</p>
+[Lotus](https://lotusia.org/) is a digital
+currency that enables instant payments to anyone, anywhere in the world. It
+uses peer-to-peer technology to operate with no central authority: managing
+transactions and issuing money are carried out collectively by the network.
+Lotus is a descendant of Bitcoin.
 
 <div align="center">
   
@@ -67,23 +48,21 @@
   
 </div>
 
-## ✨ What is Lotus?
+Lotus is the name of open-source software which enables the use of
+Lotus. It is a fork of the [Bitcoin Core](https://bitcoincore.org)
+software project.
 
 [Lotus](https://lotusia.org/) is a digital currency that enables instant payments to anyone, anywhere in the world. It uses peer-to-peer technology to operate with no central authority: managing transactions and issuing money are carried out collectively by the network. Lotus combines the best qualities of the modern monetary system and the new generation of digital cryptocurrencies, resulting in an ethical currency that is economically viable.
 
-### 🌟 Key Features:
-- **💯 Debt-free**: Issued through Proof-of-Work mining
-- **📈 Inflationary**: No arbitrary issuance cap, removing incentives to hoard
-- **🌊 Abundant**: Issuance of new Lotus is adjusted to demand of the Lotusia economy
-- **📊 Stabilizing**: Lotus can be removed from circulation through voluntary destructive use to stabilize volatility
+Lotus is released under the terms of the MIT license. See
+[COPYING](COPYING) for more information or see
+<https://opensource.org/licenses/MIT>.
 
 ## 🧠 Core Principles
 
 Reciprocity is the core of all human relationships. The Lotus currency facilitates and symbolizes the value we see in each other, allowing us to build a more connected and prosperous society.
 
-## 🔧 Technology
-
-Lotus is a fork of Bitcoin ABC that has been enhanced and modified to support the Lotusia vision. The blockchain is highly scalable, permissionless, and designed to adapt to the growing needs of the ecosystem.
+If you would like to contribute, please read [CONTRIBUTING](CONTRIBUTING.md).
 
 ## ⛏️ Mining Lotus
 
