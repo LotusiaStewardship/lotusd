@@ -102,7 +102,7 @@ jobs:
       # Upload binaries as artifacts
       - name: Upload binaries as artifacts
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: lotus-binaries
           path: ./artifacts/
