@@ -16,7 +16,7 @@ defaults:
 jobs:
   build-lotus-gpu-miner:
     name: 🔥 Build lotus-gpu-miner
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 

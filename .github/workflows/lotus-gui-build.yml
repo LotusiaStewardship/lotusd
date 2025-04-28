@@ -15,7 +15,7 @@ defaults:
 jobs:
   build-lotus-qt:
     name: 🖼️ Build lotus-qt
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     outputs:
       build_status: ${{ job.status }}
 

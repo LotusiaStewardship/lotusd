@@ -22,7 +22,7 @@ defaults:
 jobs:
   revert-version-bump:
     name: 🔄 Revert Version Bump
-    runs-on: [ self-hosted, ubuntu-latest ]
+    runs-on: [ self-hosted ]
     if: inputs.build_failures == 'true'
 
     steps:
