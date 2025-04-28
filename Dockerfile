@@ -73,7 +73,7 @@ RUN apt-get update && apt-get install -y \
     libqt5core5a \
     libqt5gui5 \
     libqt5dbus5 \
-    libprotobuf23 \
+    libprotobuf-dev \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
