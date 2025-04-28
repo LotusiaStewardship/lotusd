@@ -9,325 +9,328 @@ on:
         type: string
 
 jobs:
-  # Combine all artifacts into a single tarball
+  # Package artifacts (runs in parallel with create-tag)
   package-artifacts:
     name: 📦 Package Artifacts
     runs-on: ubuntu-latest
-    
-    steps:
-      # Make directory for artifacts
-      - name: Create artifacts directory
-        run: |
-          mkdir -p ./artifacts
-          mkdir -p ./artifacts/kernels
-      
-      # Download all binary artifacts with error handling
-      - name: Download lotusd artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: lotusd-${{ inputs.version }}
-          path: ./artifacts/
-      
-      - name: Download lotus-cli artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: lotus-cli-${{ inputs.version }}
-          path: ./artifacts/
-      
-      - name: Download lotus-seeder artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: lotus-seeder-${{ inputs.version }}
-          path: ./artifacts/
-      
-      - name: Download lotus-tx artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: lotus-tx-${{ inputs.version }}
-          path: ./artifacts/
-      
-      - name: Download lotus-wallet artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: lotus-wallet-${{ inputs.version }}
-          path: ./artifacts/
-      
-      - name: Download lotus-qt artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: lotus-qt-${{ inputs.version }}
-          path: ./artifacts/
-      
-      - name: Download lotus-gpu-miner artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: lotus-gpu-miner-${{ inputs.version }}
-          path: ./artifacts/
-      
-      # Create placeholder files for any missing artifacts
-      - name: Create placeholder files for missing artifacts
-        run: |
-          # Create placeholders for binaries that might be missing
-          for binary in lotusd lotus-cli lotus-seeder lotus-tx lotus-wallet lotus-qt lotus-gpu-miner; do
-            if [ ! -f "./artifacts/$binary" ]; then
-              echo "Creating placeholder for missing binary: $binary"
-              touch "./artifacts/$binary"
-              chmod +x "./artifacts/$binary"
-            fi
-          done
-          
-          # Make sure the kernels directory exists
-          mkdir -p ./artifacts/kernels
-      
-      # Make sure all binaries are executable
-      - name: Set permissions
-        run: |
-          chmod +x ./artifacts/*
-      
-      # Create tarball of all binaries and kernels
-      - name: Create tarball
-        run: |
-          cd ./artifacts
-          
-          # Create a directory structure to ensure kernels are next to the binary
-          mkdir -p gpu-miner-package/kernels
-          
-          # Copy lotus binaries to the root of the tarball
-          cp lotus* gpu-miner-package/
-          
-          # Copy kernels folder for the GPU miner if it exists
-          if [ -d "./kernels" ] && [ "$(ls -A ./kernels 2>/dev/null)" ]; then
-            cp -r kernels/* gpu-miner-package/kernels/ || true
-          fi
-          
-          # Create the tarball from the prepared directory
-          tar -czvf lotus-binaries-${{ inputs.version }}.tar.gz gpu-miner-package/
-          
-          # Clean up temporary directory
-          rm -rf gpu-miner-package
-          
-          cd ..
-      
-      # Upload combined artifact
-      - name: Upload combined artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lotus-binaries-${{ inputs.version }}
-          path: ./artifacts/lotus-binaries-*.tar.gz
-          retention-days: 14
+    outputs:
+      package_status: ${{ job.status }}
 
-  # Create the Git tag for the release
+    steps:
+    # Make directory for artifacts
+    - name: Create artifacts directory
+      run: |
+        mkdir -p ./artifacts
+        mkdir -p ./artifacts/kernels
+
+    # Download all binary artifacts with error handling
+    - name: Download lotusd artifact
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: lotusd-${{ inputs.version }}
+        path: ./artifacts/
+
+    - name: Download lotus-cli artifact
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: lotus-cli-${{ inputs.version }}
+        path: ./artifacts/
+
+    - name: Download lotus-seeder artifact
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: lotus-seeder-${{ inputs.version }}
+        path: ./artifacts/
+
+    - name: Download lotus-tx artifact
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: lotus-tx-${{ inputs.version }}
+        path: ./artifacts/
+
+    - name: Download lotus-wallet artifact
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: lotus-wallet-${{ inputs.version }}
+        path: ./artifacts/
+
+    - name: Download lotus-qt artifact
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: lotus-qt-${{ inputs.version }}
+        path: ./artifacts/
+
+    - name: Download lotus-gpu-miner artifact
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: lotus-gpu-miner-${{ inputs.version }}
+        path: ./artifacts/
+
+    # Create placeholder files for any missing artifacts
+    - name: Create placeholder files for missing artifacts
+      run: |
+        # Create placeholders for binaries that might be missing
+        for binary in lotusd lotus-cli lotus-seeder lotus-tx lotus-wallet lotus-qt lotus-gpu-miner; do
+          if [ ! -f "./artifacts/$binary" ]; then
+            echo "Creating placeholder for missing binary: $binary"
+            touch "./artifacts/$binary"
+            chmod +x "./artifacts/$binary"
+          fi
+        done
+
+        # Make sure the kernels directory exists
+        mkdir -p ./artifacts/kernels
+
+    # Make sure all binaries are executable
+    - name: Set permissions
+      run: |
+        chmod +x ./artifacts/*
+
+    # Create tarball of all binaries and kernels
+    - name: Create tarball
+      run: |
+        cd ./artifacts
+
+        # Create a directory structure to ensure kernels are next to the binary
+        mkdir -p gpu-miner-package/kernels
+
+        # Copy lotus binaries to the root of the tarball
+        cp lotus* gpu-miner-package/
+
+        # Copy kernels folder for the GPU miner if it exists
+        if [ -d "./kernels" ] && [ "$(ls -A ./kernels 2>/dev/null)" ]; then
+          cp -r kernels/* gpu-miner-package/kernels/ || true
+        fi
+
+        # Create the tarball from the prepared directory
+        tar -czvf lotus-binaries-${{ inputs.version }}.tar.gz gpu-miner-package/
+
+        # Clean up temporary directory
+        rm -rf gpu-miner-package
+
+        cd ..
+
+    # Upload combined artifact
+    - name: Upload combined artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: lotus-binaries-${{ inputs.version }}
+        path: ./artifacts/lotus-binaries-*.tar.gz
+        retention-days: 14
+
+  # Create the Git tag in parallel with artifact packaging
   create-tag:
     name: 🏷️ Create Git Tag
-    needs: [package-artifacts]
     runs-on: ubuntu-latest
     outputs:
       tag_created: ${{ steps.create-tag.outputs.tag_created }}
-    
+      tag_status: ${{ job.status }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          ref: master
-          fetch-depth: 0
-      
-      - name: Check if tag exists
-        id: check-tag
-        run: |
-          VERSION="${{ inputs.version }}"
-          if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION"; then
-            echo "should_tag=false" >> $GITHUB_OUTPUT
-            echo "Tag v$VERSION already exists"
-          else
-            echo "should_tag=true" >> $GITHUB_OUTPUT
-            echo "Tag v$VERSION does not exist yet"
-          fi
-      
-      - name: Set up Git identity
-        if: steps.check-tag.outputs.should_tag == 'true'
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-      
-      - name: Create and push tag
-        id: create-tag
-        if: steps.check-tag.outputs.should_tag == 'true'
-        run: |
-          VERSION="${{ inputs.version }}"
-          git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin "v$VERSION"
-          echo "Tag v$VERSION created and pushed successfully"
-          echo "tag_created=true" >> $GITHUB_OUTPUT
-  
-  # Create the GitHub release with beautiful formatting
-  create-release:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        ref: master
+        fetch-depth: 0
+
+    - name: Check if tag exists
+      id: check-tag
+      run: |
+        VERSION="${{ inputs.version }}"
+        if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION"; then
+          echo "should_tag=false" >> $GITHUB_OUTPUT
+          echo "Tag v$VERSION already exists"
+        else
+          echo "should_tag=true" >> $GITHUB_OUTPUT
+          echo "Tag v$VERSION does not exist yet"
+        fi
+
+    - name: Set up Git identity
+      if: steps.check-tag.outputs.should_tag == 'true'
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+
+    - name: Create and push tag
+      id: create-tag
+      if: steps.check-tag.outputs.should_tag == 'true'
+      run: |
+        VERSION="${{ inputs.version }}"
+        git tag -a "v$VERSION" -m "Release v$VERSION"
+        git push origin "v$VERSION"
+        echo "Tag v$VERSION created and pushed successfully"
+        echo "tag_created=true" >> $GITHUB_OUTPUT
+
+  # Create the GitHub release (depends on both parallel jobs)
+  publish-release:
     name: 🎁 Publish GitHub Release
-    needs: [create-tag, package-artifacts]
+    needs: [ create-tag, package-artifacts ]
     runs-on: ubuntu-latest
     if: |
       always() && 
       needs.create-tag.result == 'success' && 
+      needs.package-artifacts.result == 'success' &&
       (needs.create-tag.outputs.tag_created == 'true' || 
        needs.create-tag.outputs.should_tag == 'false')
-    
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          ref: master
-          fetch-depth: 0
-      
-      # Download artifacts
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: lotus-binaries-${{ inputs.version }}
-          path: ./artifacts
-      
-      # Generate comprehensive release notes with component-specific details
-      - name: Generate release notes
-        id: generate-notes
-        run: |
-          VERSION="${{ inputs.version }}"
-          REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        ref: master
+        fetch-depth: 0
+
+    # Download artifacts
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: lotus-binaries-${{ inputs.version }}
+        path: ./artifacts
+
+    # Generate comprehensive release notes with component-specific details
+    - name: Generate release notes
+      id: generate-notes
+      run: |
+        VERSION="${{ inputs.version }}"
+        REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
+
+        # Get recent commits for changelog
+        echo "Retrieving commit history for changelog..."
+        PREV_TAG=$(git describe --tags --abbrev=0 --exclude="v${VERSION}" 2>/dev/null || echo "")
+        if [ -z "$PREV_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s by %an" -10)
+          COMPARE_URL=""
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s by %an" ${PREV_TAG}..HEAD)
+          COMPARE_URL="https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${VERSION}"
+        fi
+
+        # Get component-specific commits
+        echo "Analyzing component-specific commits..."
+
+        # Define components and their main directories
+        declare -A COMPONENTS=(
+          ["lotusd"]="src/,src/bitcoind/,src/rpc/"
+          ["lotus-cli"]="src/,src/bitcoin-cli/,src/rpc/"
+          ["lotus-tx"]="src/,src/bitcoin-tx/"
+          ["lotus-wallet"]="src/,src/wallet/"
+          ["lotus-qt"]="src/,src/qt/"
+          ["lotus-seeder"]="src/,src/seeder/"
+          ["lotus-gpu-miner"]="gpuminer/"
+        )
+
+        COMPONENT_COMMITS=""
+        for component in "${!COMPONENTS[@]}"; do
+          paths=${COMPONENTS[$component]}
+          IFS=',' read -ra PATH_ARRAY <<< "$paths"
           
-          # Get recent commits for changelog
-          echo "Retrieving commit history for changelog..."
-          PREV_TAG=$(git describe --tags --abbrev=0 --exclude="v${VERSION}" 2>/dev/null || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s by %an" -10)
-            COMPARE_URL=""
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s by %an" ${PREV_TAG}..HEAD)
-            COMPARE_URL="https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${VERSION}"
-          fi
-          
-          # Get component-specific commits
-          echo "Analyzing component-specific commits..."
-          
-          # Define components and their main directories
-          declare -A COMPONENTS=(
-            ["lotusd"]="src/,src/bitcoind/,src/rpc/"
-            ["lotus-cli"]="src/,src/bitcoin-cli/,src/rpc/"
-            ["lotus-tx"]="src/,src/bitcoin-tx/"
-            ["lotus-wallet"]="src/,src/wallet/"
-            ["lotus-qt"]="src/,src/qt/"
-            ["lotus-seeder"]="src/,src/seeder/"
-            ["lotus-gpu-miner"]="gpuminer/"
-          )
-          
-          COMPONENT_COMMITS=""
-          for component in "${!COMPONENTS[@]}"; do
-            paths=${COMPONENTS[$component]}
-            IFS=',' read -ra PATH_ARRAY <<< "$paths"
-            
-            component_changelog=""
-            for path in "${PATH_ARRAY[@]}"; do
-              if [ -n "$PREV_TAG" ]; then
-                path_commits=$(git log --pretty=format:"- %s by %an" ${PREV_TAG}..HEAD -- "$path" 2>/dev/null)
-              else
-                path_commits=$(git log --pretty=format:"- %s by %an" -10 -- "$path" 2>/dev/null)
-              fi
-              
-              if [ -n "$path_commits" ] && [ -z "$component_changelog" ]; then
-                component_changelog="$path_commits"
-              elif [ -n "$path_commits" ]; then
-                component_changelog="$component_changelog"$'\n'"$path_commits"
-              fi
-            done
-            
-            # Remove duplicate entries
-            component_changelog=$(echo "$component_changelog" | sort | uniq)
-            
-            if [ -n "$component_changelog" ]; then
-              COMPONENT_COMMITS="$COMPONENT_COMMITS"$'\n\n'"### $component Changes"$'\n'"$component_changelog"
+          component_changelog=""
+          for path in "${PATH_ARRAY[@]}"; do
+            if [ -n "$PREV_TAG" ]; then
+              path_commits=$(git log --pretty=format:"- %s by %an" ${PREV_TAG}..HEAD -- "$path" 2>/dev/null)
             else
-              COMPONENT_COMMITS="$COMPONENT_COMMITS"$'\n\n'"### $component Changes"$'\n'"- No specific changes"
+              path_commits=$(git log --pretty=format:"- %s by %an" -10 -- "$path" 2>/dev/null)
+            fi
+            
+            if [ -n "$path_commits" ] && [ -z "$component_changelog" ]; then
+              component_changelog="$path_commits"
+            elif [ -n "$path_commits" ]; then
+              component_changelog="$component_changelog"$'\n'"$path_commits"
             fi
           done
           
-          # Create release notes file
-          cat > release_notes.md << EOF
-          # 🚀 Lotus Core v${VERSION} Release
-
-          ![Lotus Logo](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/master/share/pixmaps/lotus64.png)
-
-          ## 📦 Binaries and Docker Images
-
-          ### Combined Package
-          * [Combined Binary Package](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.tar.gz) - Complete package containing all binaries
-
-          ### Docker Images
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-node) - Main Lotus daemon
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-cli) - Command-line interface
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-seeder) - Network seeder
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-tx:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-tx) - Transaction utility
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-wallet:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-wallet) - Wallet utility
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-qt:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-qt) - Desktop GUI wallet
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-gpu-miner) - GPU Miner
-
-          ## 🔍 What's Changed
-
-          ${COMPARE_URL:+[View all changes](${COMPARE_URL})}
-
-          ### Overall Changelog
-          ${CHANGELOG}
+          # Remove duplicate entries
+          component_changelog=$(echo "$component_changelog" | sort | uniq)
           
-          ## Component-Specific Changes
-          ${COMPONENT_COMMITS}
+          if [ -n "$component_changelog" ]; then
+            COMPONENT_COMMITS="$COMPONENT_COMMITS"$'\n\n'"### $component Changes"$'\n'"$component_changelog"
+          else
+            COMPONENT_COMMITS="$COMPONENT_COMMITS"$'\n\n'"### $component Changes"$'\n'"- No specific changes"
+          fi
+        done
 
-          ## 💡 Installation Instructions
+        # Create release notes file
+        cat > release_notes.md << EOF
+        # 🚀 Lotus Core v${VERSION} Release
 
-          ### Main Node Installation
-          \`\`\`bash
-          # Pull the Lotus node image
-          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
+        ![Lotus Logo](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/master/share/pixmaps/lotus64.png)
 
-          # Run a Lotus node
-          docker run -d --name lotus-node -p 10605:10605 -p 10604:10604 -v lotus-data:/root/.lotus ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
-          \`\`\`
+        ## 📦 Binaries and Docker Images
 
-          ### CLI Tool Installation
-          \`\`\`bash
-          # Pull the CLI image
-          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}
+        ### Combined Package
+        * [Combined Binary Package](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.tar.gz) - Complete package containing all binaries
 
-          # Run a command using the CLI (example: getinfo)
-          docker run --rm --network=host ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION} -rpcuser=user -rpcpassword=pass getinfo
-          \`\`\`
+        ### Docker Images
+        * [\`ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-node) - Main Lotus daemon
+        * [\`ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-cli) - Command-line interface
+        * [\`ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-seeder) - Network seeder
+        * [\`ghcr.io/${REPO_OWNER_LC}/lotus-tx:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-tx) - Transaction utility
+        * [\`ghcr.io/${REPO_OWNER_LC}/lotus-wallet:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-wallet) - Wallet utility
+        * [\`ghcr.io/${REPO_OWNER_LC}/lotus-qt:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-qt) - Desktop GUI wallet
+        * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-gpu-miner) - GPU Miner
 
-          ---
-          *This release was automatically generated by the Lotus CI system on $(date -u '+%Y-%m-%d')*
-          EOF
-          
-          # Set the release notes as output
-          RELEASE_NOTES=$(cat release_notes.md)
-          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-      
-      # Create professional GitHub Release
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ inputs.version }}
-          name: Lotus Core v${{ inputs.version }}
-          body: ${{ steps.generate-notes.outputs.release_notes }}
-          files: ./artifacts/lotus-binaries-*.tar.gz
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        ## 🔍 What's Changed
+
+        ${COMPARE_URL:+[View all changes](${COMPARE_URL})}
+
+        ### Overall Changelog
+        ${CHANGELOG}
+
+        ## Component-Specific Changes
+        ${COMPONENT_COMMITS}
+
+        ## 💡 Installation Instructions
+
+        ### Main Node Installation
+        \`\`\`bash
+        # Pull the Lotus node image
+        docker pull ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
+
+        # Run a Lotus node
+        docker run -d --name lotus-node -p 10605:10605 -p 10604:10604 -v lotus-data:/root/.lotus ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
+        \`\`\`
+
+        ### CLI Tool Installation
+        \`\`\`bash
+        # Pull the CLI image
+        docker pull ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}
+
+        # Run a command using the CLI (example: getinfo)
+        docker run --rm --network=host ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION} -rpcuser=user -rpcpassword=pass getinfo
+        \`\`\`
+
+        ---
+        *This release was automatically generated by the Lotus CI system on $(date -u '+%Y-%m-%d')*
+        EOF
+
+        # Set the release notes as output
+        RELEASE_NOTES=$(cat release_notes.md)
+        echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+        echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    # Create professional GitHub Release
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ inputs.version }}
+        name: Lotus Core v${{ inputs.version }}
+        body: ${{ steps.generate-notes.outputs.release_notes }}
+        files: ./artifacts/lotus-binaries-*.tar.gz
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 # Define permissions needed for creating releases
 permissions:
   contents: write
-  packages: write 
+  packages: write

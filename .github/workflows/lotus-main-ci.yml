@@ -13,15 +13,18 @@ on:
     branches: [ main, master ]
 
 jobs:
-  # First, check the current version
+  # Version Management Step
   version-management:
     name: 📊 Version Check
     uses: ./.github/workflows/lotus-version-management.yml
     secrets: inherit
 
-  # Group 1: Build Core Components
+  # ======= BUILD GROUPS =======
+  # Each group runs in parallel after version management
+
+  # Group 1: Core Components
   build-core:
-    name: 🏗️ Build Core
+    name: 🏗️ Core Components
     needs: [ version-management ]
     if: |
       always() && 
@@ -32,10 +35,10 @@ jobs:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 2: Build Tools Components
+  # Group 2: Tool Components
   build-tools:
-    name: 🔧 Build Tools
-    needs: [ version-management, build-core ]
+    name: 🔧 Tool Components
+    needs: [ version-management ]
     if: |
       always() && 
       (needs.version-management.outputs.should_bump == 'false' || 
@@ -45,10 +48,10 @@ jobs:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 2: Build GUI Components
+  # Group 3: GUI Components
   build-gui:
-    name: 🖥️ Build GUI
-    needs: [ version-management, build-core ]
+    name: 🖥️ GUI Components
+    needs: [ version-management ]
     if: |
       always() && 
       (needs.version-management.outputs.should_bump == 'false' || 
@@ -58,10 +61,10 @@ jobs:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 3: Build Mining Components
+  # Group 4: Mining Components
   build-miner:
-    name: ⛏️ Build Miner
-    needs: [ version-management, build-tools, build-gui ]
+    name: ⛏️ Mining Components
+    needs: [ version-management ]
     if: |
       always() && 
       (needs.version-management.outputs.should_bump == 'false' || 
@@ -70,6 +73,8 @@ jobs:
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
+
+  # ======= POST-BUILD STEPS =======
 
   # Revert version bump if any builds failed
   revert-version:
@@ -88,9 +93,11 @@ jobs:
       build_failures: ${{ needs.build-core.result == 'failure' || needs.build-tools.result == 'failure' || needs.build-gui.result == 'failure' || needs.build-miner.result == 'failure' }}
     secrets: inherit
 
-  # Finally, package and release all artifacts
-  create-release:
-    name: 🚀 Create Release
+  # ======= RELEASE STEPS =======
+
+  # Package artifacts and create release
+  release:
+    name: 🚀 Release
     needs: [ version-management, build-core, build-tools, build-gui, build-miner, revert-version ]
     if: |
       always() && 
