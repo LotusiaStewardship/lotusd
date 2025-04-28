@@ -12,6 +12,9 @@ on:
   pull_request:
     branches: [ main, master ]
 
+# Use specific runners for this workflow
+runs-on: self-hosted
+
 jobs:
   # ======= STEP 1: VERSION MANAGEMENT =======
 
