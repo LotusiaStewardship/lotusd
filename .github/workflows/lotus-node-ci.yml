@@ -981,7 +981,7 @@ jobs:
           
           echo "Version revert completed. Reverted from ${{ steps.get-versions.outputs.current_version }} back to ${{ steps.get-versions.outputs.prev_version }}"
 
-  # Update create-tag job to include detailed diagnostics
+  # Create a professional GitHub release with comprehensive information
   create-tag:
     needs: [version-check, version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt, build-lotus-gpu-miner, package-artifacts, revert-version-bump]
     runs-on: ubuntu-latest
@@ -1081,37 +1081,111 @@ jobs:
             mkdir -p ./artifacts
             touch ./artifacts/lotus-binaries-${{ steps.get-version.outputs.version }}.tar.gz
           fi
-
-  # deploy:
-  #   needs: build
-  #   if: github.event_name != 'pull_request'
-  #   runs-on: ubuntu-latest
-    
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v3
       
-  #     - name: Set up SSH
-  #       uses: webfactory/ssh-agent@v0.7.0
-  #       with:
-  #         ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
-      
-  #     - name: Update docker-compose file
-  #       run: |
-  #         # Ensure proper image format if no explicit registry was specified
-  #         if grep -q "image: lotus-node:" docker-compose.yml; then
-  #           sed -i 's|image: lotus-node:.*|image: ghcr.io/${{ github.repository_owner }}/lotus-node:latest|g' docker-compose.yml
-  #         fi
+      # Generate beautiful release notes
+      - name: Generate release notes
+        if: steps.check-tag.outputs.should_tag == 'true'
+        id: generate-notes
+        run: |
+          VERSION=${{ steps.get-version.outputs.version }}
+          REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
           
-  #         # Update image reference in docker-compose.yml to use GitHub Container Registry with correct format
-  #         if grep -q "image: ghcr.io/lotus-node:" docker-compose.yml; then
-  #           sed -i 's|image: ghcr.io/lotus-node:.*|image: ghcr.io/${{ github.repository_owner }}/lotus-node:latest|g' docker-compose.yml
-  #         fi
+          # Get recent commits for changelog
+          echo "Retrieving commit history for changelog..."
+          PREV_TAG=$(git describe --tags --abbrev=0 --exclude="v${VERSION}" 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s by %an" -10)
+            COMPARE_URL=""
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s by %an" ${PREV_TAG}..HEAD)
+            COMPARE_URL="https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${VERSION}"
+          fi
+          
+          # Create release notes file
+          cat > release_notes.md << EOF
+          # 🚀 Lotus Core v${VERSION} Release
+
+          ![Lotus Logo](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/master/share/pixmaps/lotus64.png)
+
+          ## 📦 Binaries and Docker Images
+
+          ### Binary Packages
+          * [Combined Binary Package](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.tar.gz) - Complete package of all Lotus binaries
+
+          ### Docker Images
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-node) - Main Lotus daemon
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-cli) - Command-line interface
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-seeder) - Network seeder
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-tx:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-tx) - Transaction utility
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-wallet:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-wallet) - Wallet utility
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-qt:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-qt) - Desktop GUI wallet
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-gpu-miner) - GPU Miner
+
+          ## 🔍 What's Changed
+
+          ${COMPARE_URL:+[View all changes](${COMPARE_URL})}
+
+          ### Changelog
+          ${CHANGELOG}
+
+          ## 💡 Installation Instructions
+
+          ### Docker Installation
+          \`\`\`bash
+          # Pull the Lotus node image
+          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
+
+          # Run a Lotus node
+          docker run -d --name lotus-node -p 10605:10605 -p 10604:10604 -v lotus-data:/root/.lotus ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}
+          \`\`\`
+
+          ### GPU Miner Installation
+          \`\`\`bash
+          # Pull the GPU miner image
+          docker pull ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}
+
+          # Run the GPU miner (requires NVIDIA runtime)
+          docker run --gpus all -d --name lotus-gpu-miner ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION} --pool <your-pool-url> --user <your-wallet-address>
+          \`\`\`
+
+          ## 📋 System Requirements
+          - **OS**: Ubuntu 22.04 or newer, Windows 10+, macOS 11+
+          - **RAM**: 4GB minimum, 8GB recommended
+          - **Storage**: 16GB minimum, SSD recommended
+          - **GPU Mining**: NVIDIA GPU with CUDA support
+
+          ## 🔗 Additional Resources
+          - [Official Website](https://lotusia.org)
+          - [Documentation](https://docs.lotusia.org)
+          - [GitHub Repository](https://github.com/${GITHUB_REPOSITORY})
+          - [Issue Tracker](https://github.com/${GITHUB_REPOSITORY}/issues)
+
+          ---
+          *This release was automatically generated by the Lotus CI system on $(date -u '+%Y-%m-%d')*
+          EOF
+          
+          # Set the release notes as output
+          RELEASE_NOTES=$(cat release_notes.md)
+          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       
-  #     - name: Deploy to production
-  #       if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
-  #       run: |
-  #         mkdir -p ~/.ssh
-  #         ssh-keyscan ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
-  #         scp docker-compose.yml ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/data/lotus/
-  #         ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "cd /data/lotus && docker-compose pull && docker-compose up -d"
+      # Create professional GitHub Release
+      - name: Create Release
+        if: steps.check-tag.outputs.should_tag == 'true'
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.get-version.outputs.version }}
+          name: Lotus Core v${{ steps.get-version.outputs.version }}
+          body: ${{ steps.generate-notes.outputs.release_notes }}
+          files: ./artifacts/lotus-binaries-*.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Add permissions at the top of your workflow file after the 'on:' section
+permissions:
+  contents: write
+  packages: write
