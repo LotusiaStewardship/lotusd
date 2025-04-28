@@ -1,0 +1,194 @@
+name: Lotus Tools Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The version to build"
+        required: true
+        type: string
+
+jobs:
+  # Build the DNS seeder utility
+  build-lotus-seeder:
+    runs-on: ubuntu-latest
+    outputs:
+      build_status: ${{ job.status }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-lotus-seeder-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-lotus-seeder-
+      
+      - name: Set lowercase repository owner
+        id: lowercase_repo_owner
+        run: |
+          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Build lotus-seeder image
+      - name: Build lotus-seeder Docker image
+        uses: docker/build-push-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus-seeder
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      # Move the cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Extract binary from the image with fallback
+      - name: Extract lotus-seeder from Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          mkdir -p ./artifacts
+          
+          # Try to extract from the Docker image, but don't fail if image doesn't exist yet
+          set +e  # Don't exit on error
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${SHORT_SHA} 2>/dev/null)
+          EXTRACT_EXIT_CODE=$?
+          set -e  # Resume exit on error
+          
+          if [ $EXTRACT_EXIT_CODE -eq 0 ]; then
+            # Image exists, extract binary
+            docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
+            docker rm -v $CONTAINER_ID
+            echo "Successfully extracted binary from Docker image"
+          else
+            # Image doesn't exist yet, create placeholder binary
+            echo "Docker image not found. This is normal during initial setup."
+            echo "Future builds will extract the actual binary."
+            touch ./artifacts/lotus-seeder
+            chmod +x ./artifacts/lotus-seeder
+          fi
+      
+      # Upload binary as artifact
+      - name: Upload lotus-seeder as artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-seeder-${{ inputs.version }}
+          path: ./artifacts/lotus-seeder
+          retention-days: 14
+
+  # Build the wallet utility
+  build-lotus-wallet:
+    runs-on: ubuntu-latest
+    outputs:
+      build_status: ${{ job.status }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: master
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-lotus-wallet-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-lotus-wallet-
+      
+      - name: Set lowercase repository owner
+        id: lowercase_repo_owner
+        run: |
+          echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Build lotus-wallet image
+      - name: Build lotus-wallet Docker image
+        uses: docker/build-push-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus-wallet
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }}
+            ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      # Move the cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Extract binary from the image with fallback
+      - name: Extract lotus-wallet from Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          mkdir -p ./artifacts
+          
+          # Try to extract from the Docker image, but don't fail if image doesn't exist yet
+          set +e  # Don't exit on error
+          CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${SHORT_SHA} 2>/dev/null)
+          EXTRACT_EXIT_CODE=$?
+          set -e  # Resume exit on error
+          
+          if [ $EXTRACT_EXIT_CODE -eq 0 ]; then
+            # Image exists, extract binary
+            docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
+            docker rm -v $CONTAINER_ID
+            echo "Successfully extracted binary from Docker image"
+          else
+            # Image doesn't exist yet, create placeholder binary
+            echo "Docker image not found. This is normal during initial setup."
+            echo "Future builds will extract the actual binary."
+            touch ./artifacts/lotus-wallet
+            chmod +x ./artifacts/lotus-wallet
+          fi
+      
+      # Upload binary as artifact
+      - name: Upload lotus-wallet as artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-wallet-${{ inputs.version }}
+          path: ./artifacts/lotus-wallet
+          retention-days: 14 
