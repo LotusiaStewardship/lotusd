@@ -1,4 +1,14 @@
-# Build stage
+# This is a reference to the specialized Dockerfiles
+# To build the main lotus node image:
+#   docker build -f dockerfiles/Dockerfile.lotusd -t lotus-node .
+# For other components:
+#   docker build -f dockerfiles/Dockerfile.lotus-cli -t lotus-cli .
+#   docker build -f dockerfiles/Dockerfile.lotus-seeder -t lotus-seeder .
+#   docker build -f dockerfiles/Dockerfile.lotus-tx -t lotus-tx .
+#   docker build -f dockerfiles/Dockerfile.lotus-wallet -t lotus-wallet .
+#   docker build -f dockerfiles/Dockerfile.lotus-qt -t lotus-qt .
+
+# Default to the main node image
 FROM ubuntu:24.04 AS builder
 
 # Install build dependencies
@@ -41,19 +51,14 @@ RUN mkdir -p /usr/lib/cmake/flatbuffers && \
 # Set working directory for the source code
 WORKDIR /lotus-source
 
-# Copy the source code (you need to have your source in the same directory as Dockerfile)
+# Copy the source code
 COPY . .
 
-# Build the binary
+# Build the binaries
 RUN mkdir build
 WORKDIR /lotus-source/build
 RUN cmake ..
-RUN make lotus-seeder -j$(nproc)
 RUN make lotusd -j$(nproc)
-RUN make lotus-cli -j$(nproc)
-RUN make lotus-tx -j$(nproc)
-RUN make lotus-wallet -j$(nproc)
-RUN make lotus-qt -j$(nproc)
 
 # Runtime stage
 FROM ubuntu:24.04
@@ -76,13 +81,6 @@ RUN apt-get update && apt-get install -y \
     libjemalloc2 \
     libsqlite3-0 \
     libflatbuffers-dev \
-    libqt5core5a \
-    libqt5gui5 \
-    libqt5dbus5 \
-    libprotobuf-dev \
-    libqrencode4 \
-    libnng-dev \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
@@ -90,11 +88,6 @@ RUN mkdir -p /opt/lotus/bin /opt/lotus/lib /opt/lotus/include
 
 # Copy built binaries from builder stage
 COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/lotus-cli /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/qt/lotus-qt /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/seeder/lotus-seeder /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/lotus-tx /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/lotus-wallet /opt/lotus/bin/
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*

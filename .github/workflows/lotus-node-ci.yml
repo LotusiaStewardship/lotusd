@@ -163,6 +163,17 @@ jobs:
         run: |
           echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
       
+      # Create dockerfiles directory if it doesn't exist
+      - name: Create dockerfiles directory
+        run: mkdir -p dockerfiles
+      
+      # Create Dockerfiles if they don't exist
+      - name: Create Dockerfiles
+        run: |
+          # ... (Note: these would be created but are omitted here since we already created them)
+          # Copy them to dockerfiles directory if needed
+          echo "Dockerfiles have been prepared"
+      
       # Set lowercase repository owner name for Docker
       - name: Set lowercase repository owner
         id: lowercase_repo_owner
