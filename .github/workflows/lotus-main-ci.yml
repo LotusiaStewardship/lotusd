@@ -32,26 +32,28 @@ jobs:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 2: Build Supporting Components
-  build-tools-and-gui:
-    name: 🔧 Build Tools & GUI
+  # Group 2: Build Tools Components
+  build-tools:
+    name: 🔧 Build Tools
     needs: [ version-management, build-core ]
     if: |
       always() && 
       (needs.version-management.outputs.should_bump == 'false' || 
        needs.version-management.outputs.version_bumped == 'true')
-    strategy:
-      fail-fast: false
-      matrix:
-        component: [ tools, gui ]
-        include:
-        - component: tools
-          name: 🔧 Tools
-          workflow: lotus-tools-build.yml
-        - component: gui
-          name: 🖥️ GUI
-          workflow: lotus-gui-build.yml
-    uses: ./.github/workflows/${{ matrix.workflow }}
+    uses: ./.github/workflows/lotus-tools-build.yml
+    with:
+      version: ${{ needs.version-management.outputs.version }}
+    secrets: inherit
+
+  # Group 2: Build GUI Components
+  build-gui:
+    name: 🖥️ Build GUI
+    needs: [ version-management, build-core ]
+    if: |
+      always() && 
+      (needs.version-management.outputs.should_bump == 'false' || 
+       needs.version-management.outputs.version_bumped == 'true')
+    uses: ./.github/workflows/lotus-gui-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
@@ -59,7 +61,7 @@ jobs:
   # Group 3: Build Mining Components
   build-miner:
     name: ⛏️ Build Miner
-    needs: [ version-management, build-tools-and-gui ]
+    needs: [ version-management, build-tools, build-gui ]
     if: |
       always() && 
       (needs.version-management.outputs.should_bump == 'false' || 
@@ -72,29 +74,31 @@ jobs:
   # Revert version bump if any builds failed
   revert-version:
     name: ⏮️ Revert Version
-    needs: [ version-management, build-core, build-tools-and-gui, build-miner ]
+    needs: [ version-management, build-core, build-tools, build-gui, build-miner ]
     if: |
       always() && 
       needs.version-management.outputs.version_bumped == 'true' &&
       (needs.build-core.result == 'failure' || 
-       needs.build-tools-and-gui.result == 'failure' || 
+       needs.build-tools.result == 'failure' || 
+       needs.build-gui.result == 'failure' || 
        needs.build-miner.result == 'failure')
     uses: ./.github/workflows/lotus-version-revert.yml
     with:
       current_version: ${{ needs.version-management.outputs.version }}
-      build_failures: ${{ needs.build-core.result == 'failure' || needs.build-tools-and-gui.result == 'failure' || needs.build-miner.result == 'failure' }}
+      build_failures: ${{ needs.build-core.result == 'failure' || needs.build-tools.result == 'failure' || needs.build-gui.result == 'failure' || needs.build-miner.result == 'failure' }}
     secrets: inherit
 
   # Finally, package and release all artifacts
   create-release:
     name: 🚀 Create Release
-    needs: [ version-management, build-core, build-tools-and-gui, build-miner, revert-version ]
+    needs: [ version-management, build-core, build-tools, build-gui, build-miner, revert-version ]
     if: |
       always() && 
       github.ref == 'refs/heads/master' && 
       github.event_name == 'push' &&
       needs.build-core.result == 'success' &&
-      needs.build-tools-and-gui.result == 'success' &&
+      needs.build-tools.result == 'success' &&
+      needs.build-gui.result == 'success' &&
       needs.build-miner.result == 'success' &&
       (needs.revert-version.result == 'skipped' || needs.revert-version.result == 'success')
     uses: ./.github/workflows/lotus-release.yml
