@@ -12,6 +12,11 @@ on:
   pull_request:
     branches: [ main, master ]
 
+# Global defaults for all jobs
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # ======= STEP 1: VERSION MANAGEMENT =======
 

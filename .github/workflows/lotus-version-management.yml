@@ -19,11 +19,16 @@ on:
         description: "The previous version (for potential revert)"
         value: ${{ jobs.prepare-revert.outputs.prev_version || '' }}
 
+# Global defaults for all jobs
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # Check the current version first but don't modify it yet
   version-check:
     name: 🔍 Check Version
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     outputs:
       current_version: ${{ steps.get-version.outputs.version }}
       should_bump: ${{ steps.check-bump.outputs.should_bump }}
@@ -72,7 +77,7 @@ jobs:
   version-bump:
     name: 📈 Bump Version
     needs: [ version-check ]
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     # Only run on the master branch, not on pull requests or tags, and only if we should bump
     if: github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
     outputs:
@@ -125,7 +130,7 @@ jobs:
   prepare-revert:
     name: 🔄 Prepare Revert
     needs: [ version-check ]
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     if: |
       always() &&
       github.ref == 'refs/heads/master' && 

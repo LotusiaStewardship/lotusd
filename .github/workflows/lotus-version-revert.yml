@@ -16,10 +16,15 @@ on:
         required: true
         type: string
 
+# Global defaults for all jobs
+defaults:
+  run:
+    shell: bash
+
 jobs:
   revert-version-bump:
     name: 🔄 Revert Version Bump
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, ubuntu-latest ]
     if: inputs.build_failures == 'true'
 
     steps:
