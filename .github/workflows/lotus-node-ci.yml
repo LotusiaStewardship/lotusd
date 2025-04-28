@@ -1361,7 +1361,6 @@ jobs:
       
       # Download artifacts using the current version from the files
       - name: Download artifacts
-        if: steps.check-tag.outputs.should_tag == 'true'
         uses: actions/download-artifact@v4
         with:
           name: lotus-binaries-${{ steps.get-version.outputs.version }}
@@ -1571,7 +1570,6 @@ jobs:
       
       # Create professional GitHub Release
       - name: Create Release
-        if: steps.check-tag.outputs.should_tag == 'true'
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
