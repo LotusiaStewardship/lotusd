@@ -150,7 +150,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
-      # Build main lotusd image (this will be the default lotus-node image)
+      # Build main lotusd image with detailed logging
       - name: Build main lotusd Docker image
         uses: docker/build-push-action@v4
         if: github.event_name != 'pull_request'
@@ -164,12 +164,37 @@ jobs:
             ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          load: true # This ensures the image is loaded locally
       
       # Move the cache
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Verify Docker image was created
+      - name: Check if Docker image exists
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Checking if Docker image exists: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}"
+          
+          # List all available images
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to pull the image to verify it exists in the registry
+          set +e
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA}
+          PULL_EXIT_CODE=$?
+          set -e
+          
+          if [ $PULL_EXIT_CODE -eq 0 ]; then
+            echo "Docker image exists in the registry."
+          else
+            echo "WARNING: Docker image does not exist in the registry."
+            echo "This means the build or push step likely failed."
+          fi
       
       # Extract binary from the image with fallback
       - name: Extract lotusd from Docker image
@@ -269,6 +294,30 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
+      # Verify Docker image was created
+      - name: Check if Docker image exists
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Checking if Docker image exists: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-cli:sha-${SHORT_SHA}"
+          
+          # List all available images
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to pull the image to verify it exists in the registry
+          set +e
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-cli:sha-${SHORT_SHA}
+          PULL_EXIT_CODE=$?
+          set -e
+          
+          if [ $PULL_EXIT_CODE -eq 0 ]; then
+            echo "Docker image exists in the registry."
+          else
+            echo "WARNING: Docker image does not exist in the registry."
+            echo "This means the build or push step likely failed."
+          fi
+      
       # Extract binary with fallback mechanism
       - name: Extract binary from Docker image
         if: github.event_name != 'pull_request'
@@ -366,6 +415,30 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Verify Docker image was created
+      - name: Check if Docker image exists
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Checking if Docker image exists: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${SHORT_SHA}"
+          
+          # List all available images
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to pull the image to verify it exists in the registry
+          set +e
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${SHORT_SHA}
+          PULL_EXIT_CODE=$?
+          set -e
+          
+          if [ $PULL_EXIT_CODE -eq 0 ]; then
+            echo "Docker image exists in the registry."
+          else
+            echo "WARNING: Docker image does not exist in the registry."
+            echo "This means the build or push step likely failed."
+          fi
       
       # Extract binary from the image with fallback
       - name: Extract lotus-seeder from Docker image
@@ -465,6 +538,30 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
+      # Verify Docker image was created
+      - name: Check if Docker image exists
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Checking if Docker image exists: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${SHORT_SHA}"
+          
+          # List all available images
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to pull the image to verify it exists in the registry
+          set +e
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:sha-${SHORT_SHA}
+          PULL_EXIT_CODE=$?
+          set -e
+          
+          if [ $PULL_EXIT_CODE -eq 0 ]; then
+            echo "Docker image exists in the registry."
+          else
+            echo "WARNING: Docker image does not exist in the registry."
+            echo "This means the build or push step likely failed."
+          fi
+      
       # Extract binary from the image with fallback
       - name: Extract lotus-tx from Docker image
         if: github.event_name != 'pull_request'
@@ -562,6 +659,30 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Verify Docker image was created
+      - name: Check if Docker image exists
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Checking if Docker image exists: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${SHORT_SHA}"
+          
+          # List all available images
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to pull the image to verify it exists in the registry
+          set +e
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${SHORT_SHA}
+          PULL_EXIT_CODE=$?
+          set -e
+          
+          if [ $PULL_EXIT_CODE -eq 0 ]; then
+            echo "Docker image exists in the registry."
+          else
+            echo "WARNING: Docker image does not exist in the registry."
+            echo "This means the build or push step likely failed."
+          fi
       
       # Extract binary from the image with fallback
       - name: Extract lotus-wallet from Docker image
@@ -661,6 +782,30 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
       
+      # Verify Docker image was created
+      - name: Check if Docker image exists
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Checking if Docker image exists: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${SHORT_SHA}"
+          
+          # List all available images
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to pull the image to verify it exists in the registry
+          set +e
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${SHORT_SHA}
+          PULL_EXIT_CODE=$?
+          set -e
+          
+          if [ $PULL_EXIT_CODE -eq 0 ]; then
+            echo "Docker image exists in the registry."
+          else
+            echo "WARNING: Docker image does not exist in the registry."
+            echo "This means the build or push step likely failed."
+          fi
+      
       # Extract binary from the image with fallback
       - name: Extract lotus-qt from Docker image
         if: github.event_name != 'pull_request'
@@ -758,6 +903,30 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+      # Verify Docker image was created
+      - name: Check if Docker image exists
+        if: github.event_name != 'pull_request'
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "Checking if Docker image exists: ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${SHORT_SHA}"
+          
+          # List all available images
+          echo "Available Docker images:"
+          docker images
+          
+          # Try to pull the image to verify it exists in the registry
+          set +e
+          docker pull ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${SHORT_SHA}
+          PULL_EXIT_CODE=$?
+          set -e
+          
+          if [ $PULL_EXIT_CODE -eq 0 ]; then
+            echo "Docker image exists in the registry."
+          else
+            echo "WARNING: Docker image does not exist in the registry."
+            echo "This means the build or push step likely failed."
+          fi
       
       # Extract binary and kernels from the image with fallback
       - name: Extract lotus-gpu-miner from Docker image
