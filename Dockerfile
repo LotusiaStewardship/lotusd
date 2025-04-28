@@ -48,9 +48,9 @@ COPY . .
 RUN mkdir build
 WORKDIR /lotus-source/build
 RUN cmake ..
+RUN make lotus-seeder -j$(nproc)
 RUN make lotusd -j$(nproc)
 RUN make lotus-cli -j$(nproc)
-RUN make lotus-seeder -j$(nproc)
 RUN make lotus-tx -j$(nproc)
 RUN make lotus-wallet -j$(nproc)
 RUN make lotus-qt -j$(nproc)
