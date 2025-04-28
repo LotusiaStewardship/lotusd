@@ -1150,10 +1150,14 @@ jobs:
           
           echo "Version revert completed. Reverted from ${{ steps.get-versions.outputs.current_version }} back to ${{ steps.get-versions.outputs.prev_version }}"
 
-  # Create a professional GitHub release with comprehensive information
+  # Create the Git tag for the release
   create-tag:
     needs: [version-check, version-bump, build-lotusd, build-lotus-cli, build-lotus-seeder, build-lotus-tx, build-lotus-wallet, build-lotus-qt, build-lotus-gpu-miner, package-artifacts, revert-version-bump]
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      should_tag: ${{ steps.check-tag.outputs.should_tag }}
+      tag_created: ${{ steps.create-tag.outputs.tag_created }}
     if: |
       always() && 
       github.ref == 'refs/heads/master' && 
@@ -1208,7 +1212,7 @@ jobs:
           fi
           
           # Debug output
-          echo "should_tag value: $(echo "$should_tag" | cat -A)"
+          echo "should_tag value: $(cat $GITHUB_OUTPUT | grep should_tag | cut -d= -f2)"
           echo "VERSION: $VERSION"
           echo "Tag check command: git ls-remote --tags origin | grep -q \"refs/tags/v$VERSION\""
           echo "All tags:"
@@ -1221,16 +1225,41 @@ jobs:
           git config --global user.email "actions@github.com"
       
       - name: Create and push tag
+        id: create-tag
         if: steps.check-tag.outputs.should_tag == 'true'
         run: |
           VERSION=${{ steps.get-version.outputs.version }}
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin "v$VERSION"
-          echo "Created and pushed tag v$VERSION"
+          echo "Tag v$VERSION created and pushed successfully"
+          echo "tag_created=true" >> $GITHUB_OUTPUT
+  
+  # Create the GitHub release with beautiful formatting
+  create-release:
+    needs: [create-tag]
+    runs-on: ubuntu-latest
+    if: |
+      always() && 
+      needs.create-tag.result == 'success' && 
+      needs.create-tag.outputs.should_tag == 'true' &&
+      needs.create-tag.outputs.tag_created == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: master
+          fetch-depth: 0
+      
+      - name: Get current version
+        id: get-version
+        run: |
+          VERSION=${{ needs.create-tag.outputs.version }}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
       
       # Download artifacts using the current version from the files
       - name: Download artifacts
-        if: steps.check-tag.outputs.should_tag == 'true'
         uses: actions/download-artifact@v4
         with:
           name: lotus-binaries-${{ steps.get-version.outputs.version }}
@@ -1239,7 +1268,6 @@ jobs:
       
       # Verify artifacts are present
       - name: Check if artifacts exist
-        if: steps.check-tag.outputs.should_tag == 'true'
         run: |
           echo "Listing artifact contents:"
           ls -la ./artifacts || echo "Artifacts directory does not exist"
@@ -1253,7 +1281,6 @@ jobs:
       
       # Generate beautiful release notes
       - name: Generate release notes
-        if: steps.check-tag.outputs.should_tag == 'true'
         id: generate-notes
         run: |
           VERSION=${{ steps.get-version.outputs.version }}
@@ -1341,7 +1368,6 @@ jobs:
       
       # Create professional GitHub Release
       - name: Create Release
-        if: steps.check-tag.outputs.should_tag == 'true'
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
