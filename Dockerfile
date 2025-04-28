@@ -92,7 +92,7 @@ RUN mkdir -p /opt/lotus/bin /opt/lotus/lib /opt/lotus/include
 COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/
 COPY --from=builder /lotus-source/build/src/lotus-cli /opt/lotus/bin/
 COPY --from=builder /lotus-source/build/src/lotus-qt /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/lotus-seeder /opt/lotus/bin/
+# COPY --from=builder /lotus-source/build/src/lotus-seeder /opt/lotus/bin/
 COPY --from=builder /lotus-source/build/src/lotus-tx /opt/lotus/bin/
 COPY --from=builder /lotus-source/build/src/lotus-wallet /opt/lotus/bin/
 
