@@ -1,0 +1,57 @@
+# Build stage for GPU Miner (Rust application)
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
+
+# Install build dependencies for Rust
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Set working directory
+WORKDIR /lotus-source
+
+# Copy the source code (assuming GPU miner is in src/gpu-miner)
+COPY . .
+
+# Build the Rust application
+WORKDIR /lotus-source/src/gpu-miner
+RUN cargo build --release
+
+# Runtime stage
+FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create directory structure
+RUN mkdir -p /opt/lotus/bin
+
+# Copy built binary from builder stage
+COPY --from=builder /lotus-source/src/gpu-miner/target/release/lotus-gpu-miner /opt/lotus/bin/
+
+# Set permissions
+RUN chmod +x /opt/lotus/bin/*
+
+# Add to PATH
+ENV PATH="/opt/lotus/bin:${PATH}"
+
+# Set NVIDIA runtime requirements
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Set working directory
+WORKDIR /root
+
+# Default command
+ENTRYPOINT ["/opt/lotus/bin/lotus-gpu-miner"]
+CMD ["--help"] 
