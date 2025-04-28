@@ -1,16 +1,13 @@
 # Build stage for GPU Miner (Rust application)
 FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
 
-# Install build dependencies for Rust and OpenCL
+# Install build dependencies for Rust
 RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
     libssl-dev \
     curl \
     git \
-    ocl-icd-opencl-dev \
-    opencl-headers \
-    clinfo \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
@@ -20,11 +17,11 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Set working directory
 WORKDIR /lotus-source
 
-# Copy the source code
+# Copy the source code (assuming GPU miner is in src/gpu-miner)
 COPY . .
 
 # Build the Rust application
-WORKDIR /lotus-source/gpuminer
+WORKDIR /lotus-source/src/gpu-miner
 RUN cargo build --release
 
 # Runtime stage
@@ -34,17 +31,13 @@ FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
 RUN apt-get update && apt-get install -y \
     libssl3 \
     ca-certificates \
-    ocl-icd-libopencl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
-RUN mkdir -p /opt/lotus/bin /opt/lotus/kernels
+RUN mkdir -p /opt/lotus/bin
 
-# Copy built binary from builder stage (using the correct binary name)
-COPY --from=builder /lotus-source/gpuminer/target/release/lotus-miner-cli /opt/lotus/bin/lotus-gpu-miner
-
-# Copy kernels folder which is required at runtime
-COPY --from=builder /lotus-source/gpuminer/kernels /opt/lotus/kernels
+# Copy built binary from builder stage
+COPY --from=builder /lotus-source/src/gpu-miner/target/release/lotus-gpu-miner /opt/lotus/bin/
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*
@@ -57,8 +50,8 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 # Set working directory
-WORKDIR /opt/lotus
+WORKDIR /root
 
-# Default command - point to the GPU miner executable
+# Default command
 ENTRYPOINT ["/opt/lotus/bin/lotus-gpu-miner"]
 CMD ["--help"] 
