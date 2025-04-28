@@ -1,11 +1,24 @@
-name: Lotus Node CI
+# **DEPRECATED** 
+# This workflow has been replaced by a modular workflow system.
+# Please see the new workflows in the .github/workflows directory:
+# - lotus-main-ci.yml (main entry point)
+# - lotus-version-management.yml
+# - lotus-core-build.yml
+# - lotus-tools-build.yml
+# - lotus-gui-build.yml
+# - lotus-miner-build.yml
+# - lotus-version-revert.yml
+# - lotus-release.yml
+#
+# This file is kept for reference purposes only and will be removed in the future.
+
+name: Lotus Node CI (Deprecated)
 
 on:
   push:
-    branches: [ main, master, develop ]
-    tags: [ 'v*' ]
+    branches: [ deprecated ]  # Disabling the workflow
   pull_request:
-    branches: [ main, master ]
+    branches: [ deprecated ]  # Disabling the workflow
 
 jobs:
   # Check the current version first but don't modify it yet

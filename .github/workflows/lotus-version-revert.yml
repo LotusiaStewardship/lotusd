@@ -1,3 +1,5 @@
+name: Lotus Version Revert
+
 on:
   workflow_call:
     inputs:
@@ -5,53 +7,52 @@ on:
         description: "The current version that needs to be reverted"
         required: true
         type: string
-      prev_version:
-        description: "The previous version to revert to"
-        required: true
-        type: string
       build_failures:
         description: "Whether any builds failed"
         required: true
         type: string
-
+      
 jobs:
   revert-version-bump:
-    name: 🔄 Revert Version Bump
     runs-on: ubuntu-latest
     if: inputs.build_failures == 'true'
-
+    
     steps:
-    - name: Checkout code with version bump
-      uses: actions/checkout@v3
-      with:
-        ref: master
-        fetch-depth: 0
-
-    - name: Revert version bump
-      run: |
-        # Setup git identity
-        git config --global user.name "Mrs Turtle"
-        git config --global user.email "mrs.turtle@lotusia.org"
-
-        echo "Reverting version from ${{ inputs.current_version }} to ${{ inputs.prev_version }}"
-
-        # Update CMakeLists.txt to the previous version
-        sed -i "s/VERSION ${{ inputs.current_version }}/VERSION ${{ inputs.prev_version }}/" CMakeLists.txt
-
-        # Update PKGBUILD to the previous version
-        sed -i "s/pkgver=${{ inputs.current_version }}/pkgver=${{ inputs.prev_version }}/" contrib/aur/lotus/PKGBUILD
-
-        # Commit and push the reversion
-        git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
-        git commit -m "Revert version bump to ${{ inputs.current_version }} due to build failure"
-        
-        # Pull latest changes with rebase strategy to avoid merge commits
-        git fetch origin master
-        
-        # Rebase our changes on top of the latest master
-        git rebase origin/master
-        
-        # Push with force-with-lease for safety
-        git push --force-with-lease origin HEAD:master
-
-        echo "Version revert completed" 
+      - name: Checkout code with version bump
+        uses: actions/checkout@v3
+        with:
+          ref: master
+          fetch-depth: 0
+      
+      - name: Get version details  
+        id: get-versions
+        run: |
+          CURRENT_VERSION="${{ inputs.current_version }}"
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          
+          # Calculate the previous version (that we want to revert to)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          PREV_PATCH=$((PATCH - 1))
+          PREV_VERSION="$MAJOR.$MINOR.$PREV_PATCH"
+          echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "Current version: $CURRENT_VERSION, Reverting to: $PREV_VERSION"
+      
+      - name: Revert version bump
+        run: |
+          # Setup git with the same identity used for bumping
+          git config --global user.name "Mrs Turtle"
+          git config --global user.email "mrs.turtle@lotusia.org"
+          
+          # Update CMakeLists.txt to the previous version
+          sed -i "s/VERSION ${{ steps.get-versions.outputs.current_version }}/VERSION ${{ steps.get-versions.outputs.prev_version }}/" CMakeLists.txt
+          
+          # Update PKGBUILD to the previous version
+          sed -i "s/pkgver=${{ steps.get-versions.outputs.current_version }}/pkgver=${{ steps.get-versions.outputs.prev_version }}/" contrib/aur/lotus/PKGBUILD
+          
+          # Commit and push the reversion
+          git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
+          git commit -m "Revert version bump to ${{ steps.get-versions.outputs.current_version }} due to build failure"
+          git push origin HEAD:master
+          
+          echo "Version revert completed. Reverted from ${{ steps.get-versions.outputs.current_version }} back to ${{ steps.get-versions.outputs.prev_version }}" 
