@@ -95,8 +95,8 @@ jobs:
       - name: Commit version bump
         id: commit
         run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
+          git config --global user.name "Mrs Turtle"
+          git config --global user.email "mrs.turtle@lotusia.org"
           
           git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
           git commit -m "Bump version to ${{ steps.bump-version.outputs.new_version }}"
@@ -231,13 +231,14 @@ jobs:
 
   # Final job to create a tag and release
   create-tag:
-    needs: [version-check, version-bump, build]
+    needs: [version-check, version-bump, build, revert-version-bump]
     runs-on: ubuntu-latest
     if: |
       always() && 
       github.ref == 'refs/heads/master' && 
       needs.build.result == 'success' && 
-      (needs.version-check.outputs.should_bump == 'false' || needs.version-bump.result == 'success')
+      (needs.version-check.outputs.should_bump == 'false' || needs.version-bump.result == 'success') &&
+      (needs.revert-version-bump.result == 'skipped' || needs.revert-version-bump.result == 'success')
     
     steps:
       - name: Checkout code
@@ -299,6 +300,55 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+
+  # Add a job to revert the version bump if the build fails
+  revert-version-bump:
+    needs: [version-bump, build]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      needs.version-bump.result == 'success' && 
+      needs.build.result == 'failure'
+    
+    steps:
+      - name: Checkout code with version bump
+        uses: actions/checkout@v3
+        with:
+          ref: master
+          fetch-depth: 0
+      
+      - name: Get version details  
+        id: get-versions
+        run: |
+          CURRENT_VERSION=$(grep -Po "VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+" CMakeLists.txt)
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          
+          # Calculate the previous version (that we want to revert to)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          PREV_PATCH=$((PATCH - 1))
+          PREV_VERSION="$MAJOR.$MINOR.$PREV_PATCH"
+          echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "Current version: $CURRENT_VERSION, Reverting to: $PREV_VERSION"
+      
+      - name: Revert version bump
+        run: |
+          # Setup git with the same identity used for bumping
+          git config --global user.name "Mrs Turtle"
+          git config --global user.email "mrs.turtle@lotusia.org"
+          
+          # Update CMakeLists.txt to the previous version
+          sed -i "s/VERSION ${{ steps.get-versions.outputs.current_version }}/VERSION ${{ steps.get-versions.outputs.prev_version }}/" CMakeLists.txt
+          
+          # Update PKGBUILD to the previous version
+          sed -i "s/pkgver=${{ steps.get-versions.outputs.current_version }}/pkgver=${{ steps.get-versions.outputs.prev_version }}/" contrib/aur/lotus/PKGBUILD
+          
+          # Commit and push the reversion
+          git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
+          git commit -m "Revert version bump to ${{ steps.get-versions.outputs.current_version }} due to build failure"
+          git push origin HEAD:master
+          
+          echo "Version revert completed. Reverted from ${{ steps.get-versions.outputs.current_version }} back to ${{ steps.get-versions.outputs.prev_version }}"
 
   # deploy:
   #   needs: build
