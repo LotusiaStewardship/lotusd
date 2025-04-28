@@ -15,12 +15,22 @@ RUN apt-get update && apt-get install -y \
     libjemalloc-dev \
     pkg-config \
     libsqlite3-dev \
-    flatbuffers-compiler \
-    libflatbuffers-dev \
     curl \
     wget \
     git \
     && rm -rf /var/lib/apt/lists/*
+
+# Build and install flatbuffers from source
+WORKDIR /tmp
+RUN git clone https://github.com/google/flatbuffers.git && \
+    cd flatbuffers && \
+    git checkout v2.0.0 && \
+    mkdir -p build && \
+    cd build && \
+    cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
 
 # Set working directory for the source code
 WORKDIR /lotus-source
@@ -54,10 +64,13 @@ RUN apt-get update && apt-get install -y \
     libminiupnpc17 \
     libjemalloc2 \
     libsqlite3-0 \
-    libflatbuffers-dev \
     libnng-dev \
     wget \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy Flatbuffers libraries from builder
+COPY --from=builder /usr/local/lib/libflatbuffers.a /usr/local/lib/
+COPY --from=builder /usr/local/include/flatbuffers /usr/local/include/flatbuffers
 
 # Create directory structure
 RUN mkdir -p /opt/lotus/bin /opt/lotus/lib /opt/lotus/include
