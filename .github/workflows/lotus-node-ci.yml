@@ -89,13 +89,13 @@ jobs:
           # Create a temporary container to copy files from
           CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${SHORT_SHA})
           
-          # Copy each binary from the builder stage
-          docker cp $CONTAINER_ID:/lotus-source/build/src/lotusd ./artifacts/
-          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-cli ./artifacts/
-          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-qt ./artifacts/
-          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-seeder ./artifacts/
-          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-tx ./artifacts/
-          docker cp $CONTAINER_ID:/lotus-source/build/src/lotus-wallet ./artifacts/
+          # Copy each binary from the run stage
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotusd ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-cli ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-tx ./artifacts/
+          docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
           
           # Create a tarball of all binaries
           cd ./artifacts
