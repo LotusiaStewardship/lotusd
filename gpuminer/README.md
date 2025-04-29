@@ -100,6 +100,119 @@ docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
 
 **Note**: The `--gpus all` flag requires the NVIDIA Container Toolkit to be installed if you're using NVIDIA GPUs. For AMD GPUs, you may need a different configuration.
 
+### Docker Setup on Ubuntu 24.04
+
+Follow these steps to set up all dependencies needed for running the Lotus GPU Miner in Docker on Ubuntu 24.04:
+
+#### NVIDIA GPU Setup
+
+1. Install the NVIDIA driver if not already installed:
+   ```bash
+   sudo apt update
+   sudo apt install -y nvidia-driver-535  # Use the latest version available
+   sudo reboot  # Reboot to load the driver
+   ```
+
+2. Install the NVIDIA Container Toolkit:
+   ```bash
+   # Add the NVIDIA Container Toolkit repository
+   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+   curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+   sudo sed -i -e '/experimental/ s/^#//g' /etc/apt/sources.list.d/nvidia-container-toolkit.list
+   
+   # Install the toolkit
+   sudo apt-get update
+   sudo apt-get install -y nvidia-container-toolkit
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+
+3. Install OpenCL libraries:
+   ```bash
+   sudo apt update
+   sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev clinfo
+   ```
+
+4. Verify your NVIDIA GPU is detected:
+   ```bash
+   nvidia-smi  # Should show your GPU information
+   clinfo      # Should list your GPU as an OpenCL platform
+   ```
+
+5. Test Docker access to the GPU:
+   ```bash
+   # Test NVIDIA Container Toolkit
+   sudo docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+   
+   # Test OpenCL in Docker with volume mounts
+   sudo docker run --rm --gpus all \
+     -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
+     -v /etc/OpenCL:/etc/OpenCL \
+     ghcr.io/boblepointu/lotus-gpu-miner:latest clinfo
+   ```
+
+#### AMD GPU Setup
+
+1. Install AMD ROCm drivers:
+   ```bash
+   sudo apt update
+   sudo apt install -y rocm-opencl
+   ```
+
+2. Install Docker:
+   ```bash
+   sudo apt update
+   sudo apt install -y docker.io
+   sudo systemctl enable --now docker
+   sudo usermod -aG docker $USER  # Log out and back in after this
+   ```
+
+3. Install OpenCL libraries:
+   ```bash
+   sudo apt update
+   sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev clinfo
+   ```
+
+4. Verify your AMD GPU is detected:
+   ```bash
+   clinfo  # Should list your AMD GPU as an OpenCL platform
+   ```
+
+5. Run with AMD GPU:
+   ```bash
+   docker run --device=/dev/kfd --device=/dev/dri \
+     -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
+     -v /etc/OpenCL:/etc/OpenCL \
+     ghcr.io/boblepointu/lotus-gpu-miner:latest \
+     --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner \
+     --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+   ```
+
+#### Troubleshooting
+
+If you encounter `Platform::list: Error retrieving platform list: ApiWrapper(GetPlatformIdsPlatformListUnavailable(10))`, it means the Docker container cannot access OpenCL. Check that:
+
+1. Your OpenCL libraries are correctly installed on the host:
+   ```bash
+   ls -la /usr/lib/x86_64-linux-gnu/libOpenCL.so.1
+   ls -la /etc/OpenCL
+   ```
+
+2. You've correctly mounted these libraries into the container:
+   ```bash
+   docker run --rm -it --gpus all \
+     -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
+     -v /etc/OpenCL:/etc/OpenCL \
+     ubuntu:22.04 ls -la /usr/lib/x86_64-linux-gnu/libOpenCL.so.1
+   ```
+
+3. For NVIDIA, make sure the NVIDIA OpenCL ICD is properly installed:
+   ```bash
+   sudo apt install -y nvidia-opencl-icd
+   ```
+
 ## Build & Run
 
 ### Windows
