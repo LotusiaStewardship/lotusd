@@ -19,81 +19,54 @@ defaults:
     shell: bash
 
 jobs:
-  # ======= STEP 1: VERSION MANAGEMENT =======
-
   # Check the current version first
   version-management:
     name: 📊 Version Management
     uses: ./.github/workflows/lotus-version-management.yml
     secrets: inherit
 
-  # ======= STEP 2: BUILD BLOCKS (PARALLEL) =======
-
-  # Group 2a: Core Components
+  # Build components in parallel
   build-core:
     name: 🏗️ Core Components
     needs: [ version-management ]
-    if: |
-      always() && 
-      (needs.version-management.outputs.should_bump == 'false' || 
-       needs.version-management.outputs.version_bumped == 'true')
+    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
     uses: ./.github/workflows/lotus-core-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 2b: Tool Components
   build-tools:
     name: 🔧 Tool Components
     needs: [ version-management ]
-    if: |
-      always() && 
-      (needs.version-management.outputs.should_bump == 'false' || 
-       needs.version-management.outputs.version_bumped == 'true')
+    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
     uses: ./.github/workflows/lotus-tools-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 2c: GUI Components
   build-gui:
     name: 🖥️ GUI Components
     needs: [ version-management ]
-    if: |
-      always() && 
-      (needs.version-management.outputs.should_bump == 'false' || 
-       needs.version-management.outputs.version_bumped == 'true')
+    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
     uses: ./.github/workflows/lotus-gui-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Group 2d: Mining Components
   build-miner:
     name: ⛏️ Mining Components
     needs: [ version-management ]
-    if: |
-      always() && 
-      (needs.version-management.outputs.should_bump == 'false' || 
-       needs.version-management.outputs.version_bumped == 'true')
+    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
     uses: ./.github/workflows/lotus-miner-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # ======= STEP 3: REVERT VERSION IF NEEDED =======
-
-  # Revert version bump if any builds failed
+  # Revert version if any builds failed
   revert-version:
     name: ⏮️ Revert Version
     needs: [ version-management, build-core, build-tools, build-gui, build-miner ]
-    if: |
-      always() && 
-      needs.version-management.outputs.version_bumped == 'true' &&
-      (needs.build-core.result == 'failure' || 
-       needs.build-tools.result == 'failure' || 
-       needs.build-gui.result == 'failure' || 
-       needs.build-miner.result == 'failure')
+    if: always() && needs.version-management.outputs.version_bumped == 'true' && (needs.build-core.result == 'failure' || needs.build-tools.result == 'failure' || needs.build-gui.result == 'failure' || needs.build-miner.result == 'failure')
     uses: ./.github/workflows/lotus-version-revert.yml
     with:
       current_version: ${{ needs.version-management.outputs.version }}
@@ -101,21 +74,11 @@ jobs:
       build_failures: ${{ needs.build-core.result == 'failure' || needs.build-tools.result == 'failure' || needs.build-gui.result == 'failure' || needs.build-miner.result == 'failure' }}
     secrets: inherit
 
-  # ======= STEP 4: RELEASE PROCESS =======
-
-  # Call the release workflow (handles tagging, packaging, and publishing)
+  # Release process
   release:
     name: 🚀 Release
     needs: [ version-management, build-core, build-tools, build-gui, build-miner, revert-version ]
-    if: |
-      always() && 
-      github.ref == 'refs/heads/master' && 
-      github.event_name == 'push' &&
-      needs.build-core.result == 'success' &&
-      needs.build-tools.result == 'success' &&
-      needs.build-gui.result == 'success' &&
-      needs.build-miner.result == 'success' &&
-      (needs.revert-version.result == 'skipped' || needs.revert-version.result == 'success')
+    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.build-core.result == 'success' && needs.build-tools.result == 'success' && needs.build-gui.result == 'success' && needs.build-miner.result == 'success' && (needs.revert-version.result == 'skipped' || needs.revert-version.result == 'success')
     uses: ./.github/workflows/lotus-release.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
