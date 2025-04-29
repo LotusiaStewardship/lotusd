@@ -134,6 +134,7 @@ impl ConfigSettings {
         {
             s.set("mine_to_address", "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt")?;
             println!("No miner address specified. Using default: lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt");
+
         }
 
         // Set the bitcoin network

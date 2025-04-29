@@ -1,4 +1,3 @@
-name: ⏮️ Lotus Version Revert
 
 on:
   workflow_call:
