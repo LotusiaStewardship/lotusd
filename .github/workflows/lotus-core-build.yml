@@ -7,15 +7,10 @@ on:
         required: true
         type: string
 
-# Global defaults for all jobs
-defaults:
-  run:
-    shell: bash
-
 jobs:
   build-lotusd:
     name: 🚀 Build lotusd
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
@@ -77,7 +72,7 @@ jobs:
 
   build-lotus-cli:
     name: 🖥️ Build lotus-cli
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
@@ -139,7 +134,7 @@ jobs:
 
   build-lotus-tx:
     name: 💰 Build lotus-tx
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
