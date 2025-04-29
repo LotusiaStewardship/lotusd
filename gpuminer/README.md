@@ -18,9 +18,24 @@ rpc_user = "lotus"
 rpc_password = "lotus"
 gpu_index = 0
 kernel_size = 23
+pool_mining = false
 ```
 
 See `lotus-miner --help` for a description of the parameters.
+
+## Pool Mining
+
+If you're mining in a pool, you can enable pool mining mode with the `--poolmining` flag. When this flag is set, the miner will submit blocks without the miner address parameter, which is required by some mining pools.
+
+```
+./lotus-miner --poolmining
+```
+
+You can also enable pool mining in the config file:
+
+```
+pool_mining = true
+```
 
 # Build & Run
 

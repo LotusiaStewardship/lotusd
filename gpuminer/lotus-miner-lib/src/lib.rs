@@ -42,6 +42,7 @@ pub struct NodeSettings {
     pub bitcoind_password: String,
     pub rpc_poll_interval: u64,
     pub miner_addr: String,
+    pub pool_mining: bool,
 }
 
 pub struct Log {
@@ -97,6 +98,7 @@ impl Server {
                 bitcoind_password: config.rpc_password.clone(),
                 rpc_poll_interval: config.rpc_poll_interval.try_into().unwrap(),
                 miner_addr: config.mine_to_address.clone(),
+                pool_mining: config.pool_mining,
             }),
             block_state: Mutex::new(BlockState {
                 current_work: Work::default(),
@@ -308,13 +310,24 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     let log = server.log();
     let mut serialized_block = block.header.to_vec();
     serialized_block.extend_from_slice(&block.body);
-    let response = init_request(server)
-        .await
-        .body(format!(
+    
+    let node_settings = server.node_settings.lock().await;
+    let request_body = if node_settings.pool_mining {
+        format!(
+            r#"{{"method":"submitblock","params":[{:?}]}}"#,
+            hex::encode(&serialized_block)
+        )
+    } else {
+        format!(
             r#"{{"method":"submitblock","params":[{:?}, {:?}]}}"#,
             hex::encode(&serialized_block),
-            server.node_settings.lock().await.miner_addr
-        ))
+            node_settings.miner_addr
+        )
+    };
+    
+    let response = init_request(server)
+        .await
+        .body(request_body)
         .send()
         .await?;
     let response: SubmitBlockResponse = serde_json::from_str(&response.text().await?)?;
