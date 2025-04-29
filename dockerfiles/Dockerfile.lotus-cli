@@ -29,7 +29,6 @@ RUN apt-get update && apt-get install -y \
     libqrencode-dev \
     && rm -rf /var/lib/apt/lists/*
 
-
 # Create CMake configuration file for Flatbuffers
 RUN mkdir -p /usr/lib/cmake/flatbuffers && \
     echo 'set(FLATBUFFERS_INCLUDE_DIR "/usr/include")' > /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
