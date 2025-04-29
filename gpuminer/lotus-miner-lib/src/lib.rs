@@ -325,7 +325,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     let log = server.log();
     let mut serialized_block = block.header.to_vec();
     serialized_block.extend_from_slice(&block.body);
-    log.bug(format!("BUG: serialized_block: {:?}", serialized_block));
+    // log.bug(format!("BUG: serialized_block: {:?}", serialized_block));
     
     // Extract all needed data from node_settings first, without holding the lock during request
     let (url, user, password, pool_mining, miner_addr) = {
