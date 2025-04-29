@@ -61,7 +61,7 @@ jobs:
           COMMITS_SINCE_TAG=$(git rev-list $LATEST_TAG..HEAD --count)
           echo "Commits since last tag: $COMMITS_SINCE_TAG"
           
-          if [[ "$COMMITS_SINCE_TAG" -gt 5 ]]; then
+          if [[ "$COMMITS_SINCE_TAG" -gt 0 ]]; then
             echo "should_bump=true" >> $GITHUB_OUTPUT
             echo "Version bump needed: $COMMITS_SINCE_TAG commits since last tag"
           else
