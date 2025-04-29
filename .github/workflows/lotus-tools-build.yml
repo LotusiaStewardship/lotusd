@@ -40,7 +40,12 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
-        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }})
+
+        # Build the Docker image
+        docker build -t lotus-seeder:local -f dockerfiles/Dockerfile.lotus-seeder .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-seeder:local)
         docker cp $container_id:/opt/lotus/bin/lotus-seeder ./artifacts/
         docker rm $container_id
 
@@ -105,7 +110,12 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
-        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }})
+
+        # Build the Docker image
+        docker build -t lotus-wallet:local -f dockerfiles/Dockerfile.lotus-wallet .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-wallet:local)
         docker cp $container_id:/opt/lotus/bin/lotus-wallet ./artifacts/
         docker rm $container_id
 
