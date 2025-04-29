@@ -7,15 +7,10 @@ on:
         required: true
         type: string
 
-# Global defaults for all jobs
-defaults:
-  run:
-    shell: bash
-
 jobs:
   build-lotus-seeder:
     name: 🌱 Build lotus-seeder
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
@@ -45,6 +40,9 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotus-seeder ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with buildx and load it into Docker
         docker buildx build --load -t lotus-seeder:local -f dockerfiles/Dockerfile.lotus-seeder .
@@ -77,7 +75,7 @@ jobs:
 
   build-lotus-wallet:
     name: 💼 Build lotus-wallet
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
@@ -107,6 +105,9 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotus-wallet ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with buildx and load it into Docker
         docker buildx build --load -t lotus-wallet:local -f dockerfiles/Dockerfile.lotus-wallet .

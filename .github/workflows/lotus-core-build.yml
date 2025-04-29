@@ -40,6 +40,9 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotusd ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with --load flag to ensure it's available locally
         docker buildx build --load -t lotus-node:local -f dockerfiles/Dockerfile.lotusd .
@@ -102,6 +105,9 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-cli:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotus-cli ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with proper output specification
         docker buildx build --load -t lotus-cli:local -f dockerfiles/Dockerfile.lotus-cli .
@@ -164,6 +170,9 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-tx:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotus-tx ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with proper output specification
         docker buildx build --load -t lotus-tx:local -f dockerfiles/Dockerfile.lotus-tx .

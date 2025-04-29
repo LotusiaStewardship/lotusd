@@ -40,6 +40,9 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotus-qt ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with --load flag to ensure it's available locally
         docker buildx build --load -t lotus-qt:local -f dockerfiles/Dockerfile.lotus-qt .
