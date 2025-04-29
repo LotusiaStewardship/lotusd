@@ -7,7 +7,7 @@ set(CMAKE_USER_MAKE_RULES_OVERRIDE
 )
 
 project(lotus
-	VERSION 8.3.15
+	VERSION 8.3.16
 	DESCRIPTION "Lotus is a full node implementation of the Lotus protocol."
 	HOMEPAGE_URL "https://lotusia.org"
 )
