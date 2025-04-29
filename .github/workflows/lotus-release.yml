@@ -1,4 +1,3 @@
-name: 🚀 Lotus Release
 
 on:
   workflow_call:

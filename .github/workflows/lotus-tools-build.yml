@@ -1,4 +1,3 @@
-name: 🔧 Lotus Tools Build
 
 on:
   workflow_call:
