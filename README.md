@@ -5,6 +5,11 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/LotusiaStewardship/lotusd">
+    <img src="https://img.shields.io/badge/Main%20Fork-LotusiaStewardship-blue" alt="Main Fork: LotusiaStewardship">
+  </a>
+</p>
+<p align="center">
   <a href="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml">
     <img src="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml/badge.svg?branch=master" alt="CI Status">
   </a>
@@ -26,9 +31,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LotusiaStewardship/lotusd">
-    <img src="https://img.shields.io/badge/Main%20Fork-LotusiaStewardship-blue" alt="Main Fork: LotusiaStewardship">
-  </a>
   <a href="https://github.com/Boblepointu/lotusd">
     <img src="https://img.shields.io/badge/Development-Boblepointu-orange" alt="Development: Boblepointu">
   </a>
