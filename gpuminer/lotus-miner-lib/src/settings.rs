@@ -21,6 +21,7 @@ pub struct ConfigSettings {
     pub mine_to_address: String,
     pub kernel_size: i64,
     pub gpu_index: i64,
+    pub pool_mining: bool,
 }
 
 const DEFAULT_CONFIG_FILE_CONTENT: &str = r#"mine_to_address = "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt"
@@ -30,6 +31,7 @@ rpc_user = "lotus"
 rpc_password = "lotus"
 gpu_index = 0
 kernel_size = 23
+pool_mining = false
 "#;
 
 impl ConfigSettings {
@@ -54,6 +56,7 @@ impl ConfigSettings {
         s.set_default("kernel_size", DEFAULT_KERNEL_SIZE)?;
         s.set_default("gpu_index", DEFAULT_GPU_INDEX)?;
         s.set_default("mine_to_address", "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt")?;
+        s.set_default("pool_mining", false)?;
 
         // Load config from file
         let default_config = home_dir;
@@ -141,6 +144,11 @@ impl ConfigSettings {
         // Set the GPU index
         if let Some(gpu_index) = matches.value_of("gpu_index") {
             s.set("gpu_index", gpu_index.parse::<i64>().unwrap())?;
+        }
+        
+        // Set pool mining flag
+        if matches.is_present("pool_mining") {
+            s.set("pool_mining", true)?;
         }
 
         s.try_into()
