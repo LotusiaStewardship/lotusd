@@ -4,6 +4,57 @@
   </a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml">
+    <img src="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml/badge.svg?branch=master" alt="CI Status">
+  </a>
+  <a href="https://github.com/LotusiaStewardship/lotusd/releases/latest">
+    <img src="https://img.shields.io/github/v/release/LotusiaStewardship/lotusd" alt="Latest Release">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/github/license/LotusiaStewardship/lotusd" alt="License">
+  </a>
+  <a href="https://github.com/LotusiaStewardship/lotusd/issues">
+    <img src="https://img.shields.io/github/issues/LotusiaStewardship/lotusd" alt="Issues">
+  </a>
+  <a href="https://github.com/LotusiaStewardship/lotusd/network/members">
+    <img src="https://img.shields.io/github/forks/LotusiaStewardship/lotusd" alt="Forks">
+  </a>
+  <a href="https://github.com/LotusiaStewardship/lotusd/stargazers">
+    <img src="https://img.shields.io/github/stars/LotusiaStewardship/lotusd" alt="Stars">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/LotusiaStewardship/lotusd">
+    <img src="https://img.shields.io/badge/Main%20Fork-LotusiaStewardship-blue" alt="Main Fork: LotusiaStewardship">
+  </a>
+  <a href="https://github.com/Boblepointu/lotusd">
+    <img src="https://img.shields.io/badge/Development-Boblepointu-orange" alt="Development: Boblepointu">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml">
+    <img src="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml/badge.svg?branch=master" alt="CI Status">
+  </a>
+  <a href="https://github.com/Boblepointu/lotusd/releases/latest">
+    <img src="https://img.shields.io/github/v/release/Boblepointu/lotusd" alt="Latest Release">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/github/license/Boblepointu/lotusd" alt="License">
+  </a>
+  <a href="https://github.com/Boblepointu/lotusd/issues">
+    <img src="https://img.shields.io/github/issues/Boblepointu/lotusd" alt="Issues">
+  </a>
+  <a href="https://github.com/Boblepointu/lotusd/network/members">
+    <img src="https://img.shields.io/github/forks/Boblepointu/lotusd" alt="Forks">
+  </a>
+  <a href="https://github.com/Boblepointu/lotusd/stargazers">
+    <img src="https://img.shields.io/github/stars/Boblepointu/lotusd" alt="Stars">
+  </a>
+</p>
+
 # Lotus: Digital Currency for Human Relationships
 
 The goal of Lotus is to foster human relationships, build reciprocal culture, and bolster societal value production online and offline. We believe this is a civilization-changing technology which will dramatically increase human flourishing, freedom, and prosperity. The project aims to achieve this goal by implementing optimizations and protocol upgrades that enable peer-to-peer digital cash to scale many orders of magnitude beyond current limits.
@@ -26,11 +77,27 @@ Reciprocity is the core of all human relationships. The Lotus currency facilitat
 
 Lotus is a fork of Bitcoin ABC that has been enhanced and modified to support the Lotusia vision. The blockchain is highly scalable, permissionless, and designed to adapt to the growing needs of the ecosystem.
 
+## Mining Lotus
+
+Lotus uses Proof-of-Work for issuance. You can participate in securing the network and earn newly minted Lotus through mining.
+
+### GPU Mining
+
+For optimal mining performance, we provide a dedicated GPU miner that utilizes OpenCL to efficiently mine Lotus blocks on your graphics card. Our GPU miner supports both solo mining and pool mining configurations.
+
+Key features:
+- OpenCL-based for high-performance mining
+- Compatible with both AMD and NVIDIA GPUs
+- Supports both solo and pool mining
+- Easy configuration through command line or config file
+
+For detailed instructions on setting up and using the GPU miner, see the [GPU Mining Documentation](gpuminer/README.md).
+
 ## Community Resources
 
 - Website: [https://lotusia.org/](https://lotusia.org/)
 - Block Explorer: [https://explorer.lotusia.org/](https://explorer.lotusia.org/)
-- Telegram Channel: [https://t.me/givelotus](https://t.me/givelotus)
+- Telegram Channel: [https://t.me/givelotus](https://t.me/LotusiaStewardship)
 
 ## License
 
