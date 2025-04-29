@@ -37,29 +37,31 @@ jobs:
     - name: Set repository owner
       run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
-    - name: Build container
+    - name: Build and extract binary
       run: |
-        docker build -t ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }} \
-          -f dockerfiles/Dockerfile.lotus-seeder .
-
-    - name: Extract binary
-      run: |
+        # Create artifacts directory
         mkdir -p ./artifacts
-        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }})
+
+        # Build the Docker image
+        docker build -t lotus-seeder:local -f dockerfiles/Dockerfile.lotus-seeder .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-seeder:local)
         docker cp $container_id:/opt/lotus/bin/lotus-seeder ./artifacts/
         docker rm $container_id
 
-    - name: Tag and push to registry
-      if: github.event_name != 'pull_request'
-      run: |
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
+        # If not a PR, tag and push to registry
+        if [ "${{ github.event_name }}" != "pull_request" ]; then
+          # Tag for registry
+          docker tag lotus-seeder:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }}
+          docker tag lotus-seeder:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
+          docker tag lotus-seeder:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
           
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
+          # Push to registry
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
+        fi
 
     - name: Upload artifact
       if: github.event_name != 'pull_request'
@@ -97,29 +99,31 @@ jobs:
     - name: Set repository owner
       run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
-    - name: Build container
+    - name: Build and extract binary
       run: |
-        docker build -t ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }} \
-          -f dockerfiles/Dockerfile.lotus-wallet .
-
-    - name: Extract binary
-      run: |
+        # Create artifacts directory
         mkdir -p ./artifacts
-        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }})
+
+        # Build the Docker image
+        docker build -t lotus-wallet:local -f dockerfiles/Dockerfile.lotus-wallet .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-wallet:local)
         docker cp $container_id:/opt/lotus/bin/lotus-wallet ./artifacts/
         docker rm $container_id
 
-    - name: Tag and push to registry
-      if: github.event_name != 'pull_request'
-      run: |
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
+        # If not a PR, tag and push to registry
+        if [ "${{ github.event_name }}" != "pull_request" ]; then
+          # Tag for registry
+          docker tag lotus-wallet:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }}
+          docker tag lotus-wallet:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
+          docker tag lotus-wallet:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
           
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
+          # Push to registry
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
+        fi
 
     - name: Upload artifact
       if: github.event_name != 'pull_request'

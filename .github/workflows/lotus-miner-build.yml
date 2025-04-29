@@ -37,32 +37,32 @@ jobs:
     - name: Set repository owner
       run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
-    - name: Build container
+    - name: Build and extract artifacts
       run: |
-        docker build -t ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }} \
-          -f dockerfiles/Dockerfile.lotus-gpu-miner .
-
-    - name: Extract binary and kernels
-      run: |
+        # Create artifacts directory
         mkdir -p ./artifacts/kernels
 
-        # Extract binary and kernels
-        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }})
+        # Build the Docker image
+        docker build -t lotus-gpu-miner:local -f dockerfiles/Dockerfile.lotus-gpu-miner .
+
+        # Extract the binary and kernels from the local image
+        container_id=$(docker create lotus-gpu-miner:local)
         docker cp $container_id:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
         docker cp $container_id:/opt/lotus/kernels ./artifacts/
         docker rm $container_id
 
-    - name: Tag and push to registry
-      if: github.event_name != 'pull_request'
-      run: |
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+        # If not a PR, tag and push to registry
+        if [ "${{ github.event_name }}" != "pull_request" ]; then
+          # Tag for registry
+          docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
+          docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
+          docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
           
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+          # Push to registry
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+        fi
 
     - name: Upload artifacts
       if: github.event_name != 'pull_request'
