@@ -37,6 +37,48 @@ You can also enable pool mining in the config file:
 pool_mining = true
 ```
 
+# Quick Start Examples
+
+## Using Pre-built Binary
+
+You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/givelotus/lotusd/releases).
+
+### Example: Mining on a Pool
+
+```bash
+# Replace with your own mining pool details and address
+# Note: For pool mining, username and password can be any dummy values
+lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+```
+
+### Example: Solo Mining
+
+```bash
+lotus-miner-cli --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://127.0.0.1:10604 --rpc-user your_username --mine-to-address your_lotus_address --kernel-size 21
+```
+
+## Using Docker
+
+You can also run the Lotus GPU Miner using Docker:
+
+```bash
+# Pull the Docker image
+docker pull givelotus/lotus-gpu-miner:latest
+
+# Run the container with pool mining
+# Note: For pool mining, username and password can be any dummy values
+docker run --gpus all -it --rm givelotus/lotus-gpu-miner:latest \
+  lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner \
+  --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+
+# Run the container for solo mining
+docker run --gpus all -it --rm givelotus/lotus-gpu-miner:latest \
+  lotus-miner-cli --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://your_node_ip:10604 --rpc-user your_username \
+  --mine-to-address your_lotus_address --kernel-size 21
+```
+
+Note: The `--gpus all` flag requires the NVIDIA Container Toolkit to be installed if you're using NVIDIA GPUs. For AMD GPUs, you may need a different configuration.
+
 # Build & Run
 
 ## Windows
