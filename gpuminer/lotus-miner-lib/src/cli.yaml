@@ -42,5 +42,6 @@ args:
             takes_value: true
     - pool_mining:
             long: poolmining
+            short: m
             help: Enable pool mining mode
             takes_value: false
