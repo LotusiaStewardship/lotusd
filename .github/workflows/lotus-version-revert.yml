@@ -1,4 +1,3 @@
-
 on:
   workflow_call:
     inputs:
@@ -47,7 +46,10 @@ jobs:
         git commit -m "Revert version bump to ${{ inputs.current_version }} due to build failure"
         
         # Pull latest changes with rebase strategy to avoid merge commits
-        git pull --rebase origin master
+        git fetch origin master
+        
+        # Rebase our changes on top of the latest master
+        git rebase origin/master
         
         # Push with force-with-lease for safety
         git push --force-with-lease origin HEAD:master
