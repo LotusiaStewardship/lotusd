@@ -25,10 +25,10 @@ defaults:
     shell: bash
 
 jobs:
-  # Check the current version first but don't modify it yet
+  # Check current version
   version-check:
     name: 🔍 Check Version
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       current_version: ${{ steps.get-version.outputs.version }}
       should_bump: ${{ steps.check-bump.outputs.should_bump }}
@@ -46,7 +46,6 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Current version: $VERSION"
 
-    # Determine if we should bump the version
     - name: Check if version bump is needed
       id: check-bump
       run: |
@@ -55,7 +54,6 @@ jobs:
         echo "Latest tag: $LATEST_TAG"
 
         if [[ "$LATEST_TAG" == "none" ]]; then
-          # No tags exist yet, definitely bump
           echo "should_bump=true" >> $GITHUB_OUTPUT
           echo "Version bump needed: No tags exist yet"
         else
@@ -64,7 +62,6 @@ jobs:
           echo "Commits since last tag: $COMMITS_SINCE_TAG"
           
           if [[ "$COMMITS_SINCE_TAG" -gt 5 ]]; then
-            # If more than 5 commits since last tag, bump the version
             echo "should_bump=true" >> $GITHUB_OUTPUT
             echo "Version bump needed: $COMMITS_SINCE_TAG commits since last tag"
           else
@@ -73,12 +70,11 @@ jobs:
           fi
         fi
 
-  # After version check, bump the version if needed
+  # Bump version if needed
   version-bump:
     name: 📈 Bump Version
     needs: [ version-check ]
-    runs-on: [ ubuntu-latest ]
-    # Only run on the master branch, not on pull requests or tags, and only if we should bump
+    runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
     outputs:
       new_version: ${{ steps.bump-version.outputs.new_version }}
@@ -90,7 +86,6 @@ jobs:
       with:
         fetch-depth: 0
 
-    # Bump the patch version (8.3.4 -> 8.3.5)
     - name: Bump version
       id: bump-version
       run: |
@@ -110,7 +105,6 @@ jobs:
         # Update PKGBUILD
         sed -i "s/pkgver=$CURRENT_VERSION/pkgver=$NEW_VERSION/" contrib/aur/lotus/PKGBUILD
 
-    # Commit and push the version changes
     - name: Commit version bump
       id: commit
       run: |
@@ -119,25 +113,18 @@ jobs:
 
         git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
         git commit -m "Bump version to ${{ steps.bump-version.outputs.new_version }}"
-
-        # Push directly to master - make sure branch protection allows this
         git push origin HEAD:master
 
         echo "version_bumped=true" >> $GITHUB_OUTPUT
         echo "Version bumped and committed successfully"
 
-  # Prepare for potential revert, can run in parallel with version-bump
+  # Prepare for potential revert
   prepare-revert:
     name: 🔄 Prepare Revert
     needs: [ version-check ]
-    runs-on: [ ubuntu-latest ]
-    if: |
-      always() &&
-      github.ref == 'refs/heads/master' && 
-      github.event_name == 'push' && 
-      needs.version-check.outputs.should_bump == 'true'
+    runs-on: ubuntu-latest
+    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
     outputs:
-      revert_status: ${{ steps.mark-status.outputs.revert_status }}
       prev_version: ${{ steps.calculate-prev-version.outputs.prev_version }}
 
     steps:
@@ -147,7 +134,7 @@ jobs:
         CURRENT_VERSION="${{ needs.version-check.outputs.current_version }}"
         # Split version into components
         IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-        # Calculate the previous version (for potential revert)
+        # Calculate the previous version
         PREV_PATCH=$((PATCH - 1))
         PREV_VERSION="$MAJOR.$MINOR.$PREV_PATCH"
         echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT

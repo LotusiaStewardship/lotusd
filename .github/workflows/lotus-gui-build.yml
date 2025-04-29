@@ -8,16 +8,10 @@ on:
         required: true
         type: string
 
-# Global defaults for all jobs
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  # Build the Qt GUI wallet
   build-lotus-qt:
     name: 🖼️ Build lotus-qt
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
@@ -30,30 +24,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Prepare buildx cache directories
-      run: |
-        sudo mkdir -p /tmp/.buildx-cache /tmp/.buildx-cache-new
-        sudo chmod -R 777 /tmp/.buildx-cache /tmp/.buildx-cache-new
-
-        # Create a properly formatted index.json file for buildx
-        cat > /tmp/.buildx-cache/index.json << 'EOF'
-        {
-          "manifests": [],
-          "mediaType": "application/vnd.oci.image.index.v1+json",
-          "schemaVersion": 2
-        }
-        EOF
-
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-lotus-qt-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-lotus-qt-
-
     - name: Set lowercase repository owner
-      id: lowercase_repo_owner
       run: |
         echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
@@ -65,70 +36,47 @@ jobs:
         username: ${{ github.repository_owner }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Build lotus-qt image locally first
-    - name: Build lotus-qt Docker image
+    # Build and load the image locally
+    - name: Build lotus-qt
       uses: docker/build-push-action@v4
-      if: github.event_name != 'pull_request'
       with:
         context: .
         file: dockerfiles/Dockerfile.lotus-qt
-        push: false # Don't push to registry yet
-        load: true # Load into local Docker daemon
+        load: true
         tags: |
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }}
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-        outputs: type=docker
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
-    # Move the cache
-    - name: Move cache
-      run: |
-        rm -rf /tmp/.buildx-cache
-        mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
-
-    # Extract binary from the local image
-    - name: Extract lotus-qt from Docker image
-      if: github.event_name != 'pull_request'
+    # Extract binary
+    - name: Extract binary
       run: |
         mkdir -p ./artifacts
 
-        # Create a container from the local image
-        CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }})
-
-        # Extract the binary
+        # Create a container and extract the binary
+        CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }})
         docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-qt ./artifacts/
         docker rm -v $CONTAINER_ID
 
-        # Verify the file was extracted
+        # Verify extraction
         ls -la ./artifacts/
 
-        # Check the binary file size to make sure it's not empty
-        filesize=$(stat -c%s "./artifacts/lotus-qt" 2>/dev/null || echo "0")
-        echo "Binary file size: $filesize bytes"
-
-        if [ "$filesize" -eq 0 ]; then
-          echo "Error: Extracted binary file is empty"
-          exit 1
-        fi
-
-    # Now push to registry after successful extraction
-    - name: Push lotus-qt to registry
+    # Push to registry
+    - name: Push to registry
       if: github.event_name != 'pull_request'
       uses: docker/build-push-action@v4
       with:
         context: .
         file: dockerfiles/Dockerfile.lotus-qt
-        push: true # Now push to registry
+        push: true
         tags: |
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-from: type=gha
 
     # Upload binary as artifact
-    - name: Upload lotus-qt as artifact
+    - name: Upload artifact
       if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@v4
       with:
