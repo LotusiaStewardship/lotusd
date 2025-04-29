@@ -85,13 +85,16 @@ docker pull ghcr.io/boblepointu/lotus-gpu-miner:latest
 
 # Run the container with pool mining
 # Note: For pool mining, username and password can be any dummy values
-docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
-  lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner \
+docker run --gpus all -it --rm \
+  -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
+  -v /etc/OpenCL:/etc/OpenCL \
+  ghcr.io/boblepointu/lotus-gpu-miner:latest \
+  --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner \
   --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
 
 # Run the container for solo mining
 docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
-  lotus-miner-cli --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://your_node_ip:10604 --rpc-user your_username \
+  --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://your_node_ip:10604 --rpc-user your_username \
   --mine-to-address your_lotus_address --kernel-size 21
 ```
 
