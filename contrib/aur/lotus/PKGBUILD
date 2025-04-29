@@ -1,7 +1,7 @@
 # Maintainer: Josh Ellithorpe <quest@mac.com>
 
 pkgname=lotusd
-pkgver=8.3.18
+pkgver=8.3.19
 pkgrel=0
 pkgdesc="Lotus with lotusd, lotus-tx, lotus-seeder and lotus-cli"
 arch=('i686' 'x86_64')
