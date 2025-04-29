@@ -42,8 +42,8 @@ jobs:
         # Create artifacts directory
         mkdir -p ./artifacts/kernels
 
-        # Build the Docker image
-        docker build -t lotus-gpu-miner:local -f dockerfiles/Dockerfile.lotus-gpu-miner .
+        # Build the Docker image with --load flag to ensure it's available locally
+        docker buildx build --load -t lotus-gpu-miner:local -f dockerfiles/Dockerfile.lotus-gpu-miner .
 
         # Extract the binary and kernels from the local image
         container_id=$(docker create lotus-gpu-miner:local)

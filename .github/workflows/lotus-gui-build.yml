@@ -42,8 +42,8 @@ jobs:
         # Create artifacts directory
         mkdir -p ./artifacts
 
-        # Build the Docker image
-        docker build -t lotus-qt:local -f dockerfiles/Dockerfile.lotus-qt .
+        # Build the Docker image with --load flag to ensure it's available locally
+        docker buildx build --load -t lotus-qt:local -f dockerfiles/Dockerfile.lotus-qt .
 
         # Extract the binary from the local image
         container_id=$(docker create lotus-qt:local)
