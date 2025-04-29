@@ -261,22 +261,37 @@ async fn mine_some_nonces(server: ServerRef) -> Result<()> {
     })
     .await
     .unwrap()?;
-    let mut block_state = server.block_state.lock().await;
+    
+    // Handle found nonce and submit block if needed
     if let Some(nonce) = nonce {
         work.set_big_nonce(nonce);
         log.info(format!("Block hash below target with nonce: {}", nonce));
-        if let Some(mut block) = block_state.current_block.take() {
-            block.header = *work.header();
+        
+        let block = {
+            // Only acquire the lock for the minimum time needed
+            let mut block_state = server.block_state.lock().await;
+            if let Some(mut block) = block_state.current_block.take() {
+                block.header = *work.header();
+                Some(block)
+            } else {
+                log.bug("BUG: Found nonce but no block! Contact the developers.");
+                None
+            }
+        }; // Lock is released here
+        
+        // Submit block outside of any locks
+        if let Some(block) = block {
             if let Err(err) = submit_block(&server, &block).await {
                 log.error(format!(
                     "submit_block error: {:?}. This could be a connection issue.",
                     err
                 ));
             }
-        } else {
-            log.bug("BUG: Found nonce but no block! Contact the developers.");
         }
     }
+    
+    // Update state after submission
+    let mut block_state = server.block_state.lock().await;
     block_state.current_work.nonce_idx += 1;
     server
         .metrics_nonces
@@ -310,9 +325,21 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     let log = server.log();
     let mut serialized_block = block.header.to_vec();
     serialized_block.extend_from_slice(&block.body);
+    log.bug(format!("BUG: serialized_block: {:?}", serialized_block));
     
-    let node_settings = server.node_settings.lock().await;
-    let request_body = if node_settings.pool_mining {
+    // Extract all needed data from node_settings first, without holding the lock during request
+    let (url, user, password, pool_mining, miner_addr) = {
+        let node_settings = server.node_settings.lock().await;
+        (
+            node_settings.bitcoind_url.clone(),
+            node_settings.bitcoind_user.clone(), 
+            node_settings.bitcoind_password.clone(),
+            node_settings.pool_mining,
+            node_settings.miner_addr.clone()
+        )
+    };
+    
+    let request_body = if !pool_mining {
         format!(
             r#"{{"method":"submitblock","params":[{:?}]}}"#,
             hex::encode(&serialized_block)
@@ -321,15 +348,17 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         format!(
             r#"{{"method":"submitblock","params":[{:?}, {:?}]}}"#,
             hex::encode(&serialized_block),
-            node_settings.miner_addr
+            miner_addr
         )
     };
     
-    let response = init_request(server)
-        .await
+    // Create request without using init_request which would try to lock node_settings again
+    let response = server.client.post(&url)
+        .basic_auth(user, Some(password))
         .body(request_body)
         .send()
         .await?;
+        
     let response: SubmitBlockResponse = serde_json::from_str(&response.text().await?)?;
     match response.result {
         None => log.info("BLOCK ACCEPTED!"),
