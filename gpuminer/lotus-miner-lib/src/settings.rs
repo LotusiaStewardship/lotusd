@@ -23,7 +23,7 @@ pub struct ConfigSettings {
     pub gpu_index: i64,
 }
 
-const DEFAULT_CONFIG_FILE_CONTENT: &str = r#"mine_to_address = ""
+const DEFAULT_CONFIG_FILE_CONTENT: &str = r#"mine_to_address = "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt"
 rpc_url = "http://127.0.0.1:10604"
 rpc_poll_interval = 3
 rpc_user = "lotus"
@@ -53,6 +53,7 @@ impl ConfigSettings {
         s.set_default("rpc_password", DEFAULT_PASSWORD)?;
         s.set_default("kernel_size", DEFAULT_KERNEL_SIZE)?;
         s.set_default("gpu_index", DEFAULT_GPU_INDEX)?;
+        s.set_default("mine_to_address", "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt")?;
 
         // Load config from file
         let default_config = home_dir;
@@ -128,12 +129,8 @@ impl ConfigSettings {
                 .map(|mine_to_address| mine_to_address.is_empty())
                 .unwrap_or(true)
         {
-            return Err(ConfigError::Message(format!(
-                "Must set mine_to_address config option. You can find it in {}.toml",
-                std::fs::canonicalize(&config_path)
-                    .map(|path| path.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| config_path.to_string())
-            )));
+            s.set("mine_to_address", "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt")?;
+            println!("No miner address specified. Using default: lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt");
         }
 
         // Set the bitcoin network
