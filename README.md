@@ -101,6 +101,20 @@ For optimal mining performance, we provide a dedicated GPU miner that utilizes O
 
 For detailed instructions on setting up and using the GPU miner, see the [GPU Mining Documentation](gpuminer/README.md).
 
+## 🚀 Quick Start Examples
+
+### 📦 Using Pre-built Binary
+
+You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases).
+
+#### 🏊‍♂️ Example: Mining on a Pool
+
+```bash
+# Replace with your own mining pool details and address
+# Note: For pool mining, username and password can be any dummy values
+lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+```
+
 ## 🌐 Community Resources
 
 - 🏠 Website: [https://lotusia.org/](https://lotusia.org/)

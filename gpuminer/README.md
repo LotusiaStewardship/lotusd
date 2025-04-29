@@ -73,7 +73,7 @@ You can download the latest release of the Lotus GPU Miner from the [Releases pa
 ```bash
 # Replace with your own mining pool details and address
 # Note: For pool mining, username and password can be any dummy values
-lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
 ```
 
 #### 🔒 Example: Solo Mining
@@ -96,7 +96,7 @@ docker run --gpus all -it --rm \
   -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
   -v /etc/OpenCL:/etc/OpenCL \
   ghcr.io/boblepointu/lotus-gpu-miner:latest \
-  --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner \
+  --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner \
   --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
 
 # Run the container for solo mining
@@ -193,7 +193,7 @@ Follow these steps to set up all dependencies needed for running the Lotus GPU M
      -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
      -v /etc/OpenCL:/etc/OpenCL \
      ghcr.io/boblepointu/lotus-gpu-miner:latest \
-     --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner \
+     --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner \
      --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
    ```
 
