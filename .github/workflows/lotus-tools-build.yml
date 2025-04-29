@@ -8,16 +8,10 @@ on:
         required: true
         type: string
 
-# Global defaults for all jobs
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  # Build the DNS seeder utility
   build-lotus-seeder:
     name: 🌱 Build lotus-seeder
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
@@ -27,37 +21,12 @@ jobs:
       with:
         ref: master
 
-    - name: Set up Docker Buildx
+    - name: Setup Docker
       uses: docker/setup-buildx-action@v2
-
-    - name: Prepare buildx cache directories
-      run: |
-        sudo mkdir -p /tmp/.buildx-cache /tmp/.buildx-cache-new
-        sudo chmod -R 777 /tmp/.buildx-cache /tmp/.buildx-cache-new
-
-        # Create a properly formatted index.json file for buildx
-        cat > /tmp/.buildx-cache/index.json << 'EOF'
-        {
-          "manifests": [],
-          "mediaType": "application/vnd.oci.image.index.v1+json",
-          "schemaVersion": 2
-        }
-        EOF
-
-    - name: Cache Docker layers
-      uses: actions/cache@v3
       with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-lotus-seeder-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-lotus-seeder-
+        install: true
 
-    - name: Set lowercase repository owner
-      id: lowercase_repo_owner
-      run: |
-        echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-    - name: Login to GitHub Container Registry
+    - name: Docker registry login
       if: github.event_name != 'pull_request'
       uses: docker/login-action@v2
       with:
@@ -65,70 +34,34 @@ jobs:
         username: ${{ github.repository_owner }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Build lotus-seeder image locally first
-    - name: Build lotus-seeder Docker image
-      uses: docker/build-push-action@v4
-      if: github.event_name != 'pull_request'
-      with:
-        context: .
-        file: dockerfiles/Dockerfile.lotus-seeder
-        push: false # Don't push to registry yet
-        load: true # Load into local Docker daemon
-        tags: |
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }}
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-        outputs: type=docker
+    - name: Set repository owner
+      run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
-    # Move the cache
-    - name: Move cache
+    - name: Build container
       run: |
-        rm -rf /tmp/.buildx-cache
-        mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+        docker build -t ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }} \
+          -f dockerfiles/Dockerfile.lotus-seeder .
 
-    # Extract binary from the local image
-    - name: Extract lotus-seeder from Docker image
-      if: github.event_name != 'pull_request'
+    - name: Extract binary
       run: |
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotus-seeder ./artifacts/
+        docker rm $container_id
 
-        # Create a container from the local image
-        CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }})
-
-        # Extract the binary
-        docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-seeder ./artifacts/
-        docker rm -v $CONTAINER_ID
-
-        # Verify the file was extracted
-        ls -la ./artifacts/
-
-        # Check the binary file size to make sure it's not empty
-        filesize=$(stat -c%s "./artifacts/lotus-seeder" 2>/dev/null || echo "0")
-        echo "Binary file size: $filesize bytes"
-
-        if [ "$filesize" -eq 0 ]; then
-          echo "Error: Extracted binary file is empty"
-          exit 1
-        fi
-
-    # Now push to registry after successful extraction
-    - name: Push lotus-seeder to registry
+    - name: Tag and push to registry
       if: github.event_name != 'pull_request'
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        file: dockerfiles/Dockerfile.lotus-seeder
-        push: true # Now push to registry
-        tags: |
+      run: |
+        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }} \
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }}
+        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }} \
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
+          
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:${{ inputs.version }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:sha-${{ github.sha }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-seeder:latest
 
-    # Upload binary as artifact
-    - name: Upload lotus-seeder as artifact
+    - name: Upload artifact
       if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@v4
       with:
@@ -136,10 +69,9 @@ jobs:
         path: ./artifacts/lotus-seeder
         retention-days: 14
 
-  # Build the wallet utility
   build-lotus-wallet:
     name: 💼 Build lotus-wallet
-    runs-on: [ ubuntu-latest ]
+    runs-on: ubuntu-latest
     outputs:
       build_status: ${{ job.status }}
 
@@ -149,37 +81,12 @@ jobs:
       with:
         ref: master
 
-    - name: Set up Docker Buildx
+    - name: Setup Docker
       uses: docker/setup-buildx-action@v2
-
-    - name: Prepare buildx cache directories
-      run: |
-        sudo mkdir -p /tmp/.buildx-cache /tmp/.buildx-cache-new
-        sudo chmod -R 777 /tmp/.buildx-cache /tmp/.buildx-cache-new
-
-        # Create a properly formatted index.json file for buildx
-        cat > /tmp/.buildx-cache/index.json << 'EOF'
-        {
-          "manifests": [],
-          "mediaType": "application/vnd.oci.image.index.v1+json",
-          "schemaVersion": 2
-        }
-        EOF
-
-    - name: Cache Docker layers
-      uses: actions/cache@v3
       with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-lotus-wallet-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-lotus-wallet-
+        install: true
 
-    - name: Set lowercase repository owner
-      id: lowercase_repo_owner
-      run: |
-        echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-    - name: Login to GitHub Container Registry
+    - name: Docker registry login
       if: github.event_name != 'pull_request'
       uses: docker/login-action@v2
       with:
@@ -187,70 +94,34 @@ jobs:
         username: ${{ github.repository_owner }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Build lotus-wallet image locally first
-    - name: Build lotus-wallet Docker image
-      uses: docker/build-push-action@v4
-      if: github.event_name != 'pull_request'
-      with:
-        context: .
-        file: dockerfiles/Dockerfile.lotus-wallet
-        push: false # Don't push to registry yet
-        load: true # Load into local Docker daemon
-        tags: |
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }}
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-        outputs: type=docker
+    - name: Set repository owner
+      run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
-    # Move the cache
-    - name: Move cache
+    - name: Build container
       run: |
-        rm -rf /tmp/.buildx-cache
-        mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+        docker build -t ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }} \
+          -f dockerfiles/Dockerfile.lotus-wallet .
 
-    # Extract binary from the local image
-    - name: Extract lotus-wallet from Docker image
-      if: github.event_name != 'pull_request'
+    - name: Extract binary
       run: |
         mkdir -p ./artifacts
+        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }})
+        docker cp $container_id:/opt/lotus/bin/lotus-wallet ./artifacts/
+        docker rm $container_id
 
-        # Create a container from the local image
-        CONTAINER_ID=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }})
-
-        # Extract the binary
-        docker cp $CONTAINER_ID:/opt/lotus/bin/lotus-wallet ./artifacts/
-        docker rm -v $CONTAINER_ID
-
-        # Verify the file was extracted
-        ls -la ./artifacts/
-
-        # Check the binary file size to make sure it's not empty
-        filesize=$(stat -c%s "./artifacts/lotus-wallet" 2>/dev/null || echo "0")
-        echo "Binary file size: $filesize bytes"
-
-        if [ "$filesize" -eq 0 ]; then
-          echo "Error: Extracted binary file is empty"
-          exit 1
-        fi
-
-    # Now push to registry after successful extraction
-    - name: Push lotus-wallet to registry
+    - name: Tag and push to registry
       if: github.event_name != 'pull_request'
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        file: dockerfiles/Dockerfile.lotus-wallet
-        push: true # Now push to registry
-        tags: |
+      run: |
+        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }} \
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }}
+        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }} \
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
+          
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:${{ inputs.version }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:sha-${{ github.sha }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-wallet:latest
 
-    # Upload binary as artifact
-    - name: Upload lotus-wallet as artifact
+    - name: Upload artifact
       if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@v4
       with:
