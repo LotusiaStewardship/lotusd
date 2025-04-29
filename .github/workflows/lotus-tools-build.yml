@@ -42,8 +42,8 @@ jobs:
         # Create artifacts directory
         mkdir -p ./artifacts
 
-        # Build the Docker image
-        docker build -t lotus-seeder:local -f dockerfiles/Dockerfile.lotus-seeder .
+        # Build the Docker image with buildx and load it into Docker
+        docker buildx build --load -t lotus-seeder:local -f dockerfiles/Dockerfile.lotus-seeder .
 
         # Extract the binary from the local image
         container_id=$(docker create lotus-seeder:local)
@@ -104,8 +104,8 @@ jobs:
         # Create artifacts directory
         mkdir -p ./artifacts
 
-        # Build the Docker image
-        docker build -t lotus-wallet:local -f dockerfiles/Dockerfile.lotus-wallet .
+        # Build the Docker image with buildx and load it into Docker
+        docker buildx build --load -t lotus-wallet:local -f dockerfiles/Dockerfile.lotus-wallet .
 
         # Extract the binary from the local image
         container_id=$(docker create lotus-wallet:local)
