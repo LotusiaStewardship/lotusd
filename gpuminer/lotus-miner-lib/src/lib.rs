@@ -207,20 +207,25 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
             return Ok(());
         }
     };
+    let node_settings = server.node_settings.lock().await;
     let block = create_block(&unsolved_block);
     if let Some(current_block) = &block_state.current_block {
         if current_block.prev_hash() != block.prev_hash() {
             log.info(format!(
-                "Switched to new chain tip: {}",
-                display_hash(&block.prev_hash())
+                "Switched to new chain tip: {} (mining to address: {})",
+                display_hash(&block.prev_hash()),
+                node_settings.miner_addr
             ));
         }
     } else {
         log.info(format!(
-            "Started mining on chain tip: {}",
-            display_hash(&block.prev_hash())
+            "Started mining on chain tip: {} (mining to address: {})",
+            display_hash(&block.prev_hash()),
+            node_settings.miner_addr
         ));
     }
+    drop(node_settings);
+    
     block_state.extra_nonce += 1;
     block_state.next_block = Some(block);
     Ok(())
@@ -308,19 +313,27 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     let log = server.log();
     let mut serialized_block = block.header.to_vec();
     serialized_block.extend_from_slice(&block.body);
+    
+    // Get the miner address from node settings
+    let node_settings = server.node_settings.lock().await;
+    let miner_address = &node_settings.miner_addr;
+    
     let response = init_request(server)
         .await
         .body(format!(
-            r#"{{"method":"submitblock","params":[{:?}]}}"#,
-            hex::encode(&serialized_block)
+            r#"{{"method":"submitblock","params":[{:?}],"miner":{:?}}}"#,
+            hex::encode(&serialized_block),
+            miner_address
         ))
         .send()
         .await?;
     let response: SubmitBlockResponse = serde_json::from_str(&response.text().await?)?;
     match response.result {
-        None => log.info("BLOCK ACCEPTED!"),
+        None => {
+            log.info(format!("BLOCK ACCEPTED! Submitted with miner address: {}", miner_address));
+        },
         Some(reason) => {
-            log.error(format!("REJECTED BLOCK: {}", reason));
+            log.error(format!("REJECTED BLOCK: {} (submitted with miner address: {})", reason, miner_address));
             if reason == "inconclusive" {
                 log.warn(
                     "This is an orphan race; might be fixed by lowering rpc_poll_interval or \
