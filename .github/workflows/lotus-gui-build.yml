@@ -37,29 +37,31 @@ jobs:
     - name: Set repository owner
       run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
-    - name: Build container
+    - name: Build and extract binary
       run: |
-        docker build -t ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }} \
-          -f dockerfiles/Dockerfile.lotus-qt .
-
-    - name: Extract binary
-      run: |
+        # Create artifacts directory
         mkdir -p ./artifacts
-        container_id=$(docker create ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }})
+
+        # Build the Docker image
+        docker build -t lotus-qt:local -f dockerfiles/Dockerfile.lotus-qt .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-qt:local)
         docker cp $container_id:/opt/lotus/bin/lotus-qt ./artifacts/
         docker rm $container_id
 
-    - name: Tag and push to registry
-      if: github.event_name != 'pull_request'
-      run: |
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }}
-        docker tag ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }} \
-          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:latest
+        # If not a PR, tag and push to registry
+        if [ "${{ github.event_name }}" != "pull_request" ]; then
+          # Tag for registry
+          docker tag lotus-qt:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }}
+          docker tag lotus-qt:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }}
+          docker tag lotus-qt:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:latest
           
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }}
-        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:latest
+          # Push to registry
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:${{ inputs.version }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:sha-${{ github.sha }}
+          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-qt:latest
+        fi
 
     - name: Upload artifact
       if: github.event_name != 'pull_request'
