@@ -6,11 +6,11 @@
   <a href="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml">
     <img src="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml/badge.svg?branch=master" alt="CI Status">
   </a>
-  <a href="https://github.com/givelotus/lotusd/releases/latest">
-    <img src="https://img.shields.io/github/v/release/givelotus/lotusd" alt="Latest Release">
+  <a href="https://github.com/LotusiaStewardship/lotusd/releases/latest">
+    <img src="https://img.shields.io/github/v/release/LotusiaStewardship/lotusd" alt="Latest Release">
   </a>
   <a href="../LICENSE">
-    <img src="https://img.shields.io/github/license/givelotus/lotusd" alt="License">
+    <img src="https://img.shields.io/github/license/LotusiaStewardship/lotusd" alt="License">
   </a>
   <a href="https://opencl.org">
     <img src="https://img.shields.io/badge/OpenCL-Compatible-brightgreen" alt="OpenCL Compatible">
@@ -59,7 +59,7 @@ pool_mining = true
 
 ### Using Pre-built Binary
 
-You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/givelotus/lotusd/releases).
+You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases).
 
 #### Example: Mining on a Pool
 
@@ -81,16 +81,16 @@ You can also run the Lotus GPU Miner using Docker:
 
 ```bash
 # Pull the Docker image
-docker pull givelotus/lotus-gpu-miner:latest
+docker pull ghcr.io/boblepointu/lotus-gpu-miner:latest
 
 # Run the container with pool mining
 # Note: For pool mining, username and password can be any dummy values
-docker run --gpus all -it --rm givelotus/lotus-gpu-miner:latest \
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
   lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner \
   --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
 
 # Run the container for solo mining
-docker run --gpus all -it --rm givelotus/lotus-gpu-miner:latest \
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
   lotus-miner-cli --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://your_node_ip:10604 --rpc-user your_username \
   --mine-to-address your_lotus_address --kernel-size 21
 ```
@@ -114,3 +114,4 @@ Assuming you are running the lotus daemon with server mode:
 2. Install the rust toolchain using rustup
 3. Build `lotus-miner` using `cargo build`
 4. Run the lotus miner with `./target/debug/lotus-miner --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>`
+
