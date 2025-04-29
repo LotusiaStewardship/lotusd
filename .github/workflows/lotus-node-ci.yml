@@ -114,8 +114,11 @@ jobs:
           git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
           git commit -m "Bump version to ${{ steps.bump-version.outputs.new_version }}"
           
-          # Push directly to master - make sure branch protection allows this
-          git push origin HEAD:master
+          # Pull latest changes with rebase strategy to avoid merge commits
+          git pull --rebase origin master
+          
+          # Push with force-with-lease for safety
+          git push --force-with-lease origin HEAD:master
           
           echo "version_bumped=true" >> $GITHUB_OUTPUT
           echo "Version bumped and committed successfully"
@@ -1193,7 +1196,12 @@ jobs:
           # Commit and push the reversion
           git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
           git commit -m "Revert version bump to ${{ steps.get-versions.outputs.current_version }} due to build failure"
-          git push origin HEAD:master
+          
+          # Pull latest changes with rebase strategy to avoid merge commits
+          git pull --rebase origin master
+          
+          # Push with force-with-lease for safety
+          git push --force-with-lease origin HEAD:master
           
           echo "Version revert completed. Reverted from ${{ steps.get-versions.outputs.current_version }} back to ${{ steps.get-versions.outputs.prev_version }}"
 
