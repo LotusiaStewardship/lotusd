@@ -1,5 +1,3 @@
-name: 🚀 Lotus Release
-
 on:
   workflow_call:
     inputs:
@@ -99,8 +97,18 @@ jobs:
         git config --global user.email "actions@github.com"
 
         VERSION="${{ inputs.version }}"
+        
+        # Fetch the latest changes first
+        git fetch origin master
+        
+        # Make sure we're on the latest master with rebase
+        git checkout master
+        git reset --hard origin/master
+        
+        # Create and push the tag
         git tag -a "v$VERSION" -m "Release v$VERSION"
         git push origin "v$VERSION"
+        
         echo "tag_created=true" >> $GITHUB_OUTPUT
         echo "Tag v$VERSION created and pushed successfully"
 

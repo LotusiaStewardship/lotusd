@@ -113,7 +113,7 @@ jobs:
         git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
         git commit -m "Bump version to ${{ steps.bump-version.outputs.new_version }}"
         
-        # Fetch latest changes
+        # Pull latest changes with rebase strategy to avoid merge commits
         git fetch origin master
         
         # Rebase our changes on top of the latest master
