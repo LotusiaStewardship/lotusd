@@ -209,25 +209,20 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
             return Ok(());
         }
     };
-    let node_settings = server.node_settings.lock().await;
     let block = create_block(&unsolved_block);
     if let Some(current_block) = &block_state.current_block {
         if current_block.prev_hash() != block.prev_hash() {
             log.info(format!(
-                "Switched to new chain tip: {} (mining to address: {})",
-                display_hash(&block.prev_hash()),
-                node_settings.miner_addr
+                "Switched to new chain tip: {}",
+                display_hash(&block.prev_hash())
             ));
         }
     } else {
         log.info(format!(
-            "Started mining on chain tip: {} (mining to address: {})",
-            display_hash(&block.prev_hash()),
-            node_settings.miner_addr
+            "Started mining on chain tip: {}",
+            display_hash(&block.prev_hash())
         ));
     }
-    drop(node_settings);
-    
     block_state.extra_nonce += 1;
     block_state.next_block = Some(block);
     Ok(())
