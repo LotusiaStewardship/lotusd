@@ -99,7 +99,7 @@ For detailed instructions on setting up and using the GPU miner, see the [GPU Mi
 
 - Website: [https://lotusia.org/](https://lotusia.org/)
 - Block Explorer: [https://explorer.lotusia.org/](https://explorer.lotusia.org/)
-- Telegram Channel: [https://t.me/givelotus](https://t.me/LotusiaStewardship)
+- Telegram Channel: [https://t.me/LotusiaStewardship](https://t.me/LotusiaStewardship)
 
 ## License
 
