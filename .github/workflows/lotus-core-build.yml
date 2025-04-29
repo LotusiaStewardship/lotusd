@@ -41,8 +41,8 @@ jobs:
         # Create artifacts directory
         mkdir -p ./artifacts
 
-        # Build the Docker image
-        docker build -t lotus-node:local -f dockerfiles/Dockerfile.lotusd .
+        # Build the Docker image with --load flag to ensure it's available locally
+        docker buildx build --load -t lotus-node:local -f dockerfiles/Dockerfile.lotusd .
 
         # Extract the binary from the local image
         container_id=$(docker create lotus-node:local)
