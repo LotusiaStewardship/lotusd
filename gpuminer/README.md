@@ -1,5 +1,5 @@
 <p align="center">
-  <h1>Lotus GPU Miner</h1>
+  <h1>🌸 Lotus GPU Miner 🌸</h1>
 </p>
 
 <p align="center">
@@ -17,9 +17,16 @@
   </a>
 </p>
 
+<div align="center">
+  
+  > *"Harness the power of your GPU for optimal Lotus mining"*
+  
+  <hr>
+</div>
+
 The Lotus GPU miner enables high-performance mining for the Lotus network, using OpenCL to harness the power of your GPU for optimal mining efficiency.
 
-## Configuration
+## ⚙️ Configuration
 
 Configuration may be specified on the command line or via a toml file. 
 The configuration file location by default is: `~/.lotus-miner/config.toml`
@@ -39,9 +46,9 @@ pool_mining = false
 
 See `lotus-miner --help` for a description of the parameters.
 
-## Mining Modes
+## 🏊‍♂️ Mining Modes
 
-### Pool Mining
+### 🌊 Pool Mining
 
 You can enable pool mining mode with the `--poolmining` flag. When this flag is set, the miner will submit blocks using a format compatible with mining pools.
 
@@ -55,13 +62,13 @@ You can also enable pool mining in the config file:
 pool_mining = true
 ```
 
-## Quick Start Examples
+## 🚀 Quick Start Examples
 
-### Using Pre-built Binary
+### 📦 Using Pre-built Binary
 
 You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases).
 
-#### Example: Mining on a Pool
+#### 🏊‍♂️ Example: Mining on a Pool
 
 ```bash
 # Replace with your own mining pool details and address
@@ -69,13 +76,13 @@ You can download the latest release of the Lotus GPU Miner from the [Releases pa
 lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://pool.golden-flux.fr --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
 ```
 
-#### Example: Solo Mining
+#### 🔒 Example: Solo Mining
 
 ```bash
 lotus-miner-cli --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://127.0.0.1:10604 --rpc-user your_username --mine-to-address your_lotus_address --kernel-size 21
 ```
 
-### Using Docker
+### 🐳 Using Docker
 
 You can also run the Lotus GPU Miner using Docker:
 
@@ -100,11 +107,11 @@ docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
 
 **Note**: The `--gpus all` flag requires the NVIDIA Container Toolkit to be installed if you're using NVIDIA GPUs. For AMD GPUs, you may need a different configuration.
 
-### Docker Setup on Ubuntu 24.04
+### 🛠️ Docker Setup on Ubuntu 24.04
 
 Follow these steps to set up all dependencies needed for running the Lotus GPU Miner in Docker on Ubuntu 24.04:
 
-#### NVIDIA GPU Setup
+#### 🟢 NVIDIA GPU Setup
 
 1. Install the NVIDIA driver if not already installed:
    ```bash
@@ -153,7 +160,7 @@ Follow these steps to set up all dependencies needed for running the Lotus GPU M
      ghcr.io/boblepointu/lotus-gpu-miner:latest clinfo
    ```
 
-#### AMD GPU Setup
+#### 🔴 AMD GPU Setup
 
 1. Install AMD ROCm drivers:
    ```bash
@@ -190,7 +197,7 @@ Follow these steps to set up all dependencies needed for running the Lotus GPU M
      --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
    ```
 
-#### Troubleshooting
+#### 🔍 Troubleshooting
 
 If you encounter `Platform::list: Error retrieving platform list: ApiWrapper(GetPlatformIdsPlatformListUnavailable(10))`, it means the Docker container cannot access OpenCL. Check that:
 
@@ -213,9 +220,9 @@ If you encounter `Platform::list: Error retrieving platform list: ApiWrapper(Get
    sudo apt install -y nvidia-opencl-icd
    ```
 
-## Build & Run
+## 🛠️ Build & Run
 
-### Windows
+### 🪟 Windows
 
 Assuming you are running the lotus daemon with server mode:
 
@@ -224,10 +231,16 @@ Assuming you are running the lotus daemon with server mode:
 3. Build `lotus-miner` using `cargo build`
 4. Run the lotus miner with `./target/debug/lotus-miner.exe --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>`
 
-### MacOS
+### 🍎 MacOS
 
 1. Install [rustup](https://rustup.rs/)
 2. Install the rust toolchain using rustup
 3. Build `lotus-miner` using `cargo build`
 4. Run the lotus miner with `./target/debug/lotus-miner --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>`
+
+---
+
+<p align="center">
+  <strong>🌸 Happy Mining! 🌸</strong>
+</p>
 
