@@ -33,6 +33,10 @@
 #include <malloc.h>
 #endif
 
+#include <wallet/rpc/wallet.h>
+#include <wallet/wallet.h>
+#include <txmempool.h>
+
 static RPCHelpMan validateaddress() {
     return RPCHelpMan{
         "validateaddress",
@@ -887,70 +891,57 @@ static RPCHelpMan getindexinfo() {
 
 static UniValue emptymempooltxfromwallets(const Config &config,
                                      const JSONRPCRequest &request) {
-    if (request.fHelp || request.params.size() != 0) {
-        throw std::runtime_error(
-            "emptymempooltxfromwallets\n"
-            "\nRemoves all in-mempool transactions from all loaded wallets.\n"
-            "\nResult:\n"
-            "{\n"
-            "  \"total_removed\": n,       (numeric) Total number of transactions removed\n"
-            "  \"wallets\": {              (object) Per-wallet removal details\n"
-            "    \"wallet_name\": n,       (numeric) Number of transactions removed from this wallet\n"
-            "    ...\n"
-            "  }\n"
-            "}\n"
-            "\nExamples:\n" +
-            HelpExampleCli("emptymempooltxfromwallets", "") +
-            HelpExampleRpc("emptymempooltxfromwallets", ""));
-    }
+    RPCHelpMan{
+        "emptymempooltxfromwallets",
+        "Remove all mempool transactions from all wallets.\n",
+        {},
+        RPCResult{"\"result\"    (object) Result with removal statistics\n"},
+        RPCExamples{HelpExampleCli("emptymempooltxfromwallets", "") +
+                    HelpExampleRpc("emptymempooltxfromwallets", "")},
+    }.Check(request);
 
-    // Get all transactions in the mempool
-    std::vector<uint256> mempool_txids;
-    {
-        LOCK(mempool.cs);
-        for (const auto& entry : mempool.mapTx) {
-            mempool_txids.push_back(entry.GetTx().GetId());
-        }
-    }
-
-    // Initialize result
+    // Initialize result object
     UniValue result(UniValue::VOBJ);
     UniValue wallet_results(UniValue::VOBJ);
+
+    // Track total number of removed transactions
     int total_removed = 0;
 
-#ifdef ENABLE_WALLET
-    // Process all loaded wallets
-    for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
-        if (!pwallet) continue;
-
-        LOCK(pwallet->cs_wallet);
-        int wallet_removed = 0;
-
-        // Check each mempool transaction against this wallet
-        for (const uint256& txid : mempool_txids) {
-            auto it = pwallet->mapWallet.find(txid);
-            if (it != pwallet->mapWallet.end()) {
-                CWalletTx& wtx = it->second;
-                if (wtx.InMempool()) {
+    // Access mempool
+    {
+        LOCK(::mempool.cs);
+        
+        // Loop through all wallets
+        for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
+            int wallet_removed = 0;
+            
+            LOCK(pwallet->cs_wallet);
+            
+            // Loop through mempool transactions
+            for (const CTxMemPoolEntry& entry : ::mempool.mapTx) {
+                const TxId& txid = entry.GetTxId();
+                
+                // Check if wallet has this transaction
+                auto it = pwallet->mapWallet.find(txid);
+                if (it != pwallet->mapWallet.end()) {
+                    // Remove from wallet
                     pwallet->RemoveWalletTransaction(txid);
                     wallet_removed++;
+                    total_removed++;
                 }
             }
-        }
-
-        // Save wallet state if needed
-        if (wallet_removed > 0) {
+            
+            // Save wallet state
             pwallet->WalletLogPrintf("Removed %d mempool transactions\n", wallet_removed);
-            pwallet->GetDBHandle().WriteBestBlock(chainActive.GetLocator());
+            pwallet->GetDBHandle().WriteBestBlock(::chainActive.GetLocator());
             wallet_results.pushKV(pwallet->GetName(), wallet_removed);
-            total_removed += wallet_removed;
         }
     }
-#endif
-
-    // Return results
+    
+    // Build result object
     result.pushKV("total_removed", total_removed);
-    result.pushKV("wallets", wallet_results);
+    result.pushKV("wallet_details", wallet_results);
+    
     return result;
 }
 
