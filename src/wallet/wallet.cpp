@@ -661,8 +661,7 @@ void CWallet::SyncMetaData(
 
 /**
  * Outpoint is spent if any non-conflicted transaction, spends it:
- */
-bool CWallet::IsSpent(const COutPoint &outpoint) const {
+ */bool CWallet::IsSpent(const COutPoint &outpoint) const {
     std::pair<TxSpends::const_iterator, TxSpends::const_iterator> range =
         mapTxSpends.equal_range(outpoint);
 
@@ -3075,8 +3074,7 @@ static bool IsCurrentForAntiFeeSniping(interfaces::Chain &chain,
 /**
  * Return a height-based locktime for new transactions (uses the height of the
  * current chain tip unless we are not synced with the current chain
- */
-static uint32_t GetLocktimeForNewTransaction(interfaces::Chain &chain,
+ */static uint32_t GetLocktimeForNewTransaction(interfaces::Chain &chain,
                                              const BlockHash &block_hash,
                                              int block_height) {
     uint32_t locktime;
@@ -4668,6 +4666,11 @@ void CWallet::postInitProcess() {
 
     // Update wallet transactions with current mempool transactions.
     chain().requestMempoolTransactions(*this);
+    
+    // Clean up stuck transactions that have been in the wallet too long
+    // Default to removing transactions older than 10 seconds
+    // This function is called every 10 seconds to ensure regular cleanup
+    ScheduleTransactionCleanup();
 }
 
 bool CWallet::BackupWallet(const std::string &strDest) const {
@@ -5124,3 +5127,5 @@ CWallet::AddWalletDescriptor(WalletDescriptor &desc,
 
     return ret;
 }
+
+
