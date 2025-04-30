@@ -321,6 +321,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     #[derive(Deserialize)]
     struct SubmitBlockResponse {
         result: Option<String>,
+        error: Option<serde_json::Value>,
     }
     let log = server.log();
     let mut serialized_block = block.header.to_vec();
@@ -339,15 +340,21 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         )
     };
     
+    // Format the block hex
+    let block_hex = hex::encode(&serialized_block);
+    
+    // Prepare request body JSON - always include miner_addr as the 2nd parameter when pool mining
+    // The server accepts 2 params for BIP22 compatibility, with 2nd param normally ignored
     let request_body = if !pool_mining {
         format!(
-            r#"{{"method":"submitblock","params":[{:?}]}}"#,
-            hex::encode(&serialized_block)
+            r#"{{"jsonrpc":"2.0","id":"miner","method":"submitblock","params":["{}"]}}"#,
+            block_hex
         )
     } else {
+        // For pool mining, pass the miner address as second parameter
         format!(
-            r#"{{"method":"submitblock","params":[{:?}, {:?}]}}"#,
-            hex::encode(&serialized_block),
+            r#"{{"jsonrpc":"2.0","id":"miner","method":"submitblock","params":["{}", "{}"]}}"#,
+            block_hex,
             miner_addr
         )
     };
@@ -355,26 +362,64 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     // Create request without using init_request which would try to lock node_settings again
     let response = server.client.post(&url)
         .basic_auth(user, Some(password))
+        .header("Content-Type", "application/json")
         .body(request_body)
         .send()
         .await?;
-        
-    let response: SubmitBlockResponse = serde_json::from_str(&response.text().await?)?;
-    match response.result {
-        None => log.info("BLOCK ACCEPTED!"),
-        Some(reason) => {
-            log.error(format!("REJECTED BLOCK: {}", reason));
-            if reason == "inconclusive" {
-                log.warn(
-                    "This is an orphan race; might be fixed by lowering rpc_poll_interval or \
-                          updating to the newest lotus-gpu-miner.",
-                );
-            } else {
-                log.error(
-                    "Something is misconfigured; make sure you run the latest \
-                          lotusd/Lotus-QT and lotus-gpu-miner.",
-                );
+    
+    let status = response.status();
+    let response_text = response.text().await?;
+    
+    // Attempt to parse the response
+    let response: Result<SubmitBlockResponse, _> = serde_json::from_str(&response_text);
+    
+    match response {
+        Ok(parsed) => {
+            match parsed.result {
+                None => {
+                    // Check if there was an error
+                    if let Some(error) = parsed.error {
+                        log.error(format!("REJECTED BLOCK: Error {:?}", error));
+                        log.error("Something is misconfigured; make sure you run the latest lotusd/Lotus-QT and lotus-gpu-miner.");
+                    } else {
+                        if pool_mining {
+                            log.info("SHARE ACCEPTED!");
+                        } else {
+                            log.info("BLOCK ACCEPTED!");
+                        }
+                    }
+                },
+                Some(reason) => {
+                    if reason.is_empty() {
+                        if pool_mining {
+                            log.info("SHARE ACCEPTED!");
+                        } else {
+                            log.info("BLOCK ACCEPTED!");
+                        }
+                    } else {
+                        if pool_mining {
+                            log.error(format!("REJECTED SHARE: {}", reason));
+                        } else {
+                            log.error(format!("REJECTED BLOCK: {}", reason));
+                        }
+                        if reason == "inconclusive" {
+                            log.warn(
+                                "This is an orphan race; might be fixed by lowering rpc_poll_interval or \
+                                updating to the newest lotus-gpu-miner.",
+                            );
+                        } else {
+                            log.error(
+                                "Something is misconfigured; make sure you run the latest \
+                                lotusd/Lotus-QT and lotus-gpu-miner.",
+                            );
+                        }
+                    }
+                }
             }
+        },
+        Err(e) => {
+            log.error(format!("Failed to parse response: {} (Status: {})\nResponse: {}", 
+                e, status, response_text));
         }
     }
     Ok(())
