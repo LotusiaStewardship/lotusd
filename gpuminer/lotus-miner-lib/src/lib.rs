@@ -389,6 +389,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                         }
                     }
                 },
+                
                 Some(reason) => {
                     if reason.is_empty() {
                         if pool_mining {
