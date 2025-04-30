@@ -885,6 +885,75 @@ static RPCHelpMan getindexinfo() {
     };
 }
 
+static UniValue emptymempooltxfromwallets(const Config &config,
+                                     const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() != 0) {
+        throw std::runtime_error(
+            "emptymempooltxfromwallets\n"
+            "\nRemoves all in-mempool transactions from all loaded wallets.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"total_removed\": n,       (numeric) Total number of transactions removed\n"
+            "  \"wallets\": {              (object) Per-wallet removal details\n"
+            "    \"wallet_name\": n,       (numeric) Number of transactions removed from this wallet\n"
+            "    ...\n"
+            "  }\n"
+            "}\n"
+            "\nExamples:\n" +
+            HelpExampleCli("emptymempooltxfromwallets", "") +
+            HelpExampleRpc("emptymempooltxfromwallets", ""));
+    }
+
+    // Get all transactions in the mempool
+    std::vector<uint256> mempool_txids;
+    {
+        LOCK(mempool.cs);
+        for (const auto& entry : mempool.mapTx) {
+            mempool_txids.push_back(entry.GetTx().GetId());
+        }
+    }
+
+    // Initialize result
+    UniValue result(UniValue::VOBJ);
+    UniValue wallet_results(UniValue::VOBJ);
+    int total_removed = 0;
+
+#ifdef ENABLE_WALLET
+    // Process all loaded wallets
+    for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
+        if (!pwallet) continue;
+
+        LOCK(pwallet->cs_wallet);
+        int wallet_removed = 0;
+
+        // Check each mempool transaction against this wallet
+        for (const uint256& txid : mempool_txids) {
+            auto it = pwallet->mapWallet.find(txid);
+            if (it != pwallet->mapWallet.end()) {
+                CWalletTx& wtx = it->second;
+                if (wtx.InMempool()) {
+                    pwallet->RemoveWalletTransaction(txid);
+                    wallet_removed++;
+                }
+            }
+        }
+
+        // Save wallet state if needed
+        if (wallet_removed > 0) {
+            pwallet->WalletLogPrintf("Removed %d mempool transactions\n", wallet_removed);
+            pwallet->GetDBHandle().WriteBestBlock(chainActive.GetLocator());
+            wallet_results.pushKV(pwallet->GetName(), wallet_removed);
+            total_removed += wallet_removed;
+        }
+    }
+#endif
+
+    // Return results
+    result.pushKV("total_removed", total_removed);
+    result.pushKV("wallets", wallet_results);
+    return result;
+}
+
 void RegisterMiscRPCCommands(CRPCTable &t) {
     // clang-format off
     static const CRPCCommand commands[] = {
@@ -900,6 +969,7 @@ void RegisterMiscRPCCommands(CRPCTable &t) {
         { "util",               signmessagewithprivkey,  },
         { "util",               getcurrencyinfo,         },
         { "util",               getindexinfo,            },
+        { "control",            emptymempooltxfromwallets,   &emptymempooltxfromwallets,    {} },
 
         /* Not shown in help */
         { "hidden",             setmocktime,             },
