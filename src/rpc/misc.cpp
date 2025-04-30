@@ -890,64 +890,52 @@ static RPCHelpMan getindexinfo() {
     };
 }
 
-static UniValue emptymempooltxfromwallets(const JSONRPCRequest& request)
+static RPCHelpMan emptymempooltxfromwallets()
 {
-    RPCHelpMan{
+    return RPCHelpMan{
         "emptymempooltxfromwallets",
-        "Remove all mempool transactions that originated from any wallet.\n",
+        "\nRemove all transactions from the mempool that belong to a wallet.\n",
         {},
-        RPCResult{RPCResult::Type::OBJ, "", "",
-            {
-                {RPCResult::Type::NUM, "removed", "number of transactions removed"},
-                {RPCResult::Type::ARR, "txids", "transaction ids of removed transactions",
-                    {{RPCResult::Type::STR_HEX, "", "transaction id"}}
+        RPCResult{RPCResult::Type::NUM, "", "Number of transactions removed from the mempool"},
+        RPCExamples{
+            HelpExampleCli("emptymempooltxfromwallets", "")
+            + HelpExampleRpc("emptymempooltxfromwallets", "")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        {
+            LOCK(::g_mempool.cs);
+            
+            std::vector<uint256> txids_to_remove;
+            
+            for (const auto& entry : ::g_mempool.mapTx) {
+                const CTransactionRef& tx = entry.GetSharedTx();
+                bool from_wallet = false;
+
+                for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
+                    const CWalletTx* wtx = pwallet->GetWalletTx(tx->GetHash());
+                    if (wtx != nullptr) {
+                        from_wallet = true;
+                        break;
+                    }
+                }
+
+                if (from_wallet) {
+                    txids_to_remove.push_back(tx->GetHash());
                 }
             }
-        },
-        RPCExamples{
-            HelpExampleCli("emptymempooltxfromwallets", "") +
-            HelpExampleRpc("emptymempooltxfromwallets", "")
-        },
-    }.Check(request);
-
-    UniValue result(UniValue::VOBJ);
-    UniValue txids(UniValue::VARR);
-    int removed = 0;
-
-    LOCK(::mempool.cs);
-    
-    // Get all wallet transactions in the mempool
-    std::vector<uint256> wallet_txs;
-    
-    for (const auto& entry : ::mempool.mapTx) {
-        const uint256& hash = entry.GetTx().GetHash();
-        const CTransactionRef& tx = entry.GetSharedTx();
-        
-        // Check if this transaction is from any wallet
-        bool from_wallet = false;
-        for (const CWalletRef& pwallet : GetWallets()) {
-            if (pwallet->IsFromMe(tx)) {
-                from_wallet = true;
-                break;
+            
+            int count = 0;
+            for (const uint256& txid : txids_to_remove) {
+                auto it = ::g_mempool.mapTx.find(::g_mempool.txidMap().find(txid)->second);
+                if (it != ::g_mempool.mapTx.end()) {
+                    ::g_mempool.removeRecursive(*it->GetSharedTx(), MemPoolRemovalReason::REPLACED);
+                    count++;
+                }
             }
+            
+            return count;
         }
-        
-        if (from_wallet) {
-            wallet_txs.push_back(hash);
-        }
-    }
-    
-    // Remove the transactions
-    for (const uint256& txid : wallet_txs) {
-        txids.push_back(txid.ToString());
-        ::mempool.removeRecursive(CTransaction());
-        removed++;
-    }
-    
-    result.pushKV("removed", removed);
-    result.pushKV("txids", txids);
-    
-    return result;
+    };
 }
 
 void RegisterMiscRPCCommands(CRPCTable &t) {
