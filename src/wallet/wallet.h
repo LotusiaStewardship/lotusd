@@ -40,6 +40,7 @@
 #include <utility>
 #include <vector>
 
+#include <boost/asio.hpp>
 #include <boost/signals2/signal.hpp>
 
 using LoadWalletFn =
@@ -700,6 +701,7 @@ private:
     int nWalletMaxVersion GUARDED_BY(cs_wallet) = FEATURE_BASE;
 
     int64_t nNextResend = 0;
+    int64_t nNextStuckTxCleanup = 0;
     bool fBroadcastTransactions = false;
     // Local time that the tip block was received. Used to schedule wallet
     // rebroadcasts.
@@ -811,6 +813,11 @@ private:
     // ScriptPubKeyMan::GetID. In many cases it will be the hash of an internal
     // structure
     std::map<uint256, std::unique_ptr<ScriptPubKeyMan>> m_spk_managers;
+
+    // Timer-related members for transaction cleanup
+    boost::asio::io_service m_io_service;
+    std::unique_ptr<boost::asio::deadline_timer> m_tx_cleanup_timer;
+    void ScheduleTransactionCleanup();
 
 public:
     /*
@@ -1574,6 +1581,15 @@ public:
     AddWalletDescriptor(WalletDescriptor &desc,
                         const FlatSigningProvider &signing_provider,
                         const std::string &label, bool internal);
+
+    /**
+     * Delete transactions that are not in the mempool and have been in the wallet
+     * for more than the specified number of seconds.
+     * 
+     * @param max_tx_age Maximum age of transactions in seconds
+     * @return Number of transactions removed
+     */
+    int DeleteStuckTransactions(int64_t max_tx_age = 10);
 };
 
 /**
