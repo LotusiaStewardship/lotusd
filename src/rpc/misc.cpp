@@ -33,8 +33,9 @@
 #include <malloc.h>
 #endif
 
-#include <wallet/rpc/wallet.h>
 #include <wallet/wallet.h>
+#include <wallet/walletdb.h>
+#include <wallet/walletutil.h>
 #include <txmempool.h>
 
 static RPCHelpMan validateaddress() {
@@ -889,58 +890,62 @@ static RPCHelpMan getindexinfo() {
     };
 }
 
-static UniValue emptymempooltxfromwallets(const Config &config,
-                                     const JSONRPCRequest &request) {
+static UniValue emptymempooltxfromwallets(const JSONRPCRequest& request)
+{
     RPCHelpMan{
         "emptymempooltxfromwallets",
-        "Remove all mempool transactions from all wallets.\n",
+        "Remove all mempool transactions that originated from any wallet.\n",
         {},
-        RPCResult{"\"result\"    (object) Result with removal statistics\n"},
-        RPCExamples{HelpExampleCli("emptymempooltxfromwallets", "") +
-                    HelpExampleRpc("emptymempooltxfromwallets", "")},
-    }.Check(request);
-
-    // Initialize result object
-    UniValue result(UniValue::VOBJ);
-    UniValue wallet_results(UniValue::VOBJ);
-
-    // Track total number of removed transactions
-    int total_removed = 0;
-
-    // Access mempool
-    {
-        LOCK(::mempool.cs);
-        
-        // Loop through all wallets
-        for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
-            int wallet_removed = 0;
-            
-            LOCK(pwallet->cs_wallet);
-            
-            // Loop through mempool transactions
-            for (const CTxMemPoolEntry& entry : ::mempool.mapTx) {
-                const TxId& txid = entry.GetTxId();
-                
-                // Check if wallet has this transaction
-                auto it = pwallet->mapWallet.find(txid);
-                if (it != pwallet->mapWallet.end()) {
-                    // Remove from wallet
-                    pwallet->RemoveWalletTransaction(txid);
-                    wallet_removed++;
-                    total_removed++;
+        RPCResult{RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::NUM, "removed", "number of transactions removed"},
+                {RPCResult::Type::ARR, "txids", "transaction ids of removed transactions",
+                    {{RPCResult::Type::STR_HEX, "", "transaction id"}}
                 }
             }
-            
-            // Save wallet state
-            pwallet->WalletLogPrintf("Removed %d mempool transactions\n", wallet_removed);
-            pwallet->GetDBHandle().WriteBestBlock(::chainActive.GetLocator());
-            wallet_results.pushKV(pwallet->GetName(), wallet_removed);
+        },
+        RPCExamples{
+            HelpExampleCli("emptymempooltxfromwallets", "") +
+            HelpExampleRpc("emptymempooltxfromwallets", "")
+        },
+    }.Check(request);
+
+    UniValue result(UniValue::VOBJ);
+    UniValue txids(UniValue::VARR);
+    int removed = 0;
+
+    LOCK(::mempool.cs);
+    
+    // Get all wallet transactions in the mempool
+    std::vector<uint256> wallet_txs;
+    
+    for (const auto& entry : ::mempool.mapTx) {
+        const uint256& hash = entry.GetTx().GetHash();
+        const CTransactionRef& tx = entry.GetSharedTx();
+        
+        // Check if this transaction is from any wallet
+        bool from_wallet = false;
+        for (const CWalletRef& pwallet : GetWallets()) {
+            if (pwallet->IsFromMe(tx)) {
+                from_wallet = true;
+                break;
+            }
+        }
+        
+        if (from_wallet) {
+            wallet_txs.push_back(hash);
         }
     }
     
-    // Build result object
-    result.pushKV("total_removed", total_removed);
-    result.pushKV("wallet_details", wallet_results);
+    // Remove the transactions
+    for (const uint256& txid : wallet_txs) {
+        txids.push_back(txid.ToString());
+        ::mempool.removeRecursive(CTransaction());
+        removed++;
+    }
+    
+    result.pushKV("removed", removed);
+    result.pushKV("txids", txids);
     
     return result;
 }
@@ -973,3 +978,4 @@ void RegisterMiscRPCCommands(CRPCTable &t) {
         t.appendCommand(c.name, &c);
     }
 }
+
