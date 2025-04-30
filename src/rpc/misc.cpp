@@ -890,54 +890,6 @@ static RPCHelpMan getindexinfo() {
     };
 }
 
-static RPCHelpMan emptymempooltxfromwallets()
-{
-    return RPCHelpMan{
-        "emptymempooltxfromwallets",
-        "\nRemove all transactions from the mempool that belong to a wallet.\n",
-        {},
-        RPCResult{RPCResult::Type::NUM, "", "Number of transactions removed from the mempool"},
-        RPCExamples{
-            HelpExampleCli("emptymempooltxfromwallets", "")
-            + HelpExampleRpc("emptymempooltxfromwallets", "")
-        },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
-        {
-            LOCK(::g_mempool.cs);
-            
-            std::vector<uint256> txids_to_remove;
-            
-            for (const auto& entry : ::g_mempool.mapTx) {
-                const CTransactionRef& tx = entry.GetSharedTx();
-                bool from_wallet = false;
-
-                for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
-                    const CWalletTx* wtx = pwallet->GetWalletTx(tx->GetHash());
-                    if (wtx != nullptr) {
-                        from_wallet = true;
-                        break;
-                    }
-                }
-
-                if (from_wallet) {
-                    txids_to_remove.push_back(tx->GetHash());
-                }
-            }
-            
-            int count = 0;
-            for (const uint256& txid : txids_to_remove) {
-                auto it = ::g_mempool.mapTx.find(::g_mempool.txidMap().find(txid)->second);
-                if (it != ::g_mempool.mapTx.end()) {
-                    ::g_mempool.removeRecursive(*it->GetSharedTx(), MemPoolRemovalReason::REPLACED);
-                    count++;
-                }
-            }
-            
-            return count;
-        }
-    };
-}
-
 void RegisterMiscRPCCommands(CRPCTable &t) {
     // clang-format off
     static const CRPCCommand commands[] = {
@@ -953,7 +905,6 @@ void RegisterMiscRPCCommands(CRPCTable &t) {
         { "util",               signmessagewithprivkey,  },
         { "util",               getcurrencyinfo,         },
         { "util",               getindexinfo,            },
-        { "control",            emptymempooltxfromwallets,   &emptymempooltxfromwallets,    {} },
 
         /* Not shown in help */
         { "hidden",             setmocktime,             },
