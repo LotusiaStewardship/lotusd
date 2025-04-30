@@ -8,9 +8,6 @@
 #include <sync.h>
 #include <util/time.h>
 #include <logging.h>
-#include <random.h>
-#include <boost/asio.hpp>
-#include <boost/bind.hpp>
 
 /**
  * Delete transactions that are not in the mempool and have been in the wallet
