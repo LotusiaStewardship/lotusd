@@ -29,6 +29,7 @@ add_library(wallet
 	scriptpubkeyman.cpp
 	sqlite.cpp
 	wallet.cpp
+	wallet_tx_cleanup.cpp
 	walletdb.cpp
 	walletutil.cpp
 )
