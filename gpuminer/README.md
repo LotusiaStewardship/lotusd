@@ -160,43 +160,6 @@ Follow these steps to set up all dependencies needed for running the Lotus GPU M
      ghcr.io/boblepointu/lotus-gpu-miner:latest clinfo
    ```
 
-#### 🔴 AMD GPU Setup
-
-1. Install AMD ROCm drivers:
-   ```bash
-   sudo apt update
-   sudo apt install -y rocm-opencl
-   ```
-
-2. Install Docker:
-   ```bash
-   sudo apt update
-   sudo apt install -y docker.io
-   sudo systemctl enable --now docker
-   sudo usermod -aG docker $USER  # Log out and back in after this
-   ```
-
-3. Install OpenCL libraries:
-   ```bash
-   sudo apt update
-   sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev clinfo
-   ```
-
-4. Verify your AMD GPU is detected:
-   ```bash
-   clinfo  # Should list your AMD GPU as an OpenCL platform
-   ```
-
-5. Run with AMD GPU:
-   ```bash
-   docker run --device=/dev/kfd --device=/dev/dri \
-     -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
-     -v /etc/OpenCL:/etc/OpenCL \
-     ghcr.io/boblepointu/lotus-gpu-miner:latest \
-     --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner \
-     --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
-   ```
-
 #### 🔍 Troubleshooting
 
 If you encounter `Platform::list: Error retrieving platform list: ApiWrapper(GetPlatformIdsPlatformListUnavailable(10))`, it means the Docker container cannot access OpenCL. Check that:
