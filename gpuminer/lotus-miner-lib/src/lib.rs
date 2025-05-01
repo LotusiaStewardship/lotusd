@@ -42,6 +42,7 @@ pub struct NodeSettings {
     pub bitcoind_password: String,
     pub rpc_poll_interval: u64,
     pub miner_addr: String,
+    pub pool_mining: bool,
 }
 
 pub struct Log {
@@ -97,6 +98,7 @@ impl Server {
                 bitcoind_password: config.rpc_password.clone(),
                 rpc_poll_interval: config.rpc_poll_interval.try_into().unwrap(),
                 miner_addr: config.mine_to_address.clone(),
+                pool_mining: config.pool_mining,
             }),
             block_state: Mutex::new(BlockState {
                 current_work: Work::default(),
@@ -259,22 +261,37 @@ async fn mine_some_nonces(server: ServerRef) -> Result<()> {
     })
     .await
     .unwrap()?;
-    let mut block_state = server.block_state.lock().await;
+    
+    // Handle found nonce and submit block if needed
     if let Some(nonce) = nonce {
         work.set_big_nonce(nonce);
         log.info(format!("Block hash below target with nonce: {}", nonce));
-        if let Some(mut block) = block_state.current_block.take() {
-            block.header = *work.header();
+        
+        let block = {
+            // Only acquire the lock for the minimum time needed
+            let mut block_state = server.block_state.lock().await;
+            if let Some(mut block) = block_state.current_block.take() {
+                block.header = *work.header();
+                Some(block)
+            } else {
+                log.bug("BUG: Found nonce but no block! Contact the developers.");
+                None
+            }
+        }; // Lock is released here
+        
+        // Submit block outside of any locks
+        if let Some(block) = block {
             if let Err(err) = submit_block(&server, &block).await {
                 log.error(format!(
                     "submit_block error: {:?}. This could be a connection issue.",
                     err
                 ));
             }
-        } else {
-            log.bug("BUG: Found nonce but no block! Contact the developers.");
         }
     }
+    
+    // Update state after submission
+    let mut block_state = server.block_state.lock().await;
     block_state.current_work.nonce_idx += 1;
     server
         .metrics_nonces
@@ -304,34 +321,105 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     #[derive(Deserialize)]
     struct SubmitBlockResponse {
         result: Option<String>,
+        error: Option<serde_json::Value>,
     }
     let log = server.log();
     let mut serialized_block = block.header.to_vec();
     serialized_block.extend_from_slice(&block.body);
-    let response = init_request(server)
-        .await
-        .body(format!(
-            r#"{{"method":"submitblock","params":[{:?}]}}"#,
-            hex::encode(&serialized_block)
-        ))
+    // log.bug(format!("BUG: serialized_block: {:?}", serialized_block));
+    
+    // Extract all needed data from node_settings first, without holding the lock during request
+    let (url, user, password, pool_mining, miner_addr) = {
+        let node_settings = server.node_settings.lock().await;
+        (
+            node_settings.bitcoind_url.clone(),
+            node_settings.bitcoind_user.clone(), 
+            node_settings.bitcoind_password.clone(),
+            node_settings.pool_mining,
+            node_settings.miner_addr.clone()
+        )
+    };
+    
+    // Format the block hex
+    let block_hex = hex::encode(&serialized_block);
+    
+    // Prepare request body JSON - always include miner_addr as the 2nd parameter when pool mining
+    // The server accepts 2 params for BIP22 compatibility, with 2nd param normally ignored
+    let request_body = if !pool_mining {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":"miner","method":"submitblock","params":["{}"]}}"#,
+            block_hex
+        )
+    } else {
+        // For pool mining, pass the miner address as second parameter
+        format!(
+            r#"{{"jsonrpc":"2.0","id":"miner","method":"submitblock","params":["{}", "{}"]}}"#,
+            block_hex,
+            miner_addr
+        )
+    };
+    
+    // Create request without using init_request which would try to lock node_settings again
+    let response = server.client.post(&url)
+        .basic_auth(user, Some(password))
+        .header("Content-Type", "application/json")
+        .body(request_body)
         .send()
         .await?;
-    let response: SubmitBlockResponse = serde_json::from_str(&response.text().await?)?;
-    match response.result {
-        None => log.info("BLOCK ACCEPTED!"),
-        Some(reason) => {
-            log.error(format!("REJECTED BLOCK: {}", reason));
-            if reason == "inconclusive" {
-                log.warn(
-                    "This is an orphan race; might be fixed by lowering rpc_poll_interval or \
-                          updating to the newest lotus-gpu-miner.",
-                );
-            } else {
-                log.error(
-                    "Something is misconfigured; make sure you run the latest \
-                          lotusd/Lotus-QT and lotus-gpu-miner.",
-                );
+    
+    let status = response.status();
+    let response_text = response.text().await?;
+    
+    // Attempt to parse the response
+    let response: Result<SubmitBlockResponse, _> = serde_json::from_str(&response_text);
+    
+    match response {
+        Ok(parsed) => {
+            match parsed.result {
+                None => {
+                    // Check if there was an error
+                    if let Some(error) = parsed.error {
+                        log.error(format!("REJECTED BLOCK: Error {:?}", error));
+                        log.error("Something is misconfigured; make sure you run the latest lotusd/Lotus-QT and lotus-gpu-miner.");
+                    } else {
+                        if pool_mining {
+                            log.info("SHARE ACCEPTED!");
+                        } else {
+                            log.info("BLOCK ACCEPTED!");
+                        }
+                    }
+                },
+                Some(reason) => {
+                    if reason.is_empty() {
+                        if pool_mining {
+                            log.info("SHARE ACCEPTED!");
+                        } else {
+                            log.info("BLOCK ACCEPTED!");
+                        }
+                    } else {
+                        if pool_mining {
+                            log.error(format!("REJECTED SHARE: {}", reason));
+                        } else {
+                            log.error(format!("REJECTED BLOCK: {}", reason));
+                        }
+                        if reason == "inconclusive" {
+                            log.warn(
+                                "This is an orphan race; might be fixed by lowering rpc_poll_interval or \
+                                updating to the newest lotus-gpu-miner.",
+                            );
+                        } else {
+                            log.error(
+                                "Something is misconfigured; make sure you run the latest \
+                                lotusd/Lotus-QT and lotus-gpu-miner.",
+                            );
+                        }
+                    }
+                }
             }
+        },
+        Err(e) => {
+            log.error(format!("Failed to parse response: {} (Status: {})\nResponse: {}", 
+                e, status, response_text));
         }
     }
     Ok(())
