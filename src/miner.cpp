@@ -257,14 +257,14 @@ BlockAssembler::CreateNewBlock(const CScript &scriptPubKeyIn) {
     LogPrintf("CreateNewBlock(): total size: %u txs: %u fees: %ld sigops %d\n",
               nSerializeSize, nBlockTx, nFees, nBlockSigOps);
 
-    // If blockmaxsize was set, add more debugging information about sizes
-    if (gArgs.IsArgSet("-blockmaxsize")) {
-        uint64_t requestedMaxBlockSize = gArgs.GetArg("-blockmaxsize", DEFAULT_MAX_GENERATED_BLOCK_SIZE);
-        LogPrintf("CreateNewBlock(): size details - requested max: %u, internal limit: %u, coinbase size: %u, overhead: %u\n",
-                  requestedMaxBlockSize, nMaxGeneratedBlockSize, 
-                  GetSerializeSize(*pblock->vtx[0], PROTOCOL_VERSION),
-                  nSerializeSize - nBlockSize);
-    }
+    // Always log detailed size information to help diagnose issues
+    uint64_t requestedMaxBlockSize = gArgs.IsArgSet("-blockmaxsize") ? 
+                                    gArgs.GetArg("-blockmaxsize", DEFAULT_MAX_GENERATED_BLOCK_SIZE) : 
+                                    DEFAULT_MAX_GENERATED_BLOCK_SIZE;
+    LogPrintf("CreateNewBlock(): size details - requested max: %u, internal limit: %u, coinbase size: %u, overhead: %u\n",
+              requestedMaxBlockSize, nMaxGeneratedBlockSize, 
+              GetSerializeSize(*pblock->vtx[0], PROTOCOL_VERSION),
+              nSerializeSize - nBlockSize);
 
     // Fill in size
     pblock->SetSize(nSerializeSize);
@@ -306,7 +306,12 @@ void BlockAssembler::onlyUnconfirmed(CTxMemPool::setEntries &testSet) {
 bool BlockAssembler::TestPackage(uint64_t packageSize,
                                  int64_t packageSigOps) const {
     auto blockSizeWithPackage = nBlockSize + packageSize;
-    if (blockSizeWithPackage >= nMaxGeneratedBlockSize) {
+    
+    // Be more conservative with the size limit - leave more room for the coinbase
+    // transaction and other overhead that might be added later
+    if (blockSizeWithPackage >= nMaxGeneratedBlockSize - 1000) {
+        LogPrint(BCLog::MINING, "TestPackage: package of size %u would exceed block size limit (current: %u, max: %u)\n",
+                packageSize, nBlockSize, nMaxGeneratedBlockSize);
         return false;
     }
 
@@ -584,6 +589,12 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected,
         // Update transactions that depend on each of these
         nDescendantsUpdated += UpdatePackagesForAdded(ancestors, mapModifiedTx);
     }
+    
+    // Log the final block size as a percentage of the maximum allowed size
+    LogPrintf("addPackageTxs(): Final block size: %u bytes (%.2f%% of max %u bytes)\n", 
+              nBlockSize, 
+              (nBlockSize * 100.0) / nMaxGeneratedBlockSize, 
+              nMaxGeneratedBlockSize);
 }
 
 static const std::vector<uint8_t>
