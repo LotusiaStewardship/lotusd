@@ -102,9 +102,19 @@ static BlockAssembler::Options DefaultOptions(const Config &config) {
     // capped by the excessive block size)
     if (gArgs.IsArgSet("-blockmaxsize")) {
         uint64_t requestedMaxBlockSize = gArgs.GetArg("-blockmaxsize", DEFAULT_MAX_GENERATED_BLOCK_SIZE);
+        
+        // Apply a safety margin of 3000 bytes to account for:
+        // 1. Coinbase transaction size variations
+        // 2. Block metadata overhead
+        // 3. Other potential size discrepancies in accounting
+        // This ensures the final block size will be below the specified limit
+        uint64_t adjustedMaxBlockSize = requestedMaxBlockSize > 3000 ? requestedMaxBlockSize - 3000 : requestedMaxBlockSize;
+        
         options.nMaxGeneratedBlockSize = std::min<uint64_t>(
-            requestedMaxBlockSize, options.nExcessiveBlockSize - 1000);
-        LogPrintf("Setting maximum generated block size to %u bytes\n", options.nMaxGeneratedBlockSize);
+            adjustedMaxBlockSize, options.nExcessiveBlockSize - 1000);
+            
+        LogPrintf("Setting maximum generated block size to %u bytes (from requested %u bytes)\n", 
+                  options.nMaxGeneratedBlockSize, requestedMaxBlockSize);
     }
     
     Amount n = Amount::zero();
@@ -246,6 +256,15 @@ BlockAssembler::CreateNewBlock(const CScript &scriptPubKeyIn) {
 
     LogPrintf("CreateNewBlock(): total size: %u txs: %u fees: %ld sigops %d\n",
               nSerializeSize, nBlockTx, nFees, nBlockSigOps);
+
+    // If blockmaxsize was set, add more debugging information about sizes
+    if (gArgs.IsArgSet("-blockmaxsize")) {
+        uint64_t requestedMaxBlockSize = gArgs.GetArg("-blockmaxsize", DEFAULT_MAX_GENERATED_BLOCK_SIZE);
+        LogPrintf("CreateNewBlock(): size details - requested max: %u, internal limit: %u, coinbase size: %u, overhead: %u\n",
+                  requestedMaxBlockSize, nMaxGeneratedBlockSize, 
+                  GetSerializeSize(*pblock->vtx[0], PROTOCOL_VERSION),
+                  nSerializeSize - nBlockSize);
+    }
 
     // Fill in size
     pblock->SetSize(nSerializeSize);
