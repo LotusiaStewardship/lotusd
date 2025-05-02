@@ -58,10 +58,10 @@ uint64_t CTxMemPoolModifiedEntry::GetVirtualSizeWithAncestors() const {
 }
 
 BlockAssembler::Options::Options()
-    : nExcessiveBlockSize(1024 * 16),
-      nMaxGeneratedBlockSize(1024 * 16),
-    // : nExcessiveBlockSize(DEFAULT_MAX_BLOCK_SIZE),
-    //   nMaxGeneratedBlockSize(DEFAULT_MAX_GENERATED_BLOCK_SIZE),
+    // : nExcessiveBlockSize(1024 * 16),
+    //   nMaxGeneratedBlockSize(1024 * 16),
+    : nExcessiveBlockSize(DEFAULT_MAX_BLOCK_SIZE),
+      nMaxGeneratedBlockSize(DEFAULT_MAX_GENERATED_BLOCK_SIZE),
       blockMinFeeRate(DEFAULT_BLOCK_MIN_TX_FEE_PER_KB) {}
 
 BlockAssembler::BlockAssembler(const CChainParams &params,
@@ -90,13 +90,23 @@ static BlockAssembler::Options DefaultOptions(const Config &config) {
     // If both are given, restrict both.
     BlockAssembler::Options options;
 
+    // Get the excessive block size from configuration
     options.nExcessiveBlockSize = config.GetMaxBlockSize();
+    
+    // Default the maximum generated block size to either the excessive block size - 1000 bytes
+    // or the DEFAULT_MAX_GENERATED_BLOCK_SIZE, whichever is smaller
+    options.nMaxGeneratedBlockSize = std::min<uint64_t>(
+        options.nExcessiveBlockSize - 1000, DEFAULT_MAX_GENERATED_BLOCK_SIZE);
 
+    // If the blockmaxsize parameter is set, use that value instead (but still
+    // capped by the excessive block size)
     if (gArgs.IsArgSet("-blockmaxsize")) {
-        options.nMaxGeneratedBlockSize =
-            gArgs.GetArg("-blockmaxsize", DEFAULT_MAX_GENERATED_BLOCK_SIZE);
+        uint64_t requestedMaxBlockSize = gArgs.GetArg("-blockmaxsize", DEFAULT_MAX_GENERATED_BLOCK_SIZE);
+        options.nMaxGeneratedBlockSize = std::min<uint64_t>(
+            requestedMaxBlockSize, options.nExcessiveBlockSize - 1000);
+        LogPrintf("Setting maximum generated block size to %u bytes\n", options.nMaxGeneratedBlockSize);
     }
-
+    
     Amount n = Amount::zero();
     if (gArgs.IsArgSet("-blockmintxfee") &&
         ParseMoney(gArgs.GetArg("-blockmintxfee", ""), n)) {
