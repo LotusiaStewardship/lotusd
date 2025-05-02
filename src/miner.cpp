@@ -58,8 +58,10 @@ uint64_t CTxMemPoolModifiedEntry::GetVirtualSizeWithAncestors() const {
 }
 
 BlockAssembler::Options::Options()
-    : nExcessiveBlockSize(DEFAULT_MAX_BLOCK_SIZE),
-      nMaxGeneratedBlockSize(DEFAULT_MAX_GENERATED_BLOCK_SIZE),
+    : nExcessiveBlockSize(1024 * 16),
+      nMaxGeneratedBlockSize(1024 * 16),
+    // : nExcessiveBlockSize(DEFAULT_MAX_BLOCK_SIZE),
+    //   nMaxGeneratedBlockSize(DEFAULT_MAX_GENERATED_BLOCK_SIZE),
       blockMinFeeRate(DEFAULT_BLOCK_MIN_TX_FEE_PER_KB) {}
 
 BlockAssembler::BlockAssembler(const CChainParams &params,
