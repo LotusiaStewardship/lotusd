@@ -59,7 +59,7 @@
 
 <div align="center">
   
-  # 🌸 Lotus: Digital Currency for Human Relationships 🌸
+  # 🌸Lotus: Digital Currency for Human Relationships🌸
   
   <hr>
   
