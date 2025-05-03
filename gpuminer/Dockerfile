@@ -1,11 +1,17 @@
-FROM ubuntu:22.04
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 
-# Install dependencies if needed
+# Install dependencies for CUDA and OpenCL support
 RUN apt-get update && apt-get install -y \
     libssl-dev \
     ocl-icd-opencl-dev \
     ocl-icd-libopencl1 \
+    opencl-headers \
+    clinfo \
     && rm -rf /var/lib/apt/lists/*
+
+# Create symbolic link to the NVIDIA OpenCL library
+RUN mkdir -p /etc/OpenCL/vendors && \
+    echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd
 
 # Create a working directory
 WORKDIR /app
