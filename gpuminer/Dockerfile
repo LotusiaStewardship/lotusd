@@ -25,4 +25,4 @@ COPY target/debug/lotus-miner-cli /app/
 RUN chmod +x /app/lotus-miner-cli
 
 # Command to run when container starts
-ENTRYPOINT ["./lotus-miner-cli", "-p", "password", "-i", "1", "-a", "http://10.128.71.115:10609", "-u", "miner", "-o", "lotus_16PSJHzZXfxuDVuDMD2k8bdHL1AN7pnryQSUwLt77"] 
+ENTRYPOINT ["./lotus-miner-cli", "-g", "0", "-s", "26", "-o", "lotus_16PSJHmYLT6dWHD4uYKazP58uhHnKsSPTonLB8s9y", "-i", "1", "-a", "https://burnlotus.org", "--poolmining"]
