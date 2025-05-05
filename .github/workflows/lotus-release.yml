@@ -19,6 +19,7 @@ jobs:
       run: |
         mkdir -p ./artifacts
         mkdir -p ./artifacts/kernels
+        mkdir -p ./individual-packages
 
     # Download all artifacts
     - name: Download artifacts
@@ -33,8 +34,8 @@ jobs:
       run: |
         chmod +x ./artifacts/*
 
-    # Create tarball of all binaries
-    - name: Create tarball
+    # Create combined packages (tarball and zip)
+    - name: Create combined packages
       run: |
         cd ./artifacts
 
@@ -51,16 +52,108 @@ jobs:
 
         # Create tarball
         tar -czvf lotus-binaries-${{ inputs.version }}.tar.gz gpu-miner-package/
+        
+        # Create zip
+        zip -r lotus-binaries-${{ inputs.version }}.zip gpu-miner-package/
 
+    # Create individual packages
+    - name: Create individual packages
+      run: |
+        cd ./artifacts
+        
+        # Package the GPU miner binary and kernels
+        if [ -f "lotus-miner-cli" ]; then
+          # Create directory for GPU miner
+          mkdir -p lotus-gpu-miner/kernels
+          cp lotus-miner-cli lotus-gpu-miner/
+          
+          # Include required kernels
+          if [ -d "./kernels" ]; then
+            cp -r kernels/* lotus-gpu-miner/kernels/ || true
+          fi
+          
+          # Create tarball
+          tar -czvf ../individual-packages/lotus-gpu-miner-${{ inputs.version }}.tar.gz lotus-gpu-miner/
+          
+          # Create zip
+          cd lotus-gpu-miner
+          zip -r ../../individual-packages/lotus-gpu-miner-${{ inputs.version }}.zip .
+          cd ..
+          
+          # Clean up
+          rm -rf lotus-gpu-miner
+        fi
+        
+        # Package the node binary
+        if [ -f "lotusd" ]; then
+          mkdir -p lotus-node
+          cp lotusd lotus-node/
+          
+          # Create tarball
+          tar -czvf ../individual-packages/lotus-node-${{ inputs.version }}.tar.gz lotus-node/
+          
+          # Create zip
+          cd lotus-node
+          zip -r ../../individual-packages/lotus-node-${{ inputs.version }}.zip .
+          cd ..
+          
+          # Clean up
+          rm -rf lotus-node
+        fi
+        
+        # Package the QT wallet
+        if [ -f "lotus-qt" ]; then
+          mkdir -p lotus-qt
+          cp lotus-qt lotus-qt/
+          
+          # Create tarball
+          tar -czvf ../individual-packages/lotus-qt-${{ inputs.version }}.tar.gz lotus-qt/
+          
+          # Create zip
+          cd lotus-qt
+          zip -r ../../individual-packages/lotus-qt-${{ inputs.version }}.zip .
+          cd ..
+          
+          # Clean up
+          rm -rf lotus-qt
+        fi
+        
+        # Package other CLI tools
+        if [ -f "lotus-cli" ]; then
+          mkdir -p lotus-cli
+          cp lotus-cli lotus-cli/
+          
+          # Create tarball
+          tar -czvf ../individual-packages/lotus-cli-${{ inputs.version }}.tar.gz lotus-cli/
+          
+          # Create zip
+          cd lotus-cli
+          zip -r ../../individual-packages/lotus-cli-${{ inputs.version }}.zip .
+          cd ..
+          
+          # Clean up
+          rm -rf lotus-cli
+        fi
+        
         # Clean up
         rm -rf gpu-miner-package
 
-    # Upload combined artifact
+    # Upload combined artifacts
     - name: Upload combined artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: lotus-binaries-${{ inputs.version }}
-        path: ./artifacts/lotus-binaries-*.tar.gz
+        name: lotus-combined-packages-${{ inputs.version }}
+        path: |
+          ./artifacts/lotus-binaries-*.tar.gz
+          ./artifacts/lotus-binaries-*.zip
+        retention-days: 14
+
+    # Upload individual artifacts
+    - name: Upload individual artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: lotus-individual-packages-${{ inputs.version }}
+        path: ./individual-packages/*
         retention-days: 14
 
   # Create the Git tag
@@ -126,12 +219,13 @@ jobs:
         ref: master
         fetch-depth: 0
 
-    # Download artifacts
-    - name: Download artifacts
+    # Download all package artifacts
+    - name: Download package artifacts
       uses: actions/download-artifact@v4
       with:
-        name: lotus-binaries-${{ inputs.version }}
-        path: ./artifacts
+        pattern: "lotus-*-${{ inputs.version }}"
+        path: ./release-packages
+        merge-multiple: true
 
     # Generate release notes with key information
     - name: Generate release notes
@@ -157,7 +251,20 @@ jobs:
         ## 📦 Binaries and Docker Images
 
         ### Binary Packages
-        * [Combined Binary Package](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.tar.gz) - Complete package of all Lotus binaries
+
+        #### Combined Packages (All Components)
+        * [Combined Binary Package (tar.gz)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.tar.gz)
+        * [Combined Binary Package (zip)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-binaries-${VERSION}.zip)
+
+        #### Individual Component Packages
+        * [GPU Miner (tar.gz)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-gpu-miner-${VERSION}.tar.gz)
+        * [GPU Miner (zip)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-gpu-miner-${VERSION}.zip)
+        * [Lotus Node (tar.gz)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-node-${VERSION}.tar.gz)
+        * [Lotus Node (zip)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-node-${VERSION}.zip)
+        * [Lotus QT Wallet (tar.gz)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-qt-${VERSION}.tar.gz)
+        * [Lotus QT Wallet (zip)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-qt-${VERSION}.zip)
+        * [Lotus CLI Tools (tar.gz)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-cli-${VERSION}.tar.gz)
+        * [Lotus CLI Tools (zip)](https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-cli-${VERSION}.zip)
 
         ### Docker Images
         * [\`ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}\`](https://github.com/${GITHUB_REPOSITORY}/pkgs/container/lotus-node) - Main Lotus daemon
@@ -188,11 +295,17 @@ jobs:
 
         ### GPU Miner Installation
         \`\`\`bash
-        # Pull the GPU miner image
-        docker pull ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}
-
-        # Run the GPU miner (requires NVIDIA runtime)
-        docker run --gpus all -d --name lotus-gpu-miner ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION} --pool <your-pool-url> --user <your-wallet-address>
+        # Using tar.gz
+        wget https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-gpu-miner-${VERSION}.tar.gz
+        tar -xzf lotus-gpu-miner-${VERSION}.tar.gz
+        cd lotus-gpu-miner
+        ./lotus-miner-cli -g 0 -s 27 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+        
+        # Using zip
+        wget https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-gpu-miner-${VERSION}.zip
+        unzip lotus-gpu-miner-${VERSION}.zip
+        cd lotus-gpu-miner
+        ./lotus-miner-cli -g 0 -s 27 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
         \`\`\`
 
         ## 📋 System Requirements
@@ -222,7 +335,7 @@ jobs:
         tag_name: v${{ inputs.version }}
         name: Lotus Core v${{ inputs.version }}
         body: ${{ steps.generate-notes.outputs.release_notes }}
-        files: ./artifacts/lotus-binaries-*.tar.gz
+        files: ./release-packages/**/*
         draft: false
         prerelease: false
       env:
