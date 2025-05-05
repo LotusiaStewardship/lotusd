@@ -103,9 +103,28 @@ For detailed instructions on setting up and using the GPU miner, see the [GPU Mi
 
 ## 🚀 Quick Start Examples
 
-### 📦 Using Pre-built Binary
+### 📦 Available Binary Packages
 
-You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases).
+You can download the latest Lotus Core binaries from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases):
+
+#### Package Options
+- **Combined Packages**:
+  - `lotus-binaries-[VERSION].tar.gz` - All Lotus binaries in a single tarball
+  - `lotus-binaries-[VERSION].zip` - All Lotus binaries in a single zip file
+
+- **Individual Component Packages**:
+  - `lotus-gpu-miner-[VERSION].tar.gz` - GPU miner with required kernels (tar.gz format)
+  - `lotus-gpu-miner-[VERSION].zip` - GPU miner with required kernels (zip format)
+  - `lotus-node-[VERSION].tar.gz` - Lotus full node daemon (tar.gz format)
+  - `lotus-node-[VERSION].zip` - Lotus full node daemon (zip format)
+  - `lotus-qt-[VERSION].tar.gz` - Lotus desktop wallet (tar.gz format)
+  - `lotus-qt-[VERSION].zip` - Lotus desktop wallet (zip format)
+  - `lotus-cli-[VERSION].tar.gz` - Lotus command-line tools (tar.gz format)
+  - `lotus-cli-[VERSION].zip` - Lotus command-line tools (zip format)
+
+> **Note:** When using the GPU miner package, ensure that the `kernels` directory is extracted alongside the binary to ensure proper functionality.
+
+For detailed GPU miner documentation, see the [GPU Mining Documentation](gpuminer/README.md).
 
 #### 🏊‍♂️ Example: Mining on a Pool
 

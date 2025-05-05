@@ -62,31 +62,51 @@ Solo mining connects directly to a Lotus node, granting you the full block rewar
 
 You can download the latest Lotus GPU Miner binaries from the [GitHub Releases page](https://github.com/LotusiaStewardship/lotusd/releases/latest):
 
-#### Available Binary Packages
-- **Combined Package**: Download the `lotus-binaries-[VERSION].tar.gz` file which contains all Lotus binaries including the GPU miner
-- **Individual Binaries**: Extract only the files you need from the combined package:
-  ```bash
-  # Download the combined package
-  wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-binaries-latest.tar.gz
-  
-  # Extract just the GPU miner
-  tar -xzf lotus-binaries-latest.tar.gz gpu-miner-package/lotus-miner-cli
-  
-  # Make it executable
-  chmod +x gpu-miner-package/lotus-miner-cli
-  
-  # Move to a convenient location
-  mv gpu-miner-package/lotus-miner-cli ./
-  ```
+#### Available Package Options
 
-> **⚠️ Important**: When extracting individual binaries, be sure to also extract the `kernels` directory which contains required OpenCL kernel files:
-> ```bash
-> # Extract the OpenCL kernel files
-> tar -xzf lotus-binaries-latest.tar.gz gpu-miner-package/kernels
-> 
-> # Move to a directory where the binary can find them
-> mv gpu-miner-package/kernels ./
-> ```
+##### Combined Packages (All Lotus Components)
+- **Tar Archive**: `lotus-binaries-[VERSION].tar.gz` - Contains all Lotus binaries including node, wallet, and GPU miner
+- **Zip Archive**: `lotus-binaries-[VERSION].zip` - Same contents as the tar.gz but in zip format
+
+##### GPU Miner Specific Packages
+- **Tar Archive**: `lotus-gpu-miner-[VERSION].tar.gz` - Contains only the GPU miner with required kernel files
+- **Zip Archive**: `lotus-gpu-miner-[VERSION].zip` - Same as above but in zip format
+
+#### Installation Instructions
+
+##### Using the GPU Miner Package
+
+```bash
+# For tar.gz format
+wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-gpu-miner-latest.tar.gz
+tar -xzf lotus-gpu-miner-latest.tar.gz
+cd lotus-gpu-miner
+chmod +x lotus-miner-cli
+
+# For zip format
+wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-gpu-miner-latest.zip
+unzip lotus-gpu-miner-latest.zip
+chmod +x lotus-miner-cli
+```
+
+##### Extracting from the Combined Package
+
+```bash
+# For tar.gz format
+wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-binaries-latest.tar.gz
+
+# Extract just the GPU miner
+mkdir -p lotus-miner
+tar -xzf lotus-binaries-latest.tar.gz -C lotus-miner --strip-components=1 gpu-miner-package/lotus-miner-cli gpu-miner-package/kernels/
+chmod +x lotus-miner/lotus-miner-cli
+
+# For zip format
+wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-binaries-latest.zip
+unzip -j lotus-binaries-latest.zip "gpu-miner-package/lotus-miner-cli" "gpu-miner-package/kernels/*" -d lotus-miner
+chmod +x lotus-miner/lotus-miner-cli
+```
+
+> **⚠️ Important**: Always ensure you have the `kernels` directory in the same location as the binary. The OpenCL kernel files are required for the GPU miner to function correctly.
 
 #### 🏊‍♂️ Example: Mining on a Pool
 
