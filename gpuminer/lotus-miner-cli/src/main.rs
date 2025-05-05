@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use log::{info, error, LevelFilter};
+use log::{info, error, debug, LevelFilter};
 use lotus_miner_lib::{
     logger::{LoggerConfig, init_global_logger},
     ConfigSettings, Server,
@@ -69,6 +69,10 @@ struct Cli {
     /// Enable pool mining mode (submit shares to a pool instead of solo mining)
     #[clap(short = 'm', long = "poolmining", help = "Enable pool mining mode")]
     pool_mining: bool,
+    
+    /// Enable verbose debugging output (shows detailed RPC logs)
+    #[clap(long = "debug", help = "Enable verbose debugging output")]
+    debug: bool,
 }
 
 #[tokio::main]
@@ -82,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         log_file_path: Some("lotus-miner.log".into()),
         max_log_entries: 1000,
         max_hashrate_entries: 1000,
-        level: LevelFilter::Info,
+        level: if cli.debug { LevelFilter::Debug } else { LevelFilter::Info },
     };
 
     // Initialize the global logger
@@ -106,10 +110,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // You can add logic to load from a custom config file if needed.
     }
     info!("✅ Configuration loaded successfully");
+    
+    // Add debug logs for configuration settings
+    if cli.debug {
+        debug!("🔧 Configuration details:");
+        debug!("  - GPU Index: {}", settings.gpu_index);
+        debug!("  - Kernel Size: {}", settings.kernel_size);
+        debug!("  - Mining Address: {}", settings.mine_to_address);
+        debug!("  - RPC URL: {}", settings.rpc_url);
+        debug!("  - RPC Poll Interval: {}", settings.rpc_poll_interval);
+        debug!("  - Pool Mining: {}", settings.pool_mining);
+    }
 
     // Start mining
     let report_interval = Duration::from_secs(5);
     info!("⏱️ Reporting hashrate every {} seconds", report_interval.as_secs());
+    
+    if cli.debug {
+        info!("🔍 Debug mode enabled - showing detailed RPC logs");
+    }
 
     // Create a handle to capture CTRL+C
     let (tx, rx) = tokio::sync::oneshot::channel();

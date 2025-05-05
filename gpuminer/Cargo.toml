@@ -4,5 +4,6 @@ members = [
     "lotus-miner-gui",
     "lotus-miner-lib",
 ]
+resolver = "2"
 
 default-members = ["lotus-miner-cli"]
