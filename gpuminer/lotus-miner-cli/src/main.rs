@@ -1,9 +1,11 @@
 use std::time::Duration;
+use std::str::FromStr;
 
 use log::{info, error, debug, LevelFilter};
 use lotus_miner_lib::{
     logger::{LoggerConfig, init_global_logger},
     ConfigSettings, Server,
+    miner::KernelType,
 };
 use clap::Parser;
 
@@ -22,6 +24,12 @@ use clap::Parser;
 /// Example usage:
 ///   lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining
 ///
+/// Features:
+///   - Self-contained binary with embedded OpenCL kernel
+///   - Zero-stall mining architecture
+///   - Hashrate stabilization with 60-second moving average
+///   - Multiple kernel options (Lotus OG and POCLBM)
+///
 /// For more information, visit: https://github.com/Boblepointu/lotusd/blob/master/gpuminer/README.md
 #[derive(Parser, Debug)]
 #[clap(
@@ -31,7 +39,7 @@ use clap::Parser;
     about = "🌸 High-performance OpenCL miner for the Lotus blockchain.",
     long_about = None,
     after_help = "\
-EXAMPLES:\n  lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining\n\nFor more information, visit: https://github.com/Boblepointu/lotusd/blob/master/gpuminer/README.md\n\nDeveloped by Alexandre Guillioud (FrenchBTC - alexandre@burnlotus.org) and Tobias Ruck (ruck.tobias@gmail.com).\n"
+EXAMPLES:\n  lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining\n\nKernel Types:\n  - lotus_og (default): Optimized kernel for Lotus mining\n  - poclbm: Alternative kernel based on poclbm project\n\nSelf-contained binary with embedded OpenCL kernels - no external files needed!\n\nFor more information, visit: https://github.com/Boblepointu/lotusd/blob/master/gpuminer/README.md\n\nDeveloped by Alexandre Guillioud (FrenchBTC - alexandre@burnlotus.org) and Tobias Ruck (ruck.tobias@gmail.com).\n"
 )]
 struct Cli {
     /// Path to a configuration file in TOML format. Overrides defaults if present.
@@ -45,6 +53,10 @@ struct Cli {
     /// Kernel size (work batch size, default: 23)
     #[clap(short = 's', long, value_name = "kernel_size", help = "Kernel size (default: 23)")]
     kernel_size: Option<i64>,
+
+    /// Select the OpenCL kernel to use: 'lotus_og' (default) or 'poclbm'
+    #[clap(long = "kernel-type", value_name = "kernel_type", help = "OpenCL kernel to use: 'lotus_og' or 'poclbm' (default: lotus_og)")]
+    kernel_type: Option<String>,
 
     /// Address to receive mining rewards (mine-to address)
     #[clap(short = 'o', long, value_name = "mine_to_address", help = "Coinbase Output Address (mine-to address)")]
@@ -99,6 +111,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
     if let Some(ref v) = cli.gpu_index { settings.gpu_index = *v; }
     if let Some(ref v) = cli.kernel_size { settings.kernel_size = *v; }
+    if let Some(ref v) = cli.kernel_type {
+        settings.kernel_type = match KernelType::from_str(v) {
+            Ok(kernel_type) => kernel_type,
+            Err(e) => {
+                error!("Invalid kernel type: {}. Using default instead.", e);
+                KernelType::LotusOG
+            }
+        };
+    }
     if let Some(ref v) = cli.mine_to_address { settings.mine_to_address = v.clone(); }
     if let Some(ref v) = cli.rpc_password { settings.rpc_password = v.clone(); }
     if let Some(ref v) = cli.rpc_poll_interval { settings.rpc_poll_interval = *v; }
@@ -116,6 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         debug!("🔧 Configuration details:");
         debug!("  - GPU Index: {}", settings.gpu_index);
         debug!("  - Kernel Size: {}", settings.kernel_size);
+        debug!("  - Kernel Type: {}", settings.kernel_type);
         debug!("  - Mining Address: {}", settings.mine_to_address);
         debug!("  - RPC URL: {}", settings.rpc_url);
         debug!("  - RPC Poll Interval: {}", settings.rpc_poll_interval);

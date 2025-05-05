@@ -15,6 +15,26 @@ use chrono::Local;
 
 use crate::{sha256::lotus_hash, block::Block, Log};
 
+/// OpenCL kernel code for the Lotus miner.
+/// 
+/// NOTE FOR DEVELOPERS:
+/// This file contains two kernel implementations embedded directly into the binary at compile time:
+/// 1. LOTUS_OG_KERNEL - The default kernel optimized for Lotus mining
+/// 2. POCLBM_KERNEL - An alternative kernel based on the poclbm project
+///
+/// Both kernels are embedded to eliminate the need to distribute kernel files alongside the binary,
+/// providing a more convenient and reliable distribution.
+/// 
+/// The kernel selection can be controlled via the `--kernel-type` command-line parameter:
+/// - `lotus_og` (default): Uses the Lotus original kernel
+/// - `poclbm`: Uses the POCLBM-based kernel
+/// 
+/// To modify the kernels:
+/// 1. Edit the original files at gpuminer/kernels/lotus_og.cl or gpuminer/kernels/poclbm120327.cl
+/// 2. Rebuild the project - the include_str! macro will automatically pull in the new content
+const LOTUS_OG_KERNEL: &str = include_str!("../../kernels/lotus_og.cl");
+const POCLBM_KERNEL: &str = include_str!("../../kernels/poclbm120327.cl");
+
 // Counter for successful shares/blocks found
 static SHARES_FOUND: AtomicU64 = AtomicU64::new(0);
 static HASHES_PROCESSED: AtomicU64 = AtomicU64::new(0);
@@ -31,9 +51,30 @@ pub struct MiningSettings {
     pub local_work_size: i32,
     pub kernel_size: u32,
     pub inner_iter_size: i32,
-    pub kernel_name: String,
     pub sleep: u32,
     pub gpu_indices: Vec<usize>,
+    pub kernel_type: KernelType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KernelType {
+    LotusOG,
+    POCLBM,
+}
+
+impl std::fmt::Display for KernelType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KernelType::LotusOG => write!(f, "lotus_og"),
+            KernelType::POCLBM => write!(f, "poclbm"),
+        }
+    }
+}
+
+impl Default for KernelType {
+    fn default() -> Self {
+        KernelType::LotusOG
+    }
 }
 
 pub struct Miner {
@@ -41,6 +82,7 @@ pub struct Miner {
     header_buffer: Buffer<u32>,
     buffer: Buffer<u32>,
     settings: MiningSettings,
+    kernel_type: KernelType,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -228,17 +270,45 @@ impl Miner {
         let queue = Queue::new(&context, device, None)?;
         debug!("🔄 Command queue created successfully");
         
-        // Setup and build the kernels
+        // Setup and build the kernels using embedded kernel code
         let mut prog_builder = ProgramBuilder::new();
+        
+        // Use the embedded kernel code based on the selected kernel type
+        let kernel_code = match settings.kernel_type {
+            KernelType::LotusOG => LOTUS_OG_KERNEL,
+            KernelType::POCLBM => POCLBM_KERNEL,
+        };
+        
+        // Log which kernel is being used
+        info!("🔄 Using {} kernel", match settings.kernel_type {
+            KernelType::LotusOG => "Lotus Original (lotus_og)",
+            KernelType::POCLBM => "POCLBM",
+        });
+        
+        // Adjust work group sizes and optimization parameters based on kernel type
+        let (local_work_size, inner_iter_size) = match settings.kernel_type {
+            KernelType::LotusOG => (settings.local_work_size, settings.inner_iter_size),
+            KernelType::POCLBM => {
+                // POCLBM kernel often works better with these values
+                let poclbm_local_size = 64; // Common value for POCLBM kernel
+                let poclbm_inner_size = 8;  // Reduced value to avoid work group size issues
+                
+                info!("🔧 Adjusting POCLBM kernel parameters: local_work_size={}, inner_iter_size={}",
+                      poclbm_local_size, poclbm_inner_size);
+                      
+                (poclbm_local_size, poclbm_inner_size)
+            }
+        };
+        
         prog_builder
-            .src_file(format!("kernels/{}.cl", settings.kernel_name))
-            .cmplr_def("WORKSIZE", settings.local_work_size)
-            .cmplr_def("ITERATIONS", settings.inner_iter_size);
+            .src(kernel_code)
+            .cmplr_def("WORKSIZE", local_work_size)
+            .cmplr_def("ITERATIONS", inner_iter_size);
         
         // Add device to program
         prog_builder.devices(DeviceSpecifier::Single(device));
         
-        info!("🔨 Building OpenCL program...");
+        info!("🔨 Building OpenCL program from embedded kernel...");
         let program = prog_builder.build(&context)?;
         info!("✅ OpenCL program built successfully");
         
@@ -254,11 +324,26 @@ impl Miner {
         
         debug!("🧠 OpenCL buffers allocated successfully");
         
-        let search_kernel = kernel_builder
-            .arg_named("offset", 0u32)
-            .arg_named("partial_header", None::<&Buffer<u32>>)
-            .arg_named("output", None::<&Buffer<u32>>)
-            .build()?;
+        // Create the kernel with appropriate arguments based on kernel type
+        let search_kernel = match settings.kernel_type {
+            KernelType::LotusOG => {
+                kernel_builder
+                    .arg_named("offset", 0u32)
+                    .arg_named("partial_header", None::<&Buffer<u32>>)
+                    .arg_named("output", None::<&Buffer<u32>>)
+                    .build()?
+            },
+            KernelType::POCLBM => {
+                // Use the same simple 3-argument structure for POCLBM as was used in the original implementation
+                // This is a simpler approach than the previous 28-argument setup
+                info!("🔄 Using simplified 3-argument structure for POCLBM kernel");
+                kernel_builder
+                    .arg_named("offset", 0u32)
+                    .arg_named("partial_header", None::<&Buffer<u32>>)
+                    .arg_named("output", None::<&Buffer<u32>>)
+                    .build()?
+            }
+        };
             
         info!(
             "🚀 Lotus miner initialized with kernel size {} ({} bytes), ready to mine!",
@@ -266,11 +351,15 @@ impl Miner {
             crate::miner::format_number(settings.kernel_size as u64)
         );
         
+        // Create the miner with the kernel type
+        let kernel_type = settings.kernel_type;
+        
         Ok(Miner {
             search_kernel,
             buffer,
             header_buffer,
             settings,
+            kernel_type,
         })
     }
 
@@ -352,17 +441,56 @@ impl Miner {
         
         debug!("🧮 Processing nonce batch starting at base: {}", base);
         
+        // Write header data to buffer
         self.header_buffer.write(&partial_header_ints[..]).enq().map_err(Ocl)?;
-        self.search_kernel
-            .set_arg("partial_header", &self.header_buffer).map_err(Ocl)?;
-        self.search_kernel.set_arg("output", &self.buffer).map_err(Ocl)?;
-        self.search_kernel.set_arg("offset", base).map_err(Ocl)?;
+        
+        // Use the mine method to set the kernel arguments based on kernel type
+        match self.kernel_type {
+            KernelType::LotusOG => {
+                // Set the arguments for Lotus OG kernel
+                self.search_kernel
+                    .set_arg("offset", base).map_err(Ocl)?;
+                self.search_kernel
+                    .set_arg("partial_header", &self.header_buffer).map_err(Ocl)?;
+                self.search_kernel
+                    .set_arg("output", &self.buffer).map_err(Ocl)?;
+            },
+            KernelType::POCLBM => {
+                // Use the same simple argument setting for POCLBM
+                self.search_kernel
+                    .set_arg("offset", base).map_err(Ocl)?;
+                self.search_kernel
+                    .set_arg("partial_header", &self.header_buffer).map_err(Ocl)?;
+                self.search_kernel
+                    .set_arg("output", &self.buffer).map_err(Ocl)?;
+            }
+        }
+        
         let mut vec = vec![0; self.buffer.len()];
         self.buffer.write(&vec).enq().map_err(Ocl)?;
-        let cmd = self
-            .search_kernel
-            .cmd()
-            .global_work_size(self.settings.kernel_size);
+        
+        // Setup kernel execution with appropriate work group size based on kernel type
+        let cmd = match self.kernel_type {
+            KernelType::LotusOG => {
+                // For Lotus OG kernel, we can use the original settings
+                self.search_kernel
+                    .cmd()
+                    .global_work_size(self.settings.kernel_size)
+            },
+            KernelType::POCLBM => {
+                // For POCLBM kernel, we need to set both global and local work sizes
+                // The POCLBM kernel typically requires a local work size that is a power of 2
+                // and meets alignment requirements
+                let local_work_size = 64; // Common value that works on most GPUs
+                debug!("🔧 Using local_work_size={} for POCLBM kernel", local_work_size);
+                
+                self.search_kernel
+                    .cmd()
+                    .global_work_size(self.settings.kernel_size)
+                    .local_work_size(local_work_size)
+            }
+        };
+        
         unsafe {
             cmd.enq().map_err(Ocl)?;
         }
