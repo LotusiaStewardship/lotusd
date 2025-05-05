@@ -171,3 +171,4 @@ jobs:
         name: lotus-gpu-miner-debug-${{ inputs.version }}
         path: ./debug-info/
         retention-days: 3
+        
