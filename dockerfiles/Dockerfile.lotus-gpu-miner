@@ -47,6 +47,8 @@ RUN mkdir -p /opt/lotus/bin /opt/lotus/kernels
 
 # Copy built binary from builder stage
 COPY --from=builder /lotus-source/gpuminer/target/release/lotus-miner-cli /opt/lotus/bin/lotus-miner-cli
+# Create a symlink to avoid the "Could not find the file /opt/lotus/bin/lotus-gpu-miner" error
+RUN ln -s /opt/lotus/bin/lotus-miner-cli /opt/lotus/bin/lotus-gpu-miner
 
 # Copy kernels folder which is required at runtime
 COPY --from=builder /lotus-source/gpuminer/kernels /opt/lotus/kernels
