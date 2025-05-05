@@ -1,0 +1,513 @@
+use std::{
+    fmt::Display,
+    fs::{File, OpenOptions},
+    io::{self, Write},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
+};
+
+use chrono::{DateTime, Local};
+use log::{Level, LevelFilter, Log as LogTrait, Metadata, Record};
+use thiserror::Error;
+
+/// Severity levels for logging, matching the log crate's levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogSeverity {
+    Info,
+    Warn,
+    Error,
+    Bug,
+}
+
+impl From<Level> for LogSeverity {
+    fn from(level: Level) -> Self {
+        match level {
+            Level::Error => LogSeverity::Error,
+            Level::Warn => LogSeverity::Warn,
+            Level::Info => LogSeverity::Info,
+            Level::Debug | Level::Trace => LogSeverity::Info,
+        }
+    }
+}
+
+impl From<LogSeverity> for Level {
+    fn from(severity: LogSeverity) -> Self {
+        match severity {
+            LogSeverity::Info => Level::Info,
+            LogSeverity::Warn => Level::Warn,
+            LogSeverity::Error => Level::Error,
+            LogSeverity::Bug => Level::Error,
+        }
+    }
+}
+
+/// A log entry containing a message, severity level, and timestamp
+#[derive(Debug, Clone)]
+pub struct LogRecord {
+    pub msg: String,
+    pub severity: LogSeverity,
+    pub timestamp: DateTime<Local>,
+    pub source: Option<String>,
+}
+
+impl Display for LogRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let source_str = match &self.source {
+            Some(source) => format!(" [{}]", source),
+            None => String::new(),
+        };
+        
+        write!(
+            f,
+            "{} [{:?}]{} {}",
+            self.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+            self.severity,
+            source_str,
+            self.msg
+        )
+    }
+}
+
+impl From<LogRecord> for LogEntry {
+    fn from(record: LogRecord) -> Self {
+        LogEntry {
+            msg: record.msg,
+            severity: record.severity,
+            timestamp: record.timestamp,
+        }
+    }
+}
+
+/// Compatibility struct for existing code
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub msg: String,
+    pub severity: LogSeverity,
+    pub timestamp: DateTime<Local>,
+}
+
+impl Display for LogEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} [{:?}] {}",
+            self.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+            self.severity,
+            self.msg
+        )
+    }
+}
+
+impl From<LogEntry> for LogRecord {
+    fn from(entry: LogEntry) -> Self {
+        LogRecord {
+            msg: entry.msg,
+            severity: entry.severity,
+            timestamp: entry.timestamp,
+            source: None,
+        }
+    }
+}
+
+impl From<&LogEntry> for LogRecord {
+    fn from(entry: &LogEntry) -> Self {
+        LogRecord {
+            msg: entry.msg.clone(),
+            severity: entry.severity,
+            timestamp: entry.timestamp,
+            source: None,
+        }
+    }
+}
+
+/// An entry for tracking hashrate with a timestamp
+#[derive(Debug, Clone)]
+pub struct HashrateEntry {
+    pub hashrate: f64,
+    pub timestamp: DateTime<Local>,
+}
+
+impl Display for HashrateEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} Hashrate {:.3} MH/s",
+            self.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+            self.hashrate / 1_000_000.0
+        )
+    }
+}
+
+/// Errors that can occur during logging operations
+#[derive(Debug, Error)]
+pub enum LoggerError {
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
+    
+    #[error("Failed to acquire lock: {0}")]
+    LockError(String),
+    
+    #[error("Logger not initialized")]
+    NotInitialized,
+}
+
+/// Configuration for the logger
+#[derive(Debug, Clone)]
+pub struct LoggerConfig {
+    /// Whether to log to stdout
+    pub console_output: bool,
+    
+    /// Whether to log to a file
+    pub file_output: bool,
+    
+    /// Path to the log file (if file_output is true)
+    pub log_file_path: Option<PathBuf>,
+    
+    /// Maximum number of log entries to keep in memory
+    pub max_log_entries: usize,
+    
+    /// Maximum number of hashrate entries to keep in memory
+    pub max_hashrate_entries: usize,
+    
+    /// Minimum log level to record
+    pub level: LevelFilter,
+}
+
+impl Default for LoggerConfig {
+    fn default() -> Self {
+        Self {
+            console_output: true,
+            file_output: false,
+            log_file_path: None,
+            max_log_entries: 1000,
+            max_hashrate_entries: 1000,
+            level: LevelFilter::Info,
+        }
+    }
+}
+
+/// The main logger struct
+pub struct Logger {
+    logs: RwLock<Vec<LogRecord>>,
+    hashrates: RwLock<Vec<HashrateEntry>>,
+    config: RwLock<LoggerConfig>,
+    file: RwLock<Option<File>>,
+}
+
+impl Logger {
+    /// Create a new logger with the given configuration
+    pub fn new(config: LoggerConfig) -> Result<Arc<Self>, LoggerError> {
+        let file = if config.file_output {
+            if let Some(path) = &config.log_file_path {
+                let file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .append(true)
+                    .open(path)?;
+                Some(file)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        let logger = Arc::new(Self {
+            logs: RwLock::new(Vec::with_capacity(config.max_log_entries)),
+            hashrates: RwLock::new(Vec::with_capacity(config.max_hashrate_entries)),
+            config: RwLock::new(config),
+            file: RwLock::new(file),
+        });
+        
+        Ok(logger)
+    }
+    
+    /// Initialize the logger as the global logger for the log crate
+    pub fn init(logger: Arc<Logger>) -> Result<(), log::SetLoggerError> {
+        let level = {
+            let config = logger.config.read().map_err(|e| {
+                log::SetLoggerError::new(Box::leak(Box::new(e.to_string())))
+            })?;
+            config.level
+        };
+        
+        log::set_max_level(level);
+        log::set_boxed_logger(Box::new(LoggerWrapper(logger)))?;
+        
+        Ok(())
+    }
+    
+    /// Log a message with the given severity
+    pub fn log(&self, record: impl Into<LogRecord>) {
+        let record = record.into();
+        
+        // Print to console if enabled
+        if let Ok(config) = self.config.read() {
+            if config.console_output {
+                println!("{}", record);
+            }
+            
+            // Write to file if enabled
+            if config.file_output {
+                if let Ok(mut file_guard) = self.file.write() {
+                    if let Some(file) = file_guard.as_mut() {
+                        let _ = writeln!(file, "{}", record);
+                        let _ = file.flush();
+                    }
+                }
+            }
+        }
+        
+        // Store in memory
+        if let Ok(mut logs) = self.logs.write() {
+            logs.push(record);
+            
+            // Trim if exceeding max size
+            if let Ok(config) = self.config.read() {
+                if logs.len() > config.max_log_entries {
+                    logs.drain(0..logs.len() - config.max_log_entries);
+                }
+            }
+        }
+    }
+    
+    /// Log a message with the given severity
+    pub fn log_str(&self, msg: impl ToString, severity: LogSeverity) {
+        self.log(LogRecord {
+            msg: msg.to_string(),
+            severity,
+            timestamp: Local::now(),
+            source: None,
+        });
+    }
+    
+    /// Log an info message
+    pub fn info(&self, msg: impl ToString) {
+        self.log_str(msg, LogSeverity::Info);
+    }
+    
+    /// Log a warning message
+    pub fn warn(&self, msg: impl ToString) {
+        self.log_str(msg, LogSeverity::Warn);
+    }
+    
+    /// Log an error message
+    pub fn error(&self, msg: impl ToString) {
+        self.log_str(msg, LogSeverity::Error);
+    }
+    
+    /// Log a bug message
+    pub fn bug(&self, msg: impl ToString) {
+        self.log_str(msg, LogSeverity::Bug);
+    }
+    
+    /// Get all logs
+    pub fn get_logs(&self) -> Vec<LogRecord> {
+        self.logs.read().map(|logs| logs.clone()).unwrap_or_default()
+    }
+    
+    /// Get all logs and clear the log buffer
+    pub fn get_logs_and_clear(&self) -> Vec<LogEntry> {
+        if let Ok(mut logs) = self.logs.write() {
+            let result: Vec<LogEntry> = logs.drain(..).map(|r| r.into()).collect();
+            result
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Report a hashrate
+    pub fn report_hashrate(&self, hashrate: f64) {
+        let entry = HashrateEntry {
+            hashrate,
+            timestamp: Local::now(),
+        };
+        
+        // Log the hashrate
+        log::info!("Hashrate: {:.2} MH/s", hashrate / 1_000_000.0);
+        
+        // Store in memory
+        if let Ok(mut hashrates) = self.hashrates.write() {
+            hashrates.push(entry);
+            
+            // Trim if exceeding max size
+            if let Ok(config) = self.config.read() {
+                if hashrates.len() > config.max_hashrate_entries {
+                    hashrates.drain(0..hashrates.len() - config.max_hashrate_entries);
+                }
+            }
+        }
+    }
+    
+    /// Get all hashrates
+    pub fn hashrates(&self) -> Vec<HashrateEntry> {
+        self.hashrates.read().map(|h| h.clone()).unwrap_or_default()
+    }
+    
+    /// Get read access to the hashrates
+    pub fn hashrates_read<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, Vec<HashrateEntry>> {
+        self.hashrates.read().unwrap()
+    }
+    
+    /// Set the log level
+    pub fn set_level(&self, level: LevelFilter) -> Result<(), LoggerError> {
+        let mut config = self.config.write().map_err(|e| LoggerError::LockError(e.to_string()))?;
+        config.level = level;
+        log::set_max_level(level);
+        Ok(())
+    }
+    
+    /// Enable or disable console output
+    pub fn set_console_output(&self, enabled: bool) -> Result<(), LoggerError> {
+        let mut config = self.config.write().map_err(|e| LoggerError::LockError(e.to_string()))?;
+        config.console_output = enabled;
+        Ok(())
+    }
+    
+    /// Enable or disable file output and set the file path
+    pub fn set_file_output(&self, enabled: bool, path: Option<PathBuf>) -> Result<(), LoggerError> {
+        let mut config = self.config.write().map_err(|e| LoggerError::LockError(e.to_string()))?;
+        config.file_output = enabled;
+        config.log_file_path = path.clone();
+        
+        let mut file_guard = self.file.write().map_err(|e| LoggerError::LockError(e.to_string()))?;
+        *file_guard = if enabled {
+            if let Some(path) = path {
+                Some(OpenOptions::new().write(true).create(true).append(true).open(path)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        Ok(())
+    }
+}
+
+/// Implements the backward compatibility with the existing Log struct
+pub struct Log {
+    inner: Arc<Logger>,
+}
+
+impl Log {
+    pub fn new() -> Self {
+        // Create a default logger
+        let config = LoggerConfig::default();
+        let logger = Logger::new(config).unwrap();
+        
+        // Try to initialize it as the global logger
+        let _ = Logger::init(Arc::clone(&logger));
+        
+        Self { inner: logger }
+    }
+    
+    pub fn log(&self, entry: impl Into<LogEntry>) {
+        let entry = entry.into();
+        let record: LogRecord = (&entry).into();
+        self.inner.log(record);
+    }
+    
+    pub fn log_str(&self, msg: impl ToString, severity: LogSeverity) {
+        self.inner.log_str(msg, severity);
+    }
+    
+    pub fn info(&self, msg: impl ToString) {
+        self.inner.info(msg);
+    }
+    
+    pub fn warn(&self, msg: impl ToString) {
+        self.inner.warn(msg);
+    }
+    
+    pub fn error(&self, msg: impl ToString) {
+        self.inner.error(msg);
+    }
+    
+    pub fn bug(&self, msg: impl ToString) {
+        self.inner.bug(msg);
+    }
+    
+    pub fn get_logs_and_clear(&self) -> Vec<LogEntry> {
+        self.inner.get_logs_and_clear()
+    }
+    
+    pub fn report_hashrate(&self, hashrate: f64) {
+        self.inner.report_hashrate(hashrate);
+    }
+    
+    pub fn hashrates<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, Vec<HashrateEntry>> {
+        self.inner.hashrates_read()
+    }
+}
+
+/// Wrapper for the Logger to implement the log::Log trait
+struct LoggerWrapper(Arc<Logger>);
+
+impl LogTrait for LoggerWrapper {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        if let Ok(config) = self.0.config.read() {
+            metadata.level() <= config.level
+        } else {
+            // If we can't read the config, assume enabled
+            true
+        }
+    }
+    
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            let severity = LogSeverity::from(record.level());
+            let source = record.module_path().map(|s| s.to_string());
+            
+            self.0.log(LogRecord {
+                msg: record.args().to_string(),
+                severity,
+                timestamp: Local::now(),
+                source,
+            });
+        }
+    }
+    
+    fn flush(&self) {
+        if let Ok(file_guard) = self.0.file.write() {
+            if let Some(file) = file_guard.as_ref() {
+                let _ = file.sync_all();
+            }
+        }
+    }
+}
+
+// Initialize a global static logger that can be accessed from anywhere
+static LOGGER_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+/// Get the global logger instance
+pub fn get_global_logger() -> Result<Arc<Logger>, LoggerError> {
+    if !LOGGER_INITIALIZED.load(Ordering::SeqCst) {
+        return Err(LoggerError::NotInitialized);
+    }
+    
+    // Since we can't directly access the logger from the log crate,
+    // we'll create a new one with the current settings
+    let config = LoggerConfig {
+        level: log::max_level(),
+        ..Default::default()
+    };
+    
+    Logger::new(config)
+}
+
+/// Initialize the global logger with custom configuration
+pub fn init_global_logger(config: LoggerConfig) -> Result<Arc<Logger>, Box<dyn std::error::Error>> {
+    let logger = Logger::new(config)?;
+    Logger::init(Arc::clone(&logger))?;
+    LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
+    Ok(logger)
+}
+
+/// Initialize the global logger with default configuration
+pub fn init_default_logger() -> Result<Arc<Logger>, Box<dyn std::error::Error>> {
+    init_global_logger(LoggerConfig::default())
+}
