@@ -22,7 +22,7 @@ use clap::Parser;
 /// Example usage:
 ///   lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining
 ///
-/// For more information, visit: https://github.com/lotus/lotus-miner
+/// For more information, visit: https://github.com/Boblepointu/lotusd/blob/master/gpuminer/README.md
 #[derive(Parser, Debug)]
 #[clap(
     name = "Lotus GPU Miner",
@@ -31,7 +31,7 @@ use clap::Parser;
     about = "🌸 High-performance OpenCL miner for the Lotus blockchain.",
     long_about = None,
     after_help = "\
-EXAMPLES:\n  lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining\n\nFor more information, visit: https://github.com/lotus/lotus-miner\n\nDeveloped by Alexandre Guillioud (FrenchBTC - alexandre@burnlotus.org) and Tobias Ruck (ruck.tobias@gmail.com).\n"
+EXAMPLES:\n  lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining\n\nFor more information, visit: https://github.com/Boblepointu/lotusd/blob/master/gpuminer/README.md\n\nDeveloped by Alexandre Guillioud (FrenchBTC - alexandre@burnlotus.org) and Tobias Ruck (ruck.tobias@gmail.com).\n"
 )]
 struct Cli {
     /// Path to a configuration file in TOML format. Overrides defaults if present.
