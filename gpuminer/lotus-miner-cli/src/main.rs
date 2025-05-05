@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Initialize the global logger
     init_global_logger(logger_config).map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+    info!("Author: Alexandre Guillioud - FrenchBTC");
     info!("🌸 Lotus GPU Miner CLI started");
     
     // Load configuration

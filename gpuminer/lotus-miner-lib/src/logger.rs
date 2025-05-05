@@ -57,10 +57,6 @@ pub struct LogRecord {
 
 impl Display for LogRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source_str = match &self.source {
-            Some(source) => format!(" [{}]", source),
-            None => String::new(),
-        };
         let tag = format!("{:<9}", self.tag).bold();
         let tag_colored = match self.tag.to_lowercase().as_str() {
             "status" => tag.bright_cyan(),
@@ -79,11 +75,10 @@ impl Display for LogRecord {
         };
         write!(
             f,
-            "[{}] [{}] [{}]{} {}",
+            "[{}] [{}] [{}] {}",
             self.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
             tag_colored,
             level_colored,
-            source_str,
             self.msg
         )
     }
@@ -370,14 +365,12 @@ impl Logger {
             hashrate,
             timestamp: Local::now(),
         };
-        
-        // Log the hashrate
-        log::info!("Hashrate: {:.2} MH/s", hashrate / 1_000_000.0);
-        
+        // Log the hashrate with emoji and formatted value
+        let formatted = crate::miner::format_hashes_per_sec(hashrate as u64);
+        self.info(format!("💯 Hashrate: {}", formatted), Some("General"));
         // Store in memory
         if let Ok(mut hashrates) = self.hashrates.write() {
             hashrates.push(entry);
-            
             // Trim if exceeding max size
             if let Ok(config) = self.config.read() {
                 if hashrates.len() > config.max_hashrate_entries {
@@ -507,14 +500,12 @@ impl LogTrait for LoggerWrapper {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             let severity = LogSeverity::from(record.level());
-            let source = record.module_path().map(|s| s.to_string());
-            
             self.0.log(LogRecord {
                 msg: record.args().to_string(),
                 severity,
                 timestamp: Local::now(),
-                tag: String::new(),
-                source,
+                tag: "General".to_string(),
+                source: None,
             });
         }
     }

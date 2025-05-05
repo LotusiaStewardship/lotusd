@@ -1,7 +1,10 @@
 [package]
 name = "lotus-miner-lib"
-version = "0.3.0"
-authors = ["Tobias Ruck <ruck.tobias@gmail.com>"]
+version = "0.4.0"
+authors = [
+    "Tobias Ruck <ruck.tobias@gmail.com>",
+    "Alexandre Guillioud - FrenchBTC <alexandre@burnlotus.org>"
+]
 edition = "2018"
 
 [dependencies]
