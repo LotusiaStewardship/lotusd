@@ -66,6 +66,7 @@ fi\n\
 echo "Detected $GPU_COUNT GPUs"\n\
 \n\
 # Set default values for parameters\n\
+GPU_INDEX=${GPU_INDEX:-0}\n\
 KERNEL_SIZE=${KERNEL_SIZE:-22}\n\
 RPC_URL=${RPC_URL:-"https://burnlotus.org"}\n\
 RPC_USER=${RPC_USER:-"miner"}\n\
@@ -73,7 +74,70 @@ RPC_PASSWORD=${RPC_PASSWORD:-"password"}\n\
 RPC_POLL_INTERVAL=${RPC_POLL_INTERVAL:-1}\n\
 POOL_MINING=${POOL_MINING:-true}\n\
 INSTANCES_PER_GPU=${INSTANCES_PER_GPU:-4}\n\
-CONFIG_PARAM=""\n\
+CONFIG_FILE=${CONFIG_FILE:-""}\n\
+\n\
+# Process command line arguments - properly handle both short and long options\n\
+PASSTHROUGH_ARGS=""\n\
+ADDR_FOUND=false\n\
+\n\
+# If there is only one argument and it starts with "lotus_", treat it as the miner address\n\
+if [[ $# -eq 1 && "$1" == lotus_* ]]; then\n\
+  MINER_ADDRESS="$1"\n\
+  ADDR_FOUND=true\n\
+else\n\
+  # Otherwise parse arguments properly\n\
+  while [[ $# -gt 0 ]]; do\n\
+    case "$1" in\n\
+      -o|--mine-to-address)\n\
+        MINER_ADDRESS="$2"\n\
+        ADDR_FOUND=true\n\
+        shift 2\n\
+        ;;\n\
+      -g|--gpu-index)\n\
+        GPU_INDEX="$2"\n\
+        shift 2\n\
+        ;;\n\
+      -s|--kernel-size)\n\
+        KERNEL_SIZE="$2"\n\
+        shift 2\n\
+        ;;\n\
+      -i|--rpc-poll-interval)\n\
+        RPC_POLL_INTERVAL="$2"\n\
+        shift 2\n\
+        ;;\n\
+      -a|--rpc-url)\n\
+        RPC_URL="$2"\n\
+        shift 2\n\
+        ;;\n\
+      -u|--rpc-user)\n\
+        RPC_USER="$2"\n\
+        shift 2\n\
+        ;;\n\
+      -p|--rpc-password)\n\
+        RPC_PASSWORD="$2"\n\
+        shift 2\n\
+        ;;\n\
+      -c|--config)\n\
+        CONFIG_FILE="$2"\n\
+        shift 2\n\
+        ;;\n\
+      -m|--poolmining)\n\
+        POOL_MINING=true\n\
+        shift\n\
+        ;;\n\
+      -d|--debug)\n\
+        DEBUG=true\n\
+        PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $1"\n\
+        shift\n\
+        ;;\n\
+      *)\n\
+        # For any other arguments, pass them through\n\
+        PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $1"\n\
+        shift\n\
+        ;;\n\
+    esac\n\
+  done\n\
+fi\n\
 \n\
 # Set pool mining flag if enabled\n\
 POOL_MINING_FLAG=""\n\
@@ -82,18 +146,14 @@ if [[ "$POOL_MINING" == "true" ]]; then\n\
 fi\n\
 \n\
 # Set config file parameter if provided\n\
+CONFIG_PARAM=""\n\
 if [[ -n "$CONFIG_FILE" ]]; then\n\
   CONFIG_PARAM="--config $CONFIG_FILE"\n\
 fi\n\
 \n\
-# Check if a miner address was provided as a parameter or environment variable\n\
-MINER_ADDRESS=${MINER_ADDRESS:-""}\n\
-if [[ -n "$1" ]]; then\n\
-  MINER_ADDRESS="$1"\n\
-fi\n\
-\n\
 if [[ -n "$MINER_ADDRESS" ]]; then\n\
   echo "Using provided miner address: $MINER_ADDRESS"\n\
+  ADDR_FOUND=true\n\
 fi\n\
 \n\
 # Function to get a random address\n\
@@ -136,7 +196,8 @@ do\n\
       -u $RPC_USER \\\n\
       -p $RPC_PASSWORD \\\n\
       $POOL_MINING_FLAG \\\n\
-      $CONFIG_PARAM &\n\
+      $CONFIG_PARAM \\\n\
+      $PASSTHROUGH_ARGS &\n\
   done\n\
 done\n\
 \n\
