@@ -225,8 +225,15 @@ jobs:
     - name: Download package artifacts
       uses: actions/download-artifact@v4
       with:
-        path: ./all-artifacts
-        merge-multiple: false
+        name: lotus-combined-packages-${{ inputs.version }}
+        path: ./combined-packages
+
+    # Download individual package artifacts
+    - name: Download individual package artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: lotus-individual-packages-${{ inputs.version }}
+        path: ./individual-packages
 
     # Create the release-packages directory structure
     - name: Prepare release packages
@@ -234,13 +241,13 @@ jobs:
         mkdir -p ./release-packages
         
         # Copy combined packages
-        if [ -d "./all-artifacts/lotus-combined-packages-${{ inputs.version }}" ]; then
-          cp -r ./all-artifacts/lotus-combined-packages-${{ inputs.version }}/* ./release-packages/
+        if [ -d "./combined-packages" ]; then
+          cp -v ./combined-packages/* ./release-packages/
         fi
         
         # Copy individual packages
-        if [ -d "./all-artifacts/lotus-individual-packages-${{ inputs.version }}" ]; then
-          cp -r ./all-artifacts/lotus-individual-packages-${{ inputs.version }}/* ./release-packages/
+        if [ -d "./individual-packages" ]; then
+          cp -v ./individual-packages/* ./release-packages/
         fi
         
         # List all files in release-packages for debugging
