@@ -36,20 +36,24 @@ jobs:
 
     - name: Set repository owner
       run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
-
     - name: Build and extract artifacts
       run: |
         # Create artifacts directory
-        mkdir -p ./artifacts/kernels
+        mkdir -p ./artifacts
 
         # Build the Docker image with --load flag to ensure it's available locally
         docker buildx build --load -t lotus-gpu-miner:local -f dockerfiles/Dockerfile.lotus-gpu-miner .
 
-        # Extract the binary and kernels from the local image
+        # Extract the binary from the local image
+        # Note: The kernels are now embedded in the binary, so we don't need to copy them separately
         container_id=$(docker create lotus-gpu-miner:local)
         docker cp $container_id:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
-        docker cp $container_id:/opt/lotus/kernels ./artifacts/
         docker rm $container_id
+
+        # Create a symlink for backward compatibility
+        cd ./artifacts
+        ln -sf lotus-gpu-miner lotus-miner-cli
+        cd ..
 
         # If not a PR, tag and push to registry
         if [ "${{ github.event_name }}" != "pull_request" ]; then
