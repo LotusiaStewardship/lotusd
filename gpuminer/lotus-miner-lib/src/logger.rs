@@ -152,6 +152,9 @@ pub enum LoggerError {
     
     #[error("Logger not initialized")]
     NotInitialized,
+
+    #[error("Failed to set logger: {0}")]
+    SetLogger(String),
 }
 
 /// Configuration for the logger
@@ -226,18 +229,18 @@ impl Logger {
     }
     
     /// Initialize the logger as the global logger for the log crate
-    pub fn init(logger: Arc<Logger>) -> Result<(), log::SetLoggerError> {
+    pub fn init(logger: Arc<Logger>) -> Result<(), LoggerError> {
         let level = {
-            let config = logger.config.read().map_err(|e| {
-                log::SetLoggerError::new(Box::leak(Box::new(e.to_string())))
-            })?;
+            let config = logger
+                .config
+                .read()
+                .map_err(|e| LoggerError::LockError(e.to_string()))?;
             config.level
         };
         
         log::set_max_level(level);
-        log::set_boxed_logger(Box::new(LoggerWrapper(logger)))?;
-        
-        Ok(())
+        log::set_logger(Box::leak(Box::new(LoggerWrapper(logger))))
+            .map_err(|e| LoggerError::SetLogger(e.to_string()))
     }
     
     /// Log a message with the given severity
@@ -268,7 +271,9 @@ impl Logger {
             // Trim if exceeding max size
             if let Ok(config) = self.config.read() {
                 if logs.len() > config.max_log_entries {
-                    logs.drain(0..logs.len() - config.max_log_entries);
+                    let to_keep = config.max_log_entries;
+                    let len = logs.len();
+                    logs.drain(0..len - to_keep);
                 }
             }
         }
@@ -336,7 +341,9 @@ impl Logger {
             // Trim if exceeding max size
             if let Ok(config) = self.config.read() {
                 if hashrates.len() > config.max_hashrate_entries {
-                    hashrates.drain(0..hashrates.len() - config.max_hashrate_entries);
+                    let to_keep = config.max_hashrate_entries;
+                    let len = hashrates.len();
+                    hashrates.drain(0..len - to_keep);
                 }
             }
         }
@@ -500,7 +507,7 @@ pub fn get_global_logger() -> Result<Arc<Logger>, LoggerError> {
 }
 
 /// Initialize the global logger with custom configuration
-pub fn init_global_logger(config: LoggerConfig) -> Result<Arc<Logger>, Box<dyn std::error::Error>> {
+pub fn init_global_logger(config: LoggerConfig) -> Result<Arc<Logger>, LoggerError> {
     let logger = Logger::new(config)?;
     Logger::init(Arc::clone(&logger))?;
     LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
@@ -508,6 +515,6 @@ pub fn init_global_logger(config: LoggerConfig) -> Result<Arc<Logger>, Box<dyn s
 }
 
 /// Initialize the global logger with default configuration
-pub fn init_default_logger() -> Result<Arc<Logger>, Box<dyn std::error::Error>> {
+pub fn init_default_logger() -> Result<Arc<Logger>, LoggerError> {
     init_global_logger(LoggerConfig::default())
 }
