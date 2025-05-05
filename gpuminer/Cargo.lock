@@ -1368,7 +1368,7 @@ checksum = "518ef76f2f87365916b142844c16d8fefd85039bc5699050210a7778ee1cd1de"
 
 [[package]]
 name = "lotus-miner-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "config",
  "ctrlc",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "lotus-miner-lib"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bitcoincash-addr",
  "chrono",

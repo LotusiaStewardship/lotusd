@@ -190,13 +190,13 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
     if let Some(current_block) = &block_state.current_block {
         if current_block.prev_hash() != block.prev_hash() {
             log.info(format!(
-                "Switched to new chain tip: {}",
+                "🔀 Switched to new chain tip: {}",
                 display_hash(&block.prev_hash())
             ), Some("Miner"));
         }
     } else {
         log.info(format!(
-            "Started mining on chain tip: {}",
+            "🌱 Started mining on chain tip: {}",
             display_hash(&block.prev_hash())
         ), Some("Miner"));
     }
@@ -360,7 +360,14 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                         log.error("Something is misconfigured; make sure you run the latest lotusd/Lotus-QT and lotus-gpu-miner.", Some("Share"));
                     } else {
                         if pool_mining {
-                            log.info("Share accepted!", Some("Share"));
+                            log.info(
+                                format!(
+                                    "Share accepted by \"{}\" for \"{}\" !",
+                                    server.node_settings.lock().await.bitcoind_url,
+                                    server.node_settings.lock().await.miner_addr
+                                ),
+                                Some("Share")
+                            );
                         } else {
                             log.info("Block accepted!", Some("Share"));
                         }
@@ -369,7 +376,14 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                 Some(reason) => {
                     if reason.is_empty() {
                         if pool_mining {
-                            log.info("Share accepted!", Some("Share"));
+                            log.info(
+                                format!(
+                                    "Share accepted by \"{}\" for \"{}\" !",
+                                    server.node_settings.lock().await.bitcoind_url,
+                                    server.node_settings.lock().await.miner_addr
+                                ),
+                                Some("Share")
+                            );
                         } else {
                             log.info("Block accepted!", Some("Share"));
                         }
