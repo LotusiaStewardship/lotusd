@@ -78,14 +78,14 @@ You can download the latest Lotus GPU Miner binaries from the [GitHub Releases p
 
 ```bash
 # For tar.gz format
-wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-gpu-miner-latest.tar.gz
-tar -xzf lotus-gpu-miner-latest.tar.gz
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-gpu-miner-0.4.0.tar.gz
+tar -xzf lotus-gpu-miner-0.4.0.tar.gz
 cd lotus-gpu-miner
 chmod +x lotus-miner-cli
 
 # For zip format
-wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-gpu-miner-latest.zip
-unzip lotus-gpu-miner-latest.zip
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-gpu-miner-0.4.0.zip
+unzip lotus-gpu-miner-0.4.0.zip
 chmod +x lotus-miner-cli
 ```
 
@@ -93,20 +93,19 @@ chmod +x lotus-miner-cli
 
 ```bash
 # For tar.gz format
-wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-binaries-latest.tar.gz
-
-# Extract just the GPU miner
-mkdir -p lotus-miner
-tar -xzf lotus-binaries-latest.tar.gz -C lotus-miner --strip-components=1 gpu-miner-package/lotus-miner-cli gpu-miner-package/kernels/
-chmod +x lotus-miner/lotus-miner-cli
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-binaries-0.4.0.tar.gz
+tar -xzf lotus-binaries-0.4.0.tar.gz
+cd gpu-miner-package
+chmod +x lotus-miner-cli
 
 # For zip format
-wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-binaries-latest.zip
-unzip -j lotus-binaries-latest.zip "gpu-miner-package/lotus-miner-cli" "gpu-miner-package/kernels/*" -d lotus-miner
-chmod +x lotus-miner/lotus-miner-cli
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-binaries-0.4.0.zip
+unzip lotus-binaries-0.4.0.zip
+cd gpu-miner-package
+chmod +x lotus-miner-cli
 ```
 
-> **⚠️ Important**: Always ensure you have the `kernels` directory in the same location as the binary. The OpenCL kernel files are required for the GPU miner to function correctly.
+> **⚠️ Important**: Always ensure you have the `kernels` directory in the same location as the binary. The OpenCL kernel files are required for the GPU miner to function correctly. Both the individual and combined packages include this directory structure.
 
 #### 🏊‍♂️ Example: Mining on a Pool
 
