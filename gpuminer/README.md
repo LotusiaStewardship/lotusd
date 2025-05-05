@@ -70,7 +70,7 @@ You can download the latest Lotus GPU Miner binaries from the [GitHub Releases p
 - **Zip Archive**: `lotus-binaries-[VERSION].zip` - Same contents as the tar.gz but in zip format
 
 ##### GPU Miner Specific Packages
-- **Tar Archive**: `lotus-gpu-miner-[VERSION].tar.gz` - Contains only the GPU miner with required kernel files
+- **Tar Archive**: `lotus-gpu-miner-[VERSION].tar.gz` - Contains only the GPU miner with required OpenCL kernels
 - **Zip Archive**: `lotus-gpu-miner-[VERSION].zip` - Same as above but in zip format
 
 #### Installation Instructions
@@ -80,14 +80,20 @@ You can download the latest Lotus GPU Miner binaries from the [GitHub Releases p
 ```bash
 # For tar.gz format
 wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-gpu-miner-0.4.0.tar.gz
-tar -xzf lotus-gpu-miner-0.4.0.tar.gz
-cd lotus-gpu-miner
+tar -xzf lotus-gpu-miner-0.4.0.tar.gz -C .
+cd gpu-miner-dir
 chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+
+# You can also use the symlink if you prefer:
+# ./lotus-gpu-miner -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
 
 # For zip format
 wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-gpu-miner-0.4.0.zip
-unzip lotus-gpu-miner-0.4.0.zip
+unzip lotus-gpu-miner-0.4.0.zip -d gpu-miner-dir
+cd gpu-miner-dir
 chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
 ```
 
 ##### Extracting from the Combined Package
@@ -98,12 +104,14 @@ wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus
 tar -xzf lotus-binaries-0.4.0.tar.gz
 cd gpu-miner-package
 chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
 
 # For zip format
 wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-binaries-0.4.0.zip
-unzip lotus-binaries-0.4.0.zip
+unzip lotus-binaries-0.4.0.zip -d gpu-miner-package
 cd gpu-miner-package
 chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
 ```
 
 > **ℹ️ Note**: The OpenCL kernel code is now embedded directly in the binary, eliminating the need for the external `kernels` directory. This provides a cleaner, more reliable distribution and a fully self-contained binary.
