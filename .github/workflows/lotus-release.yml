@@ -19,6 +19,7 @@ jobs:
       run: |
         mkdir -p ./artifacts
         mkdir -p ./individual-packages
+        mkdir -p ./debug-info
 
     # Download all artifacts
     - name: Download artifacts
@@ -27,6 +28,14 @@ jobs:
         pattern: "*-${{ inputs.version }}"
         path: ./artifacts/
         merge-multiple: true
+    
+    # Debug output of downloaded artifacts
+    - name: Debug output of downloaded artifacts
+      run: |
+        echo "Contents of ./artifacts directory:"
+        ls -la ./artifacts/
+        find ./artifacts -type f | sort > ./debug-info/found-artifacts.txt
+        cat ./debug-info/found-artifacts.txt
 
     # Make sure all binaries are executable
     - name: Set permissions
@@ -41,8 +50,12 @@ jobs:
         # Create directory structure
         mkdir -p gpu-miner-package
 
-        # Copy binaries
-        cp lotus* gpu-miner-package/
+        # Copy all binaries
+        cp -v lotus* gpu-miner-package/ || true
+        
+        # Additional debug info
+        echo "Files in gpu-miner-package:"
+        ls -la gpu-miner-package/
 
         # Create tarball
         tar -czvf lotus-binaries-${{ inputs.version }}.tar.gz gpu-miner-package/
@@ -58,38 +71,55 @@ jobs:
         # Clean up any existing directories first to avoid conflicts
         rm -rf gpu-miner-dir lotus-node-dir lotus-qt-dir lotus-cli-dir
         
-        # Package the GPU miner binary
-        if [ -f "lotus-miner-cli" ]; then
+        # Package the GPU miner binary - check for both names
+        if [ -f "lotus-miner-cli" ] || [ -f "lotus-gpu-miner" ]; then
+          echo "Found GPU miner binary, packaging it..."
+          
           # Create directory for GPU miner
           mkdir -p gpu-miner-dir
-          # Copy the binary and create a symlink with the expected name
-          cp lotus-miner-cli gpu-miner-dir/
-          cd gpu-miner-dir
-          ln -sf lotus-miner-cli lotus-gpu-miner
-          cd ..
+          
+          # Copy the binary and ensure both names are available
+          if [ -f "lotus-miner-cli" ]; then
+            cp -v lotus-miner-cli gpu-miner-dir/
+            if [ ! -f "lotus-gpu-miner" ]; then
+              cd gpu-miner-dir
+              ln -sf lotus-miner-cli lotus-gpu-miner
+              cd ..
+            fi
+          elif [ -f "lotus-gpu-miner" ]; then
+            cp -v lotus-gpu-miner gpu-miner-dir/
+            cd gpu-miner-dir
+            ln -sf lotus-gpu-miner lotus-miner-cli
+            cd ..
+          fi
           
           # Include required kernels if they exist
           if [ -d "./kernels" ]; then
             mkdir -p gpu-miner-dir/kernels
-            cp -r kernels/* gpu-miner-dir/kernels/ || true
+            cp -rv kernels/* gpu-miner-dir/kernels/ || true
           fi
           
           # Create tarball
+          echo "Creating GPU miner tarball..."
           tar -czvf ../individual-packages/lotus-gpu-miner-${{ inputs.version }}.tar.gz gpu-miner-dir/
           
           # Create zip
+          echo "Creating GPU miner zip..."
           cd gpu-miner-dir
           zip -r ../../individual-packages/lotus-gpu-miner-${{ inputs.version }}.zip .
           cd ..
           
           # Clean up
           rm -rf gpu-miner-dir
+        else
+          echo "WARNING: GPU miner binary not found! Checking directory contents:"
+          ls -la
         fi
         
         # Package the node binary
         if [ -f "lotusd" ]; then
           mkdir -p lotus-node-dir
-          cp lotusd lotus-node-dir/
+          cp -v lotusd lotus-node-dir/
           
           # Create tarball
           tar -czvf ../individual-packages/lotus-node-${{ inputs.version }}.tar.gz lotus-node-dir/
@@ -106,7 +136,7 @@ jobs:
         # Package the QT wallet
         if [ -f "lotus-qt" ]; then
           mkdir -p lotus-qt-dir
-          cp lotus-qt lotus-qt-dir/
+          cp -v lotus-qt lotus-qt-dir/
           
           # Create tarball
           tar -czvf ../individual-packages/lotus-qt-${{ inputs.version }}.tar.gz lotus-qt-dir/
@@ -123,7 +153,7 @@ jobs:
         # Package other CLI tools
         if [ -f "lotus-cli" ]; then
           mkdir -p lotus-cli-dir
-          cp lotus-cli lotus-cli-dir/
+          cp -v lotus-cli lotus-cli-dir/
           
           # Create tarball
           tar -czvf ../individual-packages/lotus-cli-${{ inputs.version }}.tar.gz lotus-cli-dir/
@@ -139,6 +169,10 @@ jobs:
         
         # Clean up
         rm -rf gpu-miner-package
+        
+        # Check the individual packages directory
+        echo "Contents of individual-packages directory:"
+        ls -la ../individual-packages/
 
     # Upload combined artifacts
     - name: Upload combined artifacts
@@ -157,6 +191,14 @@ jobs:
         name: lotus-individual-packages-${{ inputs.version }}
         path: ./individual-packages/*
         retention-days: 14
+        
+    # Upload debug info
+    - name: Upload debug info
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-debug-info-${{ inputs.version }}
+        path: ./debug-info/
+        retention-days: 1
 
   # Create the Git tag
   create-tag:
@@ -221,36 +263,23 @@ jobs:
         ref: master
         fetch-depth: 0
 
-    # Download all package artifacts
-    - name: Download package artifacts
+    # Download combined packages
+    - name: Download combined packages
       uses: actions/download-artifact@v4
       with:
         name: lotus-combined-packages-${{ inputs.version }}
-        path: ./combined-packages
+        path: ./release-packages
 
-    # Download individual package artifacts
-    - name: Download individual package artifacts
+    # Download individual packages
+    - name: Download individual packages
       uses: actions/download-artifact@v4
       with:
         name: lotus-individual-packages-${{ inputs.version }}
-        path: ./individual-packages
-
-    # Create the release-packages directory structure
-    - name: Prepare release packages
+        path: ./release-packages
+        
+    # Print contents of release packages directory
+    - name: List release files
       run: |
-        mkdir -p ./release-packages
-        
-        # Copy combined packages
-        if [ -d "./combined-packages" ]; then
-          cp -v ./combined-packages/* ./release-packages/
-        fi
-        
-        # Copy individual packages
-        if [ -d "./individual-packages" ]; then
-          cp -v ./individual-packages/* ./release-packages/
-        fi
-        
-        # List all files in release-packages for debugging
         echo "Files to be included in release:"
         ls -la ./release-packages/
 
