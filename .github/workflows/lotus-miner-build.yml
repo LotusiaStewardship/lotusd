@@ -36,44 +36,163 @@ jobs:
 
     - name: Set repository owner
       run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
+    - name: Create artifacts directory
+      run: |
+        mkdir -p ./artifacts
+        mkdir -p ./debug-info
+      
+    # Build and extract with detailed error handling
     - name: Build and extract artifacts
       run: |
-        # Create artifacts directory
-        mkdir -p ./artifacts
-
+        echo "Starting the GPU miner build process..."
+        
         # Build the Docker image with --load flag to ensure it's available locally
+        echo "Building Docker image from Dockerfile.lotus-gpu-miner..."
         docker buildx build --load -t lotus-gpu-miner:local -f dockerfiles/Dockerfile.lotus-gpu-miner .
-
-        # Extract the binary from the local image
-        # Note: The kernels are now embedded in the binary, so we don't need to copy them separately
+        
+        if [ $? -ne 0 ]; then
+          echo "ERROR: Docker build failed!"
+          exit 1
+        fi
+        
+        echo "Docker image built successfully."
+        
+        # List docker images to confirm 
+        echo "Listing Docker images:"
+        docker images | grep lotus-gpu-miner
+        
+        # Extract the binary from the local image with error checking
+        echo "Creating container from image to extract binary..."
         container_id=$(docker create lotus-gpu-miner:local)
-        docker cp $container_id:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
+        
+        if [ -z "$container_id" ]; then
+          echo "ERROR: Failed to create container from image!"
+          exit 1
+        fi
+        
+        echo "Container created with ID: $container_id"
+        echo "Extracting binary from container..."
+        
+        # Inspect the container to see what's inside
+        echo "Container filesystem contents at /opt/lotus/bin/:"
+        docker exec $container_id ls -la /opt/lotus/bin/ || echo "WARNING: Unable to list directory contents"
+        
+        # Copy the binary with error handling
+        docker cp $container_id:/opt/lotus/bin/lotus-gpu-miner ./artifacts/ || docker cp $container_id:/opt/lotus/bin/lotus-miner-cli ./artifacts/
+        
+        cp_status=$?
         docker rm $container_id
-
-        # Create a symlink for backward compatibility
-        cd ./artifacts
-        ln -sf lotus-gpu-miner lotus-miner-cli
-        cd ..
-
-        # If not a PR, tag and push to registry
-        if [ "${{ github.event_name }}" != "pull_request" ]; then
-          # Tag for registry
-          docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
-          docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
-          docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+        
+        if [ $cp_status -ne 0 ]; then
+          echo "ERROR: Failed to copy binary from container!"
+          # Try alternative location or name 
+          echo "Trying alternative binary name or location..."
           
-          # Push to registry
-          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
-          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
-          docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+          # Create new container and try alternative paths
+          alt_container_id=$(docker create lotus-gpu-miner:local)
+          
+          # Try to find the binary anywhere in the container
+          echo "Searching for binary in container:"
+          docker exec $alt_container_id find /opt -name "lotus-*" || echo "WARNING: Find command failed"
+          
+          # Try various possible locations and names
+          docker cp $alt_container_id:/opt/lotus/bin/lotus-miner-cli ./artifacts/ || \
+          docker cp $alt_container_id:/usr/local/bin/lotus-gpu-miner ./artifacts/ || \
+          docker cp $alt_container_id:/usr/local/bin/lotus-miner-cli ./artifacts/ || \
+          docker cp $alt_container_id:/bin/lotus-gpu-miner ./artifacts/ || \
+          docker cp $alt_container_id:/bin/lotus-miner-cli ./artifacts/
+          
+          cp_alt_status=$?
+          docker rm $alt_container_id
+          
+          if [ $cp_alt_status -ne 0 ]; then
+            echo "ERROR: All attempts to extract binary failed!"
+            exit 1
+          fi
+        fi
+        
+        # Verify extracted file exists and has content
+        echo "Contents of artifacts directory:"
+        ls -la ./artifacts/
+        
+        # Check if the binary exists and has reasonable size
+        if [ -f "./artifacts/lotus-gpu-miner" ]; then
+          file_size=$(du -k "./artifacts/lotus-gpu-miner" | cut -f1)
+          echo "Binary found: lotus-gpu-miner (${file_size}KB)"
+          
+          if [ "$file_size" -lt 100 ]; then
+            echo "WARNING: Binary file is suspiciously small (${file_size}KB)"
+          fi
+          
+          # Create symlink for backward compatibility
+          cd ./artifacts
+          ln -sf lotus-gpu-miner lotus-miner-cli
+          cd ..
+        elif [ -f "./artifacts/lotus-miner-cli" ]; then
+          file_size=$(du -k "./artifacts/lotus-miner-cli" | cut -f1)
+          echo "Binary found: lotus-miner-cli (${file_size}KB)" 
+          
+          if [ "$file_size" -lt 100 ]; then
+            echo "WARNING: Binary file is suspiciously small (${file_size}KB)"
+          fi
+          
+          # Create symlink for compatibility in reverse
+          cd ./artifacts
+          ln -sf lotus-miner-cli lotus-gpu-miner
+          cd ..
+        else
+          echo "ERROR: No usable binary found after extraction!"
+          exit 1
+        fi
+        
+        # Save debug info
+        echo "Build completed successfully, saving debug information."
+        ls -la ./artifacts > ./debug-info/artifacts-list.txt
+        file ./artifacts/lotus* > ./debug-info/file-type-info.txt
+        
+        echo "Checking for executable status:"
+        if [ -x "./artifacts/lotus-gpu-miner" ]; then
+          echo "lotus-gpu-miner is executable"
+        else
+          echo "Setting executable permissions on lotus-gpu-miner"
+          chmod +x ./artifacts/lotus-gpu-miner
+        fi
+        
+        if [ -x "./artifacts/lotus-miner-cli" ]; then
+          echo "lotus-miner-cli is executable"
+        else  
+          echo "Setting executable permissions on lotus-miner-cli"
+          chmod +x ./artifacts/lotus-miner-cli
         fi
 
-    - name: Upload artifacts
+    # If not a PR, tag and push to registry
+    - name: Tag and push Docker image
+      if: github.event_name != 'pull_request'
+      run: |
+        # Tag for registry
+        docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
+        docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
+        docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+        
+        # Push to registry
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+
+    # Upload GPU miner binary artifacts with updated path pattern
+    - name: Upload GPU miner artifacts
       if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@v4
       with:
         name: lotus-gpu-miner-${{ inputs.version }}
-        path: |
-          ./artifacts/lotus-gpu-miner
-          ./artifacts/kernels/
+        path: ./artifacts/lotus*
         retention-days: 14
+    
+    # Upload debug info
+    - name: Upload debug info
+      uses: actions/upload-artifact@v4
+      with:
+        name: lotus-gpu-miner-debug-${{ inputs.version }}
+        path: ./debug-info/
+        retention-days: 3
