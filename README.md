@@ -143,7 +143,8 @@ docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest --gpu-
 
 - 🏠 Website: [https://lotusia.org/](https://lotusia.org/)
 - 🔍 Block Explorer: [https://explorer.lotusia.org/](https://explorer.lotusia.org/)
-- 💬 Telegram Channel: [https://t.me/LotusiaStewardship](https://t.me/LotusiaStewardship)
+- 💬 Telegram Airdrop Channel: [https://t.me/LotusiaStewardship](https://t.me/LotusiaStewardship)
+- 💬 Telegram Talk Channel: [https://t.me/LotusiaDiscourse](https://t.me/LotusiaDiscourse)
 - 📚 Documentation: [https://docs.lotusia.org/](https://docs.lotusia.org/)
 - 🌐 Pool: [https://burnlotus.org/](https://burnlotus.org/)
 
