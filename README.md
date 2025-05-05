@@ -105,7 +105,7 @@ For detailed instructions on setting up and using the GPU miner, see the [GPU Mi
 
 ### 📦 Available Binary Packages
 
-You can download the latest Lotus Core binaries from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases):
+You can download the latest Lotus Root binaries from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases):
 
 #### Package Options
 - **Combined Packages**:
