@@ -33,6 +33,8 @@ pub struct Server {
     rng: Mutex<rand::rngs::StdRng>,
     metrics_timestamp: Mutex<SystemTime>,
     metrics_nonces: AtomicU64,
+    hashrate_data_points: Mutex<Vec<(SystemTime, u64)>>,
+    last_total_nonces: AtomicU64,
     log: Log,
     report_hashrate_interval: Duration,
 }
@@ -86,6 +88,8 @@ impl Server {
             rng: Mutex::new(rand::rngs::StdRng::from_entropy()),
             metrics_timestamp: Mutex::new(SystemTime::now()),
             metrics_nonces: AtomicU64::new(0),
+            hashrate_data_points: Mutex::new(Vec::new()),
+            last_total_nonces: AtomicU64::new(0),
             log: Log::new(),
             report_hashrate_interval,
         }
@@ -133,6 +137,88 @@ impl Server {
     pub fn log(&self) -> &Log {
         &self.log
     }
+
+    async fn calculate_moving_average_hashrate(&self) -> f64 {
+        let now = SystemTime::now();
+        let current_total_nonces = self.metrics_nonces.load(Ordering::Acquire);
+        let previous_total = self.last_total_nonces.swap(current_total_nonces, Ordering::AcqRel);
+        let new_nonces = current_total_nonces.saturating_sub(previous_total);
+        
+        let mut data_points = self.hashrate_data_points.lock().await;
+        data_points.push((now, new_nonces));
+        
+        let cutoff = now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default() - Duration::from_secs(60);
+        data_points.retain(|(time, _)| {
+            time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default() >= cutoff
+        });
+        
+        // Calculate total nonces and time span across all retained data points
+        let mut total_nonces = 0u64;
+        let oldest_timestamp = data_points.first().map(|(time, _)| *time).unwrap_or(now);
+        
+        for (_, nonces) in data_points.iter() {
+            total_nonces = total_nonces.saturating_add(*nonces);
+        }
+        
+        // Calculate time span in seconds
+        let time_span = now.duration_since(oldest_timestamp)
+            .unwrap_or_default()
+            .as_secs_f64()
+            .max(0.1); // Avoid division by zero by ensuring at least 0.1 seconds
+        
+        // Calculate initial hashrate (nonces per second)
+        let raw_hashrate = total_nonces as f64 / time_span;
+        
+        // Apply warm-up period stabilization logic
+        let stabilized_hashrate = if time_span < 15.0 {
+            // During warm-up period (less than 15 seconds of data)
+            
+            // Use a sliding scale that starts at a conservative estimate and gradually 
+            // approaches the raw value as we get more data
+            let warm_up_factor = (time_span / 15.0).min(1.0);
+            
+            // Use the most recent point's rate as a baseline, but cap it at a reasonable value
+            // This prevents extremely high initial readings
+            let single_point_rate = if data_points.len() > 1 {
+                let (time1, _) = data_points[data_points.len() - 1];
+                let (time2, nonces2) = data_points[data_points.len() - 2];
+                
+                let point_time_diff = time1.duration_since(time2)
+                    .unwrap_or_default()
+                    .as_secs_f64()
+                    .max(0.1);
+                
+                (nonces2 as f64) / point_time_diff
+            } else {
+                raw_hashrate
+            };
+            
+            // Cap the initial estimate to prevent unrealistically high values
+            let capped_rate = single_point_rate.min(3_000_000_000.0); // Cap at 3 GH/s initially
+            
+            // Gradually blend between the capped initial estimate and the raw calculation
+            let result = capped_rate * (1.0 - warm_up_factor) + raw_hashrate * warm_up_factor;
+            
+            // Log that we're stabilizing the hashrate during warm-up
+            self.log.debug(
+                format!(
+                    "Stabilizing hashrate during {:.1}s warm-up period: raw {:.2} GH/s → stabilized {:.2} GH/s ({}% warm-up)",
+                    time_span,
+                    raw_hashrate / 1_000_000_000.0,
+                    result / 1_000_000_000.0,
+                    (warm_up_factor * 100.0) as u32
+                ),
+                Some("Hashrate")
+            );
+            
+            result
+        } else {
+            // We have enough data, use the raw calculated value
+            raw_hashrate
+        };
+        
+        stabilized_hashrate
+    }
 }
 
 async fn init_request(server: &Server) -> RequestBuilder {
@@ -153,11 +239,9 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
     let log = server.log();
     let url = server.node_settings.lock().await.bitcoind_url.clone();
     
-    // Start timing the RPC request
     let request_start = std::time::Instant::now();
     log.debug(format!("🛰️ [DEBUG] RPC call: getrawunsolvedblock to URL: {}", url), Some("RPC"));
     
-    // Build the request body outside of the request to avoid holding multiple locks
     let request_body = {
         let miner_addr = server.node_settings.lock().await.miner_addr.clone();
         format!(
@@ -166,7 +250,6 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
         )
     };
     
-    // Make the request without holding locks
     let response = init_request(&server)
         .await
         .body(request_body)
@@ -178,15 +261,12 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
     log.debug(format!("🛰️ [DEBUG] RPC response status: {} for getrawunsolvedblock (took: {}ms)", 
         status, network_time.as_millis()), Some("RPC"));
     
-    // Process the response
     let response_str = response.text().await?;
     log.debug(format!("🛰️ [DEBUG] RPC response body length: {} characters", response_str.len()), Some("RPC"));
     
-    // Parse the response
     let response: Result<GetRawUnsolvedBlockResponse, _> = serde_json::from_str(&response_str);
     log.debug("🛰️ [DEBUG] RPC response parsed for getrawunsolvedblock", Some("RPC"));
     
-    // Handle errors
     let response = match response {
         Ok(response) => response,
         Err(_) => {
@@ -201,7 +281,6 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
         }
     };
     
-    // Process the block data
     let unsolved_block = match response.result {
         Some(unsolved_block) => unsolved_block,
         None => {
@@ -213,15 +292,12 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
         }
     };
     
-    // Create block and update state
     let block = create_block(&unsolved_block);
     
     let total_time = request_start.elapsed();
     
-    // Update block state
     let mut block_state = server.block_state.lock().await;
     
-    // Log chain tip changes
     if let Some(current_block) = &block_state.current_block {
         if current_block.prev_hash() != block.prev_hash() {
             log.info(format!(
@@ -236,11 +312,9 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
         ), Some("Miner"));
     }
     
-    // Update block state
     block_state.extra_nonce += 1;
     block_state.next_block = Some(block);
     
-    // Log timing info
     log.debug(format!("🛰️ Work fetch completed in {}ms (network: {}ms)", 
         total_time.as_millis(), network_time.as_millis()), Some("RPC"));
         
@@ -257,7 +331,6 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     let mut serialized_block = block.header.to_vec();
     serialized_block.extend_from_slice(&block.body);
     
-    // Extract all needed data from node_settings first, without holding the lock during request
     let (url, user, password, pool_mining, miner_addr) = {
         let node_settings = server.node_settings.lock().await;
         (
@@ -269,18 +342,14 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         )
     };
     log.info(format!("🛰️ Submitting share to pool: {}", url), Some("RPC"));
-    // Format the block hex
     let block_hex = hex::encode(&serialized_block);
     
-    // Prepare request body JSON - always include miner_addr as the 2nd parameter when pool mining
-    // The server accepts 2 params for BIP22 compatibility, with 2nd param normally ignored
     let request_body = if !pool_mining {
         format!(
             r#"{{"jsonrpc":"2.0","id":"miner","method":"submitblock","params":["{}"]}}"#,
             block_hex
         )
     } else {
-        // For pool mining, pass the miner address as second parameter
         format!(
             r#"{{"jsonrpc":"2.0","id":"miner","method":"submitblock","params":["{}", "{}"]}}"#,
             block_hex,
@@ -290,7 +359,6 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     
     log.debug(format!("🛰️ [DEBUG] RPC call: submitblock to URL: {}", url), Some("RPC"));
     
-    // Create request without using init_request which would try to lock node_settings again
     let response = server.client.post(&url)
         .basic_auth(user, Some(password))
         .header("Content-Type", "application/json")
@@ -303,14 +371,12 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     
     log.debug(format!("🛰️ [DEBUG] RPC response body length: {} characters for submitblock", response_text.len()), Some("RPC"));
     
-    // Attempt to parse the response
     let response: Result<SubmitBlockResponse, _> = serde_json::from_str(&response_text);
     
     match response {
         Ok(parsed) => {
             match parsed.result {
                 None => {
-                    // Check if there was an error
                     if let Some(error) = parsed.error {
                         log.error(format!("REJECTED BLOCK: Error {:?}", error), Some("Share"));
                         log.error("Something is misconfigured; make sure you run the latest lotusd/Lotus-QT and lotus-gpu-miner.", Some("Share"));
@@ -368,7 +434,6 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         }
     }
     
-    // Add a debug log to confirm we've completed the share submission
     log.info("✅ Share submission completed, mining continues uninterrupted", Some("Miner"));
     
     Ok(())
@@ -380,7 +445,6 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
     
     log.info(format!("🚀 Starting mining loop (pool mode: {})", if pool_mining { "enabled" } else { "disabled" }), Some("Miner"));
     
-    // Prefetch initial work if needed
     {
         log.info("🧠 Initializing work queue for continuous mining...", Some("Miner"));
         let block_state = server.block_state.lock().await;
@@ -393,21 +457,18 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
         }
     }
     
-    // Create a continuous work processor that feeds work to the miner
     if pool_mining {
         let server_clone = Arc::clone(&server);
         tokio::spawn(async move {
             let log = server_clone.log();
             log.info("🚀 Starting high-efficiency mining processor", Some("Miner"));
             
-            // Continuous prefetching to ensure zero wait time
             tokio::spawn({
                 let inner_server = Arc::clone(&server_clone);
                 async move {
                     let log = inner_server.log();
                     log.debug("🔄 Starting zero-latency work prefetcher", Some("Miner"));
                     loop {
-                        // Always try to have next work ready
                         let needs_work = {
                             let block_state = inner_server.block_state.lock().await;
                             block_state.next_block.is_none()
@@ -427,19 +488,16 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 }
             });
             
-            // Core high-efficiency mining loop
             loop {
-                // Before starting a mining operation, ensure we have a next block ready
                 let has_next_block = {
                     let block_state = server_clone.block_state.lock().await;
                     block_state.next_block.is_some()
                 };
                 
-                // If we don't have a next block ready, wait for it (preventing wasted GPU time)
                 if !has_next_block {
                     log.debug("⏳ Waiting for prefetch to complete before mining", Some("Miner"));
                     let mut wait_count = 0;
-                    while !has_next_block && wait_count < 20 { // Max 100ms wait
+                    while !has_next_block && wait_count < 20 {
                         tokio::time::sleep(Duration::from_millis(5)).await;
                         wait_count += 1;
                         
@@ -449,7 +507,6 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                         }
                     }
                     
-                    // If we still don't have next work, trigger fetch directly
                     if !has_next_block {
                         log.info("⚠️ Prefetch not completed in time, fetching directly", Some("Miner"));
                         if let Err(err) = update_next_block(&server_clone).await {
@@ -460,13 +517,10 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                     }
                 }
                 
-                // Get the current block to mine on with zero wait
                 let current_work = {
                     let mut block_state = server_clone.block_state.lock().await;
                     
-                    // Take the next block as current
                     if let Some(next_block) = block_state.next_block.take() {
-                        // Check if we're already mining this exact header (compare first 32 bytes)
                         let next_header_start = hex::encode(&next_block.header[0..16]);
                         
                         if let Some(current_block) = &block_state.current_block {
@@ -474,15 +528,11 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                             
                             if current_header_start == next_header_start {
                                 log.debug(format!("🔄 Skipping identical work header: {}", current_header_start), Some("Miner"));
-                                // Put it back and continue with current
                                 block_state.next_block = Some(next_block);
-                                // Reset nonce index to prevent exhaustion
                                 block_state.current_work.nonce_idx = 0;
                                 log.debug("♻️ Reset nonce index for existing work to prevent exhaustion", Some("Miner"));
-                                // Return current work with reset index
                                 Some(block_state.current_work.clone())
                             } else {
-                                // Different header, use the new one
                                 log.debug(format!("📝 Switching work from {} to {}", 
                                     current_header_start, next_header_start), Some("Miner"));
                                 block_state.current_work = Work::from_header(next_block.header, next_block.target);
@@ -490,16 +540,13 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                                 Some(block_state.current_work.clone())
                             }
                         } else {
-                            // No current block
                             log.debug(format!("📝 Setting new work with header: {}", next_header_start), Some("Miner"));
                             block_state.current_work = Work::from_header(next_block.header, next_block.target);
                             block_state.current_block = Some(next_block);
                             Some(block_state.current_work.clone())
                         }
                     } else {
-                        // No next block available
                         if let Some(_) = &block_state.current_block {
-                            // We still have a current block, keep using it but reset nonce index
                             block_state.current_work.nonce_idx = 0;
                             log.debug("♻️ Reset nonce index for reused work to prevent exhaustion", Some("Miner"));
                             Some(block_state.current_work.clone())
@@ -509,22 +556,18 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                     }
                 };
                 
-                // If we still don't have work (shouldn't happen), try again
                 if current_work.is_none() {
                     log.error("❌ No work available despite prefetching, retrying...", Some("Miner"));
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     continue;
                 }
                 
-                // We have work, start mining immediately
                 let mut work = current_work.unwrap();
                 
-                // Safety check to prevent nonce exhaustion
                 if work.nonce_idx > 1000 {
                     log.debug("♻️ Resetting high nonce index to prevent exhaustion", Some("Miner"));
                     work.nonce_idx = 0;
                     
-                    // Also update the block state to maintain consistency
                     let mut block_state = server_clone.block_state.lock().await;
                     if let Some(_) = &block_state.current_block {
                         block_state.current_work.nonce_idx = 0;
@@ -534,11 +577,9 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 let big_nonce = server_clone.rng.lock().await.gen();
                 work.set_big_nonce(big_nonce);
                 
-                // Launch mining with performance timing
                 let start_time = std::time::Instant::now();
                 log.debug(format!("⚡ Starting mining with nonce base {}", big_nonce), Some("Miner"));
                 
-                // Run the mining operation on the GPU
                 let mining_result = tokio::task::spawn_blocking({
                     let inner_server = Arc::clone(&server_clone);
                     move || {
@@ -555,12 +596,10 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 })
                 .await;
                 
-                // Log mining performance 
                 let mining_duration = start_time.elapsed();
                 log.debug(format!("✅ Mining batch completed in {}ms", 
                     mining_duration.as_millis()), Some("Miner"));
                 
-                // Handle the mining result
                 let (nonce, num_nonces_per_search) = match mining_result {
                     Ok(Ok((nonce, num_nonces))) => (nonce, num_nonces),
                     Ok(Err(err)) => {
@@ -573,12 +612,10 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                     }
                 };
                 
-                // Handle found nonce (share/block)
                 if let Some(nonce) = nonce {
                     work.set_big_nonce(nonce);
                     log.info(format!("💎 Block hash below target with nonce: {}", nonce), Some("Share"));
                     
-                    // Start a background task to fetch new work immediately (without waiting)
                     let fetch_server = Arc::clone(&server_clone);
                     tokio::spawn(async move {
                         let log = fetch_server.log();
@@ -590,7 +627,6 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                         }
                     });
                     
-                    // Get the block for submission without blocking the mining loop
                     let block = {
                         let mut block_state = server_clone.block_state.lock().await;
                         if let Some(mut block) = block_state.current_block.take() {
@@ -602,9 +638,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                         }
                     };
                     
-                    // Submit the block/share in a background task
                     if let Some(block) = block {
-                        // Don't wait for submission to complete - submit in a background task
                         let submit_server = Arc::clone(&server_clone);
                         tokio::spawn(async move {
                             let log = submit_server.log();
@@ -638,10 +672,8 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                     };
                     
                     if elapsed > server_clone.report_hashrate_interval {
-                        let num_nonces = server_clone.metrics_nonces.load(Ordering::Acquire);
-                        let hashrate = num_nonces as f64 / elapsed.as_secs_f64();
+                        let hashrate = server_clone.calculate_moving_average_hashrate().await;
                         log.report_hashrate(hashrate);
-                        server_clone.metrics_nonces.store(0, Ordering::Release);
                         *timestamp = SystemTime::now();
                     }
                 }
@@ -808,10 +840,8 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 };
                 
                 if elapsed > server.report_hashrate_interval {
-                    let num_nonces = server.metrics_nonces.load(Ordering::Acquire);
-                    let hashrate = num_nonces as f64 / elapsed.as_secs_f64();
+                    let hashrate = server.calculate_moving_average_hashrate().await;
                     log.report_hashrate(hashrate);
-                    server.metrics_nonces.store(0, Ordering::Release);
                     *timestamp = SystemTime::now();
                 }
             }
