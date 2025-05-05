@@ -18,7 +18,6 @@ jobs:
     - name: Create artifacts directory
       run: |
         mkdir -p ./artifacts
-        mkdir -p ./artifacts/kernels
         mkdir -p ./individual-packages
 
     # Download all artifacts
@@ -40,15 +39,10 @@ jobs:
         cd ./artifacts
 
         # Create directory structure
-        mkdir -p gpu-miner-package/kernels
+        mkdir -p gpu-miner-package
 
         # Copy binaries
         cp lotus* gpu-miner-package/
-
-        # Copy kernels
-        if [ -d "./kernels" ]; then
-          cp -r kernels/* gpu-miner-package/kernels/ || true
-        fi
 
         # Create tarball
         tar -czvf lotus-binaries-${{ inputs.version }}.tar.gz gpu-miner-package/
@@ -61,78 +55,81 @@ jobs:
       run: |
         cd ./artifacts
         
-        # Package the GPU miner binary and kernels
+        # Clean up any existing directories first to avoid conflicts
+        rm -rf gpu-miner-dir lotus-node-dir lotus-qt-dir lotus-cli-dir
+        
+        # Package the GPU miner binary
         if [ -f "lotus-miner-cli" ]; then
           # Create directory for GPU miner
-          mkdir -p lotus-gpu-miner/kernels
-          cp lotus-miner-cli lotus-gpu-miner/
+          mkdir -p gpu-miner-dir/kernels
+          cp lotus-miner-cli gpu-miner-dir/
           
           # Include required kernels
           if [ -d "./kernels" ]; then
-            cp -r kernels/* lotus-gpu-miner/kernels/ || true
+            cp -r kernels/* gpu-miner-dir/kernels/ || true
           fi
           
           # Create tarball
-          tar -czvf ../individual-packages/lotus-gpu-miner-${{ inputs.version }}.tar.gz lotus-gpu-miner/
+          tar -czvf ../individual-packages/lotus-gpu-miner-${{ inputs.version }}.tar.gz gpu-miner-dir/
           
           # Create zip
-          cd lotus-gpu-miner
+          cd gpu-miner-dir
           zip -r ../../individual-packages/lotus-gpu-miner-${{ inputs.version }}.zip .
           cd ..
           
           # Clean up
-          rm -rf lotus-gpu-miner
+          rm -rf gpu-miner-dir
         fi
         
         # Package the node binary
         if [ -f "lotusd" ]; then
-          mkdir -p lotus-node
-          cp lotusd lotus-node/
+          mkdir -p lotus-node-dir
+          cp lotusd lotus-node-dir/
           
           # Create tarball
-          tar -czvf ../individual-packages/lotus-node-${{ inputs.version }}.tar.gz lotus-node/
+          tar -czvf ../individual-packages/lotus-node-${{ inputs.version }}.tar.gz lotus-node-dir/
           
           # Create zip
-          cd lotus-node
+          cd lotus-node-dir
           zip -r ../../individual-packages/lotus-node-${{ inputs.version }}.zip .
           cd ..
           
           # Clean up
-          rm -rf lotus-node
+          rm -rf lotus-node-dir
         fi
         
         # Package the QT wallet
         if [ -f "lotus-qt" ]; then
-          mkdir -p lotus-qt
-          cp lotus-qt lotus-qt/
+          mkdir -p lotus-qt-dir
+          cp lotus-qt lotus-qt-dir/
           
           # Create tarball
-          tar -czvf ../individual-packages/lotus-qt-${{ inputs.version }}.tar.gz lotus-qt/
+          tar -czvf ../individual-packages/lotus-qt-${{ inputs.version }}.tar.gz lotus-qt-dir/
           
           # Create zip
-          cd lotus-qt
+          cd lotus-qt-dir
           zip -r ../../individual-packages/lotus-qt-${{ inputs.version }}.zip .
           cd ..
           
           # Clean up
-          rm -rf lotus-qt
+          rm -rf lotus-qt-dir
         fi
         
         # Package other CLI tools
         if [ -f "lotus-cli" ]; then
-          mkdir -p lotus-cli
-          cp lotus-cli lotus-cli/
+          mkdir -p lotus-cli-dir
+          cp lotus-cli lotus-cli-dir/
           
           # Create tarball
-          tar -czvf ../individual-packages/lotus-cli-${{ inputs.version }}.tar.gz lotus-cli/
+          tar -czvf ../individual-packages/lotus-cli-${{ inputs.version }}.tar.gz lotus-cli-dir/
           
           # Create zip
-          cd lotus-cli
+          cd lotus-cli-dir
           zip -r ../../individual-packages/lotus-cli-${{ inputs.version }}.zip .
           cd ..
           
           # Clean up
-          rm -rf lotus-cli
+          rm -rf lotus-cli-dir
         fi
         
         # Clean up
