@@ -61,11 +61,16 @@ jobs:
         # Package the GPU miner binary
         if [ -f "lotus-miner-cli" ]; then
           # Create directory for GPU miner
-          mkdir -p gpu-miner-dir/kernels
+          mkdir -p gpu-miner-dir
+          # Copy the binary and create a symlink with the expected name
           cp lotus-miner-cli gpu-miner-dir/
+          cd gpu-miner-dir
+          ln -sf lotus-miner-cli lotus-gpu-miner
+          cd ..
           
-          # Include required kernels
+          # Include required kernels if they exist
           if [ -d "./kernels" ]; then
+            mkdir -p gpu-miner-dir/kernels
             cp -r kernels/* gpu-miner-dir/kernels/ || true
           fi
           
@@ -295,13 +300,17 @@ jobs:
         # Using tar.gz
         wget https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-gpu-miner-${VERSION}.tar.gz
         tar -xzf lotus-gpu-miner-${VERSION}.tar.gz
-        cd lotus-gpu-miner
+        cd gpu-miner-dir
+        chmod +x lotus-miner-cli
         ./lotus-miner-cli -g 0 -s 27 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+        # You can also use the symlink:
+        # ./lotus-gpu-miner -g 0 -s 27 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
         
         # Using zip
         wget https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/lotus-gpu-miner-${VERSION}.zip
-        unzip lotus-gpu-miner-${VERSION}.zip
-        cd lotus-gpu-miner
+        unzip lotus-gpu-miner-${VERSION}.zip -d gpu-miner-dir
+        cd gpu-miner-dir
+        chmod +x lotus-miner-cli
         ./lotus-miner-cli -g 0 -s 27 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
         \`\`\`
 

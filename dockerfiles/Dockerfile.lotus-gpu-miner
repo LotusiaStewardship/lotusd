@@ -21,7 +21,7 @@ WORKDIR /lotus-source/gpuminer
 RUN cargo build --release
 
 # Intermediate stage to create the startup script
-FROM rust:slim-bookworm AS script-builder
+FROM debian:bookworm-slim AS script-builder
 
 # Create the startup script
 RUN echo '#!/bin/bash\n\
@@ -163,9 +163,11 @@ RUN mkdir -p /etc/OpenCL/vendors && \
 # Create minimal directory structure
 RUN mkdir -p /opt/lotus/bin
 
-# Copy only the built binary from builder stage
+# Copy only the built binary from builder stage and ensure consistent naming
 COPY --from=builder /lotus-source/gpuminer/target/release/lotus-miner-cli /opt/lotus/bin/lotus-miner-cli
-RUN ln -s /opt/lotus/bin/lotus-miner-cli /opt/lotus/bin/lotus-gpu-miner
+
+# Create a symbolic link for the alternate name to maintain compatibility with both naming conventions
+RUN ln -sf /opt/lotus/bin/lotus-miner-cli /opt/lotus/bin/lotus-gpu-miner
 
 # Copy startup script
 COPY --from=script-builder /start-miners.sh /opt/lotus/start-miners.sh
