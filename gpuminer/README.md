@@ -22,6 +22,8 @@
   > *"Harness the power of your GPU for optimal Lotus mining"*
   
   <hr>
+  
+  **[📦 Download](#-using-pre-built-binaries)** • **[🐳 Docker Images](#docker-images)** • **[🚀 Quick Start](#-quick-start-examples)** • **[📚 Documentation](#-advanced-architecture)**
 </div>
 
 The Lotus GPU miner enables high-performance mining for the Lotus network, using OpenCL to harness the power of your GPU for optimal mining efficiency.
@@ -56,9 +58,35 @@ Solo mining connects directly to a Lotus node, granting you the full block rewar
 
 ## 🚀 Quick Start Examples
 
-### 📦 Using Pre-built Binary
+### 📦 Using Pre-built Binaries
 
-You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases).
+You can download the latest Lotus GPU Miner binaries from the [GitHub Releases page](https://github.com/LotusiaStewardship/lotusd/releases/latest):
+
+#### Available Binary Packages
+- **Combined Package**: Download the `lotus-binaries-[VERSION].tar.gz` file which contains all Lotus binaries including the GPU miner
+- **Individual Binaries**: Extract only the files you need from the combined package:
+  ```bash
+  # Download the combined package
+  wget https://github.com/LotusiaStewardship/lotusd/releases/latest/download/lotus-binaries-latest.tar.gz
+  
+  # Extract just the GPU miner
+  tar -xzf lotus-binaries-latest.tar.gz gpu-miner-package/lotus-miner-cli
+  
+  # Make it executable
+  chmod +x gpu-miner-package/lotus-miner-cli
+  
+  # Move to a convenient location
+  mv gpu-miner-package/lotus-miner-cli ./
+  ```
+
+> **⚠️ Important**: When extracting individual binaries, be sure to also extract the `kernels` directory which contains required OpenCL kernel files:
+> ```bash
+> # Extract the OpenCL kernel files
+> tar -xzf lotus-binaries-latest.tar.gz gpu-miner-package/kernels
+> 
+> # Move to a directory where the binary can find them
+> mv gpu-miner-package/kernels ./
+> ```
 
 #### 🏊‍♂️ Example: Mining on a Pool
 
@@ -135,6 +163,15 @@ The miner implements an intelligent hashrate calculation system:
 - **Debug Logging**: Logs show the stabilization process when using the `--debug` flag
 
 ## 🐳 Docker Support
+
+### Docker Images
+
+The official Lotus GPU Miner images are available on GitHub Container Registry:
+
+- **Latest Image**: `ghcr.io/boblepointu/lotus-gpu-miner:latest`
+- **Versioned Images**: `ghcr.io/boblepointu/lotus-gpu-miner:v0.4.0` (replace with specific version)
+
+You can view all available tags at [GitHub Container Registry](https://github.com/Boblepointu/lotusd/pkgs/container/lotus-gpu-miner).
 
 ### Running with Docker
 
