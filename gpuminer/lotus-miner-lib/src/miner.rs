@@ -261,7 +261,7 @@ impl Miner {
             .build()?;
             
         info!(
-            "🚀 Lotus miner initialized with kernel size {} ({}), ready to mine!",
+            "🚀 Lotus miner initialized with kernel size {} ({} bytes), ready to mine!",
             crate::miner::format_bytes(settings.kernel_size as u64),
             crate::miner::format_number(settings.kernel_size as u64)
         );

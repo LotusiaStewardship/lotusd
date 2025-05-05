@@ -5,9 +5,76 @@ use lotus_miner_lib::{
     logger::{LoggerConfig, init_global_logger},
     ConfigSettings, Server,
 };
+use clap::Parser;
+
+/// 🌸 Lotus GPU Miner CLI
+///
+/// ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+/// ┃  High-performance OpenCL miner for the Lotus chain  ┃
+/// ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+///
+/// Welcome to the Lotus GPU Miner!
+///
+/// Authors:
+///   Alexandre Guillioud - FrenchBTC <alexandre@burnlotus.org>
+///   Tobias Ruck <ruck.tobias@gmail.com>
+///
+/// Example usage:
+///   lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining
+///
+/// For more information, visit: https://github.com/lotus/lotus-miner
+#[derive(Parser, Debug)]
+#[clap(
+    name = "Lotus GPU Miner",
+    version,
+    author = "Alexandre Guillioud - FrenchBTC <alexandre@burnlotus.org>, Tobias Ruck <ruck.tobias@gmail.com>",
+    about = "🌸 High-performance OpenCL miner for the Lotus blockchain.",
+    long_about = None,
+    after_help = "\
+EXAMPLES:\n  lotus-miner-cli -g 0 -s 25 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org --poolmining\n\nFor more information, visit: https://github.com/lotus/lotus-miner\n\nDeveloped by Alexandre Guillioud (FrenchBTC - alexandre@burnlotus.org) and Tobias Ruck (ruck.tobias@gmail.com).\n"
+)]
+struct Cli {
+    /// Path to a configuration file in TOML format. Overrides defaults if present.
+    #[clap(short, long, value_name = "CONFIG", help = "Configuration file (TOML)")]
+    config: Option<String>,
+
+    /// GPU index to use for mining (default: 0)
+    #[clap(short = 'g', long, value_name = "gpu_index", help = "GPU index to use (default: 0)")]
+    gpu_index: Option<i64>,
+
+    /// Kernel size (work batch size, default: 23)
+    #[clap(short = 's', long, value_name = "kernel_size", help = "Kernel size (default: 23)")]
+    kernel_size: Option<i64>,
+
+    /// Address to receive mining rewards (mine-to address)
+    #[clap(short = 'o', long, value_name = "mine_to_address", help = "Coinbase Output Address (mine-to address)")]
+    mine_to_address: Option<String>,
+
+    /// Password for Lotus RPC authentication
+    #[clap(short = 'p', long, value_name = "rpc_password", help = "Lotus RPC password")]
+    rpc_password: Option<String>,
+
+    /// How often to poll the Lotus node for new work (seconds)
+    #[clap(short = 'i', long, value_name = "rpc_poll_interval", help = "Lotus RPC getblocktemplate poll interval (seconds)")]
+    rpc_poll_interval: Option<i64>,
+
+    /// Lotus node RPC URL (e.g. http://127.0.0.1:10604 or https://burnlotus.org)
+    #[clap(short = 'a', long, value_name = "rpc_url", help = "Lotus RPC address")]
+    rpc_url: Option<String>,
+
+    /// Username for Lotus RPC authentication
+    #[clap(short = 'u', long, value_name = "rpc_user", help = "Lotus RPC username")]
+    rpc_user: Option<String>,
+
+    /// Enable pool mining mode (submit shares to a pool instead of solo mining)
+    #[clap(short = 'm', long = "poolmining", help = "Enable pool mining mode")]
+    pool_mining: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let cli = Cli::parse();
+
     // Initialize the logger
     let logger_config = LoggerConfig {
         console_output: true,
@@ -20,12 +87,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Initialize the global logger
     init_global_logger(logger_config).map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-    info!("Author: Alexandre Guillioud - FrenchBTC");
+    info!("Author: Alexandre Guillioud - FrenchBTC - https://burnlotus.org - alexandre@burnlotus.org - https://github.com/Boblepointu/lotusd");
     info!("🌸 Lotus GPU Miner CLI started");
     
-    // Load configuration
-    let settings = ConfigSettings::load(true)
+    // Load configuration, giving priority to CLI args
+    let mut settings = ConfigSettings::load(true)
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+    if let Some(ref v) = cli.gpu_index { settings.gpu_index = *v; }
+    if let Some(ref v) = cli.kernel_size { settings.kernel_size = *v; }
+    if let Some(ref v) = cli.mine_to_address { settings.mine_to_address = v.clone(); }
+    if let Some(ref v) = cli.rpc_password { settings.rpc_password = v.clone(); }
+    if let Some(ref v) = cli.rpc_poll_interval { settings.rpc_poll_interval = *v; }
+    if let Some(ref v) = cli.rpc_url { settings.rpc_url = v.clone(); }
+    if let Some(ref v) = cli.rpc_user { settings.rpc_user = v.clone(); }
+    if cli.pool_mining { settings.pool_mining = true; }
+    if let Some(ref _v) = cli.config {
+        // Optionally, reload config from the specified file (not implemented here for brevity)
+        // You can add logic to load from a custom config file if needed.
+    }
     info!("✅ Configuration loaded successfully");
 
     // Start mining
