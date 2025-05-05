@@ -105,7 +105,96 @@ docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
   --mine-to-address your_lotus_address --kernel-size 21
 ```
 
+### 🐋 Using Our Docker Container with Multi-GPU Support
+
+We provide a Docker container with automatic multi-GPU detection that can run multiple miner instances per GPU:
+
+```bash
+# Build the Docker container
+docker build -t lotus-miner-cuda ./gpuminer
+
+# Run with default random addresses
+docker run --gpus all lotus-miner-cuda
+
+# Run with your own miner address
+docker run --gpus all lotus-miner-cuda YOUR_LOTUS_ADDRESS
+
+# Example with a specific address
+docker run --gpus all lotus-miner-cuda lotus_16PSJHmYLT6dWHD4uYKazP58uhHnKsSPTonLB8s9y
+```
+
+#### 🎛️ Customizing Docker Container Parameters
+
+You can customize all aspects of the miner by passing environment variables:
+
+```bash
+# Customize kernel size and number of instances per GPU
+docker run --gpus all \
+  -e KERNEL_SIZE=24 \
+  -e INSTANCES_PER_GPU=2 \
+  lotus-miner-cuda YOUR_LOTUS_ADDRESS
+
+# Full customization example
+docker run --gpus all \
+  -e KERNEL_SIZE=23 \
+  -e RPC_URL="https://burnlotus.org" \
+  -e RPC_USER="miner" \
+  -e RPC_PASSWORD="password" \
+  -e RPC_POLL_INTERVAL=3 \
+  -e POOL_MINING=true \
+  -e INSTANCES_PER_GPU=4 \
+  lotus-miner-cuda YOUR_LOTUS_ADDRESS
+```
+
+#### 📋 Available Environment Variables
+
+The container supports all parameters available to the `lotus-miner-cli` tool:
+
+| Environment Variable | CLI Equivalent        | Description                              | Default Value        |
+|----------------------|-----------------------|------------------------------------------|----------------------|
+| `MINER_ADDRESS`      | `-o, --mine-to-address` | Your Lotus address                      | (Random from list)   |
+| `KERNEL_SIZE`        | `-s, --kernel-size`    | Kernel size parameter                    | 22                   |
+| `RPC_URL`            | `-a, --rpc-url`        | Mining pool URL                          | https://burnlotus.org |
+| `RPC_USER`           | `-u, --rpc-user`       | RPC username                             | miner                |
+| `RPC_PASSWORD`       | `-p, --rpc-password`   | RPC password                             | password             |
+| `RPC_POLL_INTERVAL`  | `-i, --rpc-poll-interval` | Block template polling interval       | 1                    |
+| `POOL_MINING`        | `-m, --poolmining`     | Whether to use pool mining mode (note: CLI uses lowercase 'm')  | true                 |
+| `INSTANCES_PER_GPU`  | N/A                    | Number of miner instances per GPU        | 4                    |
+| `CONFIG_FILE`        | `-c, --config`         | Path to a config file                    | (Not used)           |
+
+The container will:
+- Automatically detect all available GPUs
+- Launch multiple miner instances for each GPU (configurable)
+- Use your provided address if specified, or randomly select from a built-in list
+- Mine to the official Lotus pool at https://burnlotus.org by default
+
 **Note**: The `--gpus all` flag requires the NVIDIA Container Toolkit to be installed if you're using NVIDIA GPUs. For AMD GPUs, you may need a different configuration.
+
+### 🔍 Command Line Parameters
+
+For reference, here are all parameters supported by the `lotus-miner-cli` tool:
+
+```
+USAGE:
+    lotus-miner-cli [FLAGS] [OPTIONS]
+
+FLAGS:
+    -h, --help          Prints help information
+    -m, --poolmining    Enable pool mining mode (note: lowercase 'm' in poolmining, not poolMining)
+    -V, --version       Prints version information
+
+OPTIONS:
+    -c, --config <config>                          Configuration file
+    -g, --gpu-index <gpu_index>                    GPU index
+    -s, --kernel-size <kernel_size>                Kernel size
+    -o, --mine-to-address <mine_to_address>        Coinbase Output Address
+    -p, --rpc-password <rpc_password>              Lotus RPC password
+    -i, --rpc-poll-interval <rpc_poll_interval>    Lotus RPC getblocktemplate poll interval
+    -a, --rpc-url <rpc_url>                        Lotus RPC address
+    -u, --rpc-user <rpc_user>                      Lotus RPC username
+```
+
+**Important Note**: The pool mining parameter must be specified as `--poolmining` (lowercase) or `-m`. Using `--poolMining` (with capital 'M') will not be recognized.
 
 ### 🛠️ Docker Setup on Ubuntu 24.04
 
@@ -191,19 +280,24 @@ Assuming you are running the lotus daemon with server mode:
 
 1. Install OpenCL for your GPU. [AMD](https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/releases/download/1.0/OCL_SDK_Light_AMD.exe) or [NVidia](https://developer.nvidia.com/cuda-downloads)
 2. Install [rust](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
-3. Build `lotus-miner` using `cargo build`
-4. Run the lotus miner with `./target/debug/lotus-miner.exe --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>`
+3. Build `lotus-miner-cli` using `cargo build`
+4. Run the lotus miner with:
+   ```bash
+   ./target/debug/lotus-miner-cli --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>
+   ```
 
 ### 🍎 MacOS
 
 1. Install [rustup](https://rustup.rs/)
 2. Install the rust toolchain using rustup
-3. Build `lotus-miner` using `cargo build`
-4. Run the lotus miner with `./target/debug/lotus-miner --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>`
+3. Build `lotus-miner-cli` using `cargo build`
+4. Run the lotus miner with:
+   ```bash
+   ./target/debug/lotus-miner-cli --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>
+   ```
 
 ---
 
 <p align="center">
   <strong>🌸 Happy Mining! 🌸</strong>
 </p>
-
