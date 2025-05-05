@@ -98,7 +98,7 @@ impl Server {
                 let log = server.log();
                 loop {
                     if let Err(err) = update_next_block(&server).await {
-                        log.error(format!("update_next_block error: {:?}", err));
+                        log.error(format!("update_next_block error: {:?}", err), Some("Miner"));
                     }
                     let rpc_poll_interval = server.node_settings.lock().await.rpc_poll_interval;
                     tokio::time::sleep(Duration::from_secs(rpc_poll_interval)).await;
@@ -111,7 +111,7 @@ impl Server {
                 let log = server.log();
                 loop {
                     if let Err(err) = mine_some_nonces(Arc::clone(&server)).await {
-                        log.error(format!("mine_some_nonces error: {:?}", err));
+                        log.error(format!("mine_some_nonces error: {:?}", err), Some("Miner"));
                     }
                     tokio::time::sleep(Duration::from_micros(3)).await;
                 }
@@ -168,9 +168,9 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
             log.error(format!(
                 "getrawunsolvedblock failed ({}): {}",
                 status, response_str
-            ));
+            ), Some("Miner"));
             if status == StatusCode::UNAUTHORIZED {
-                log.error("It seems you specified the wrong username/password");
+                log.error("It seems you specified the wrong username/password", Some("Miner"));
             }
             return Ok(());
         }
@@ -182,7 +182,7 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
             log.error(format!(
                 "getrawunsolvedblock failed: {}",
                 response.error.unwrap_or("unknown error".to_string())
-            ));
+            ), Some("Miner"));
             return Ok(());
         }
     };
@@ -192,13 +192,13 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
             log.info(format!(
                 "Switched to new chain tip: {}",
                 display_hash(&block.prev_hash())
-            ));
+            ), Some("Miner"));
         }
     } else {
         log.info(format!(
             "Started mining on chain tip: {}",
             display_hash(&block.prev_hash())
-        ));
+        ), Some("Miner"));
     }
     block_state.extra_nonce += 1;
     block_state.next_block = Some(block);
@@ -228,7 +228,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 log.error(format!(
                     "Error: Exhaustively searched nonces. This could be fixed by lowering \
                            rpc_poll_interval."
-                ));
+                ), Some("Miner"));
                 return Ok((None, 0));
             }
             miner
@@ -242,7 +242,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
     // Handle found nonce and submit block if needed
     if let Some(nonce) = nonce {
         work.set_big_nonce(nonce);
-        log.info(format!("Block hash below target with nonce: {}", nonce));
+        log.info(format!("Block hash below target with nonce: {}", nonce), Some("Share"));
         
         let block = {
             // Only acquire the lock for the minimum time needed
@@ -251,7 +251,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 block.header = *work.header();
                 Some(block)
             } else {
-                log.bug("BUG: Found nonce but no block! Contact the developers.");
+                log.bug("Bug: Found nonce but no block! Contact the developers.", Some("Share"));
                 None
             }
         }; // Lock is released here
@@ -262,7 +262,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 log.error(format!(
                     "submit_block error: {:?}. This could be a connection issue.",
                     err
-                ));
+                ), Some("Miner"));
             }
         }
     }
@@ -278,9 +278,9 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
         Ok(elapsed) => elapsed,
         Err(err) => {
             log.bug(format!(
-                "BUG: Elapsed time error: {}. Contact the developers.",
+                "Bug: Elapsed time error: {}. Contact the developers.",
                 err
-            ));
+            ), Some("Miner"));
             return Ok(());
         }
     };
@@ -356,38 +356,38 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                 None => {
                     // Check if there was an error
                     if let Some(error) = parsed.error {
-                        log.error(format!("REJECTED BLOCK: Error {:?}", error));
-                        log.error("Something is misconfigured; make sure you run the latest lotusd/Lotus-QT and lotus-gpu-miner.");
+                        log.error(format!("REJECTED BLOCK: Error {:?}", error), Some("Share"));
+                        log.error("Something is misconfigured; make sure you run the latest lotusd/Lotus-QT and lotus-gpu-miner.", Some("Share"));
                     } else {
                         if pool_mining {
-                            log.info("SHARE ACCEPTED!");
+                            log.info("Share accepted!", Some("Share"));
                         } else {
-                            log.info("BLOCK ACCEPTED!");
+                            log.info("Block accepted!", Some("Share"));
                         }
                     }
                 },
                 Some(reason) => {
                     if reason.is_empty() {
                         if pool_mining {
-                            log.info("SHARE ACCEPTED!");
+                            log.info("Share accepted!", Some("Share"));
                         } else {
-                            log.info("BLOCK ACCEPTED!");
+                            log.info("Block accepted!", Some("Share"));
                         }
                     } else {
                         if pool_mining {
-                            log.error(format!("REJECTED SHARE: {}", reason));
+                            log.error(format!("REJECTED SHARE: {}", reason), Some("Share"));
                         } else {
-                            log.error(format!("REJECTED BLOCK: {}", reason));
+                            log.error(format!("REJECTED BLOCK: {}", reason), Some("Share"));
                         }
                         if reason == "inconclusive" {
                             log.warn(
                                 "This is an orphan race; might be fixed by lowering rpc_poll_interval or \
-                                updating to the newest lotus-gpu-miner.",
+                                updating to the newest lotus-gpu-miner.", Some("Share")
                             );
                         } else {
                             log.error(
                                 "Something is misconfigured; make sure you run the latest \
-                                lotusd/Lotus-QT and lotus-gpu-miner.",
+                                lotusd/Lotus-QT and lotus-gpu-miner.", Some("Share")
                             );
                         }
                     }
@@ -396,7 +396,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         },
         Err(e) => {
             log.error(format!("Failed to parse response: {} (Status: {})\nResponse: {}", 
-                e, status, response_text));
+                e, status, response_text), Some("Miner"));
         }
     }
     Ok(())

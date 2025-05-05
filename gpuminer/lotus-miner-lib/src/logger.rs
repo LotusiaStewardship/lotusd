@@ -12,6 +12,7 @@ use std::{
 use chrono::{DateTime, Local};
 use log::{Level, LevelFilter, Log as LogTrait, Metadata, Record};
 use thiserror::Error;
+use colored::*;
 
 /// Severity levels for logging, matching the log crate's levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,7 @@ pub struct LogRecord {
     pub msg: String,
     pub severity: LogSeverity,
     pub timestamp: DateTime<Local>,
+    pub tag: String,
     pub source: Option<String>,
 }
 
@@ -59,12 +61,28 @@ impl Display for LogRecord {
             Some(source) => format!(" [{}]", source),
             None => String::new(),
         };
-        
+        let tag = format!("{:<9}", self.tag).bold();
+        let tag_colored = match self.tag.to_lowercase().as_str() {
+            "status" => tag.bright_cyan(),
+            "miner" => tag.bright_yellow(),
+            "opencl" => tag.bright_green(),
+            "hashrate" => tag.bright_magenta(),
+            "share" => tag.bright_blue(),
+            "shutdown" => tag.bright_red(),
+            _ => tag.white(),
+        };
+        let level_colored = match self.severity {
+            LogSeverity::Info => "Info".bright_white(),
+            LogSeverity::Warn => "Warn".yellow(),
+            LogSeverity::Error => "Error".red(),
+            LogSeverity::Bug => "Bug".magenta(),
+        };
         write!(
             f,
-            "{} [{:?}]{} {}",
+            "[{}] [{}] [{}]{} {}",
             self.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-            self.severity,
+            tag_colored,
+            level_colored,
             source_str,
             self.msg
         )
@@ -77,6 +95,7 @@ impl From<LogRecord> for LogEntry {
             msg: record.msg,
             severity: record.severity,
             timestamp: record.timestamp,
+            tag: record.tag,
         }
     }
 }
@@ -87,15 +106,33 @@ pub struct LogEntry {
     pub msg: String,
     pub severity: LogSeverity,
     pub timestamp: DateTime<Local>,
+    pub tag: String,
 }
 
 impl Display for LogEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tag = format!("{:<9}", self.tag).bold();
+        let tag_colored = match self.tag.to_lowercase().as_str() {
+            "status" => tag.bright_cyan(),
+            "miner" => tag.bright_yellow(),
+            "opencl" => tag.bright_green(),
+            "hashrate" => tag.bright_magenta(),
+            "share" => tag.bright_blue(),
+            "shutdown" => tag.bright_red(),
+            _ => tag.white(),
+        };
+        let level_colored = match self.severity {
+            LogSeverity::Info => "Info".bright_white(),
+            LogSeverity::Warn => "Warn".yellow(),
+            LogSeverity::Error => "Error".red(),
+            LogSeverity::Bug => "Bug".magenta(),
+        };
         write!(
             f,
-            "{} [{:?}] {}",
+            "[{}] [{}] [{}] {}",
             self.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-            self.severity,
+            tag_colored,
+            level_colored,
             self.msg
         )
     }
@@ -107,6 +144,7 @@ impl From<LogEntry> for LogRecord {
             msg: entry.msg,
             severity: entry.severity,
             timestamp: entry.timestamp,
+            tag: entry.tag,
             source: None,
         }
     }
@@ -118,6 +156,7 @@ impl From<&LogEntry> for LogRecord {
             msg: entry.msg.clone(),
             severity: entry.severity,
             timestamp: entry.timestamp,
+            tag: entry.tag.clone(),
             source: None,
         }
     }
@@ -280,33 +319,34 @@ impl Logger {
     }
     
     /// Log a message with the given severity
-    pub fn log_str(&self, msg: impl ToString, severity: LogSeverity) {
+    pub fn log_str(&self, msg: impl ToString, severity: LogSeverity, tag: Option<&str>) {
         self.log(LogRecord {
             msg: msg.to_string(),
             severity,
             timestamp: Local::now(),
+            tag: tag.unwrap_or("General").to_string(),
             source: None,
         });
     }
     
     /// Log an info message
-    pub fn info(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Info);
+    pub fn info(&self, msg: impl ToString, tag: Option<&str>) {
+        self.log_str(msg, LogSeverity::Info, tag);
     }
     
     /// Log a warning message
-    pub fn warn(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Warn);
+    pub fn warn(&self, msg: impl ToString, tag: Option<&str>) {
+        self.log_str(msg, LogSeverity::Warn, tag);
     }
     
     /// Log an error message
-    pub fn error(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Error);
+    pub fn error(&self, msg: impl ToString, tag: Option<&str>) {
+        self.log_str(msg, LogSeverity::Error, tag);
     }
     
     /// Log a bug message
-    pub fn bug(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Bug);
+    pub fn bug(&self, msg: impl ToString, tag: Option<&str>) {
+        self.log_str(msg, LogSeverity::Bug, tag);
     }
     
     /// Get all logs
@@ -418,24 +458,24 @@ impl Log {
         self.inner.log(record);
     }
     
-    pub fn log_str(&self, msg: impl ToString, severity: LogSeverity) {
-        self.inner.log_str(msg, severity);
+    pub fn log_str(&self, msg: impl ToString, severity: LogSeverity, tag: Option<&str>) {
+        self.inner.log_str(msg, severity, tag);
     }
     
-    pub fn info(&self, msg: impl ToString) {
-        self.inner.info(msg);
+    pub fn info(&self, msg: impl ToString, tag: Option<&str>) {
+        self.inner.info(msg, tag);
     }
     
-    pub fn warn(&self, msg: impl ToString) {
-        self.inner.warn(msg);
+    pub fn warn(&self, msg: impl ToString, tag: Option<&str>) {
+        self.inner.warn(msg, tag);
     }
     
-    pub fn error(&self, msg: impl ToString) {
-        self.inner.error(msg);
+    pub fn error(&self, msg: impl ToString, tag: Option<&str>) {
+        self.inner.error(msg, tag);
     }
     
-    pub fn bug(&self, msg: impl ToString) {
-        self.inner.bug(msg);
+    pub fn bug(&self, msg: impl ToString, tag: Option<&str>) {
+        self.inner.bug(msg, tag);
     }
     
     pub fn get_logs_and_clear(&self) -> Vec<LogEntry> {
@@ -473,6 +513,7 @@ impl LogTrait for LoggerWrapper {
                 msg: record.args().to_string(),
                 severity,
                 timestamp: Local::now(),
+                tag: String::new(),
                 source,
             });
         }
