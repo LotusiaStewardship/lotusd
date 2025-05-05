@@ -152,7 +152,7 @@ fn display_hash(hash: &[u8]) -> String {
 async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let log = server.log();
     let url = server.node_settings.lock().await.bitcoind_url.clone();
-    log.info(format!("🛰️ Requesting new work from pool: {}", url), Some("RPC"));
+    log.debug(format!("🛰️ [DEBUG] RPC call: getrawunsolvedblock to URL: {}", url), Some("RPC"));
     let response = init_request(&server)
         .await
         .body(format!(
@@ -161,11 +161,12 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
         ))
         .send()
         .await?;
-    log.info(format!("🛰️ Response status for new work: {}", response.status()), Some("RPC"));
+    log.debug(format!("🛰️ [DEBUG] RPC response status: {} for getrawunsolvedblock", response.status()), Some("RPC"));
     let status = response.status();
     let response_str = response.text().await?;
+    log.debug(format!("🛰️ [DEBUG] RPC response body length: {} characters", response_str.len()), Some("RPC"));
     let response: Result<GetRawUnsolvedBlockResponse, _> = serde_json::from_str(&response_str);
-    log.info("🛰️ Finished fetching new work (after response parse)", Some("RPC"));
+    log.debug("🛰️ [DEBUG] RPC response parsed for getrawunsolvedblock", Some("RPC"));
     let response = match response {
         Ok(response) => response,
         Err(_) => {
@@ -206,7 +207,7 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
     }
     block_state.extra_nonce += 1;
     block_state.next_block = Some(block);
-    log.info("🛰️ Set next_block after fetching new work", Some("RPC"));
+    log.debug("🛰️ Set next_block after fetching new work", Some("RPC"));
     Ok(())
 }
 
@@ -251,6 +252,8 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         )
     };
     
+    log.debug(format!("🛰️ [DEBUG] RPC call: submitblock to URL: {}", url), Some("RPC"));
+    
     // Create request without using init_request which would try to lock node_settings again
     let response = server.client.post(&url)
         .basic_auth(user, Some(password))
@@ -258,9 +261,11 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         .body(request_body)
         .send()
         .await?;
-    log.info(format!("🛰️ Response status for share submission: {}", response.status()), Some("RPC"));
+    log.debug(format!("🛰️ [DEBUG] RPC response status: {} for submitblock", response.status()), Some("RPC"));
     let status = response.status();
     let response_text = response.text().await?;
+    
+    log.debug(format!("🛰️ [DEBUG] RPC response body length: {} characters for submitblock", response_text.len()), Some("RPC"));
     
     // Attempt to parse the response
     let response: Result<SubmitBlockResponse, _> = serde_json::from_str(&response_text);
@@ -277,13 +282,13 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                         if pool_mining {
                             log.info(
                                 format!(
-                                    "Share accepted by \"{}\" for \"{}\" !",
+                                    "🎉 Share accepted by \"{}\" for \"{}\" !",
                                     url, miner_addr
                                 ),
                                 Some("Share")
                             );
                         } else {
-                            log.info("Block accepted!", Some("Share"));
+                            log.info("🎉 Block accepted!", Some("Share"));
                         }
                     }
                 },
@@ -292,13 +297,13 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                         if pool_mining {
                             log.info(
                                 format!(
-                                    "Share accepted by \"{}\" for \"{}\" !",
+                                    "🎉 Share accepted by \"{}\" for \"{}\" !",
                                     url, miner_addr
                                 ),
                                 Some("Share")
                             );
                         } else {
-                            log.info("Block accepted!", Some("Share"));
+                            log.info("🎉 Block accepted!", Some("Share"));
                         }
                     } else {
                         if pool_mining {
@@ -348,7 +353,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
             if let Some(next_block) = block_state.next_block.take() {
                 block_state.current_work = Work::from_header(next_block.header, next_block.target);
                 block_state.current_block = Some(next_block);
-                log.info("🛰️ Set current_block from next_block in mining loop", Some("RPC"));
+                log.debug("🛰️ Set current_block from next_block in mining loop", Some("RPC"));
             }
             
             // Check if we have a current block to mine on

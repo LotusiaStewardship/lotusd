@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     fs::{File, OpenOptions},
-    io::{self, Write},
+    io::Write,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -17,6 +17,7 @@ use colored::*;
 /// Severity levels for logging, matching the log crate's levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogSeverity {
+    Debug,
     Info,
     Warn,
     Error,
@@ -29,7 +30,8 @@ impl From<Level> for LogSeverity {
             Level::Error => LogSeverity::Error,
             Level::Warn => LogSeverity::Warn,
             Level::Info => LogSeverity::Info,
-            Level::Debug | Level::Trace => LogSeverity::Info,
+            Level::Debug => LogSeverity::Debug,
+            Level::Trace => LogSeverity::Debug,
         }
     }
 }
@@ -37,6 +39,7 @@ impl From<Level> for LogSeverity {
 impl From<LogSeverity> for Level {
     fn from(severity: LogSeverity) -> Self {
         match severity {
+            LogSeverity::Debug => Level::Debug,
             LogSeverity::Info => Level::Info,
             LogSeverity::Warn => Level::Warn,
             LogSeverity::Error => Level::Error,
@@ -65,9 +68,11 @@ impl Display for LogRecord {
             "hashrate" => tag.bright_magenta(),
             "share" => tag.bright_blue(),
             "shutdown" => tag.bright_red(),
+            "rpc" => tag.bright_cyan(),
             _ => tag.white(),
         };
         let level_colored = match self.severity {
+            LogSeverity::Debug => "DEBUG".bright_blue(),
             LogSeverity::Info => "Info".bright_white(),
             LogSeverity::Warn => "Warn".yellow(),
             LogSeverity::Error => "Error".red(),
@@ -117,6 +122,7 @@ impl Display for LogEntry {
             _ => tag.white(),
         };
         let level_colored = match self.severity {
+            LogSeverity::Debug => "Debug".bright_black(),
             LogSeverity::Info => "Info".bright_white(),
             LogSeverity::Warn => "Warn".yellow(),
             LogSeverity::Error => "Error".red(),
@@ -178,17 +184,32 @@ impl Display for HashrateEntry {
 /// Errors that can occur during logging operations
 #[derive(Debug, Error)]
 pub enum LoggerError {
-    #[error("IO error: {0}")]
-    Io(#[from] io::Error),
-    
-    #[error("Failed to acquire lock: {0}")]
-    LockError(String),
+    #[error("Failed to initialize logger: {0}")]
+    InitError(std::io::Error),
     
     #[error("Logger not initialized")]
     NotInitialized,
-
+    
     #[error("Failed to set logger: {0}")]
     SetLogger(String),
+    
+    #[error("Logger already initialized")]
+    AlreadyInitialized,
+    
+    #[error("IO error: {0}")]
+    IoError(std::io::Error),
+    
+    #[error("Set logger error: {0}")]
+    SetLoggerError(String),
+    
+    #[error("Failed to acquire lock: {0}")]
+    LockError(String),
+}
+
+impl From<std::io::Error> for LoggerError {
+    fn from(err: std::io::Error) -> Self {
+        LoggerError::IoError(err)
+    }
 }
 
 /// Configuration for the logger
@@ -344,6 +365,16 @@ impl Logger {
         self.log_str(msg, LogSeverity::Bug, tag);
     }
     
+    /// Log a debug message
+    pub fn debug(&self, msg: impl ToString, tag: Option<&str>) {
+        // Only log if debug level is enabled
+        if let Ok(config) = self.config.read() {
+            if config.level >= LevelFilter::Debug {
+                self.log_str(msg, LogSeverity::Debug, tag);
+            }
+        }
+    }
+    
     /// Get all logs
     pub fn get_logs(&self) -> Vec<LogRecord> {
         self.logs.read().map(|logs| logs.clone()).unwrap_or_default()
@@ -471,6 +502,11 @@ impl Log {
         self.inner.bug(msg, tag);
     }
     
+    /// Log a debug message
+    pub fn debug(&self, msg: impl ToString, tag: Option<&str>) {
+        self.inner.debug(msg, tag);
+    }
+    
     pub fn get_logs_and_clear(&self) -> Vec<LogEntry> {
         self.inner.get_logs_and_clear()
     }
@@ -522,6 +558,36 @@ impl LogTrait for LoggerWrapper {
 // Initialize a global static logger that can be accessed from anywhere
 static LOGGER_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+/// Initialize the global logger with the given configuration
+pub fn init_global_logger(config: LoggerConfig) -> Result<Arc<Logger>, LoggerError> {
+    if LOGGER_INITIALIZED.load(Ordering::SeqCst) {
+        return Err(LoggerError::AlreadyInitialized);
+    }
+    
+    // Create a new logger with the given configuration
+    let logger = Logger::new(config.clone())?;
+    
+    // Initialize the logger
+    Logger::init(Arc::clone(&logger)).map_err(|e| LoggerError::SetLoggerError(e.to_string()))?;
+    
+    // Mark the logger as initialized
+    LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
+    
+    // Print the current log level to help debugging
+    let level_str = match config.level {
+        LevelFilter::Off => "Off",
+        LevelFilter::Error => "Error",
+        LevelFilter::Warn => "Warn",
+        LevelFilter::Info => "Info",
+        LevelFilter::Debug => "Debug",
+        LevelFilter::Trace => "Trace",
+    };
+    
+    println!("Logger initialized with level: {}", level_str);
+    
+    Ok(logger)
+}
+
 /// Get the global logger instance
 pub fn get_global_logger() -> Result<Arc<Logger>, LoggerError> {
     if !LOGGER_INITIALIZED.load(Ordering::SeqCst) {
@@ -536,14 +602,6 @@ pub fn get_global_logger() -> Result<Arc<Logger>, LoggerError> {
     };
     
     Logger::new(config)
-}
-
-/// Initialize the global logger with custom configuration
-pub fn init_global_logger(config: LoggerConfig) -> Result<Arc<Logger>, LoggerError> {
-    let logger = Logger::new(config)?;
-    Logger::init(Arc::clone(&logger))?;
-    LOGGER_INITIALIZED.store(true, Ordering::SeqCst);
-    Ok(logger)
 }
 
 /// Initialize the global logger with default configuration
