@@ -122,7 +122,7 @@ You can download the latest Lotus Core binaries from the [Releases page](https:/
   - `lotus-cli-[VERSION].tar.gz` - Lotus command-line tools (tar.gz format)
   - `lotus-cli-[VERSION].zip` - Lotus command-line tools (zip format)
 
-> **Note:** When using the GPU miner package, ensure that the `kernels` directory is extracted alongside the binary to ensure proper functionality.
+> **Note:** The GPU miner now includes embedded OpenCL kernel code, making it a completely self-contained binary.
 
 For detailed GPU miner documentation, see the [GPU Mining Documentation](gpuminer/README.md).
 
