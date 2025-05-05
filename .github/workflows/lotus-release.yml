@@ -357,7 +357,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v${{ inputs.version }}
-        name: Lotus Core v${{ inputs.version }}
+        name: Lotus Root v${{ inputs.version }}
         body: ${{ steps.generate-notes.outputs.release_notes }}
         files: ./release-packages/*
         draft: false
