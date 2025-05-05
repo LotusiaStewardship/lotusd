@@ -151,6 +151,8 @@ fn display_hash(hash: &[u8]) -> String {
 
 async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let log = server.log();
+    let url = server.node_settings.lock().await.bitcoind_url.clone();
+    log.info(format!("🛰️ Requesting new work from pool: {}", url), Some("RPC"));
     let response = init_request(&server)
         .await
         .body(format!(
@@ -159,9 +161,11 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
         ))
         .send()
         .await?;
+    log.info(format!("🛰️ Response status for new work: {}", response.status()), Some("RPC"));
     let status = response.status();
     let response_str = response.text().await?;
     let response: Result<GetRawUnsolvedBlockResponse, _> = serde_json::from_str(&response_str);
+    log.info("🛰️ Finished fetching new work (after response parse)", Some("RPC"));
     let response = match response {
         Ok(response) => response,
         Err(_) => {
@@ -202,95 +206,7 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
     }
     block_state.extra_nonce += 1;
     block_state.next_block = Some(block);
-    Ok(())
-}
-
-async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let log = server.log();
-    let mut block_state = server.block_state.lock().await;
-    if let Some(next_block) = block_state.next_block.take() {
-        block_state.current_work = Work::from_header(next_block.header, next_block.target);
-        block_state.current_block = Some(next_block);
-    }
-    if block_state.current_block.is_none() {
-        return Ok(());
-    }
-    let mut work = block_state.current_work;
-    let big_nonce = server.rng.lock().await.gen();
-    work.set_big_nonce(big_nonce);
-    drop(block_state); // release lock
-    let (nonce, num_nonces_per_search) = tokio::task::spawn_blocking({
-        let server = Arc::clone(&server);
-        move || {
-            let log = server.log();
-            let mut miner = server.miner.lock().unwrap();
-            if !miner.has_nonces_left(&work) {
-                log.error(format!(
-                    "Error: Exhaustively searched nonces. This could be fixed by lowering \
-                           rpc_poll_interval."
-                ), Some("Miner"));
-                return Ok((None, 0));
-            }
-            miner
-                .find_nonce(&work, server.log())
-                .map(|nonce| (nonce, miner.num_nonces_per_search()))
-        }
-    })
-    .await
-    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)??;
-    
-    // Handle found nonce and submit block if needed
-    if let Some(nonce) = nonce {
-        work.set_big_nonce(nonce);
-        log.info(format!("Block hash below target with nonce: {}", nonce), Some("Share"));
-        
-        let block = {
-            // Only acquire the lock for the minimum time needed
-            let mut block_state = server.block_state.lock().await;
-            if let Some(mut block) = block_state.current_block.take() {
-                block.header = *work.header();
-                Some(block)
-            } else {
-                log.bug("Bug: Found nonce but no block! Contact the developers.", Some("Share"));
-                None
-            }
-        }; // Lock is released here
-        
-        // Submit block outside of any locks
-        if let Some(block) = block {
-            if let Err(err) = submit_block(&server, &block).await {
-                log.error(format!(
-                    "submit_block error: {:?}. This could be a connection issue.",
-                    err
-                ), Some("Miner"));
-            }
-        }
-    }
-    
-    // Update state after submission
-    let mut block_state = server.block_state.lock().await;
-    block_state.current_work.nonce_idx += 1;
-    server
-        .metrics_nonces
-        .fetch_add(num_nonces_per_search, Ordering::AcqRel);
-    let mut timestamp = server.metrics_timestamp.lock().await;
-    let elapsed = match SystemTime::now().duration_since(*timestamp) {
-        Ok(elapsed) => elapsed,
-        Err(err) => {
-            log.bug(format!(
-                "Bug: Elapsed time error: {}. Contact the developers.",
-                err
-            ), Some("Miner"));
-            return Ok(());
-        }
-    };
-    if elapsed > server.report_hashrate_interval {
-        let num_nonces = server.metrics_nonces.load(Ordering::Acquire);
-        let hashrate = num_nonces as f64 / elapsed.as_secs_f64();
-        log.report_hashrate(hashrate);
-        server.metrics_nonces.store(0, Ordering::Release);
-        *timestamp = SystemTime::now();
-    }
+    log.info("🛰️ Set next_block after fetching new work", Some("RPC"));
     Ok(())
 }
 
@@ -303,7 +219,6 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
     let log = server.log();
     let mut serialized_block = block.header.to_vec();
     serialized_block.extend_from_slice(&block.body);
-    // log.bug(format!("BUG: serialized_block: {:?}", serialized_block));
     
     // Extract all needed data from node_settings first, without holding the lock during request
     let (url, user, password, pool_mining, miner_addr) = {
@@ -316,7 +231,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
             node_settings.miner_addr.clone()
         )
     };
-    
+    log.info(format!("🛰️ Submitting share to pool: {}", url), Some("RPC"));
     // Format the block hex
     let block_hex = hex::encode(&serialized_block);
     
@@ -343,7 +258,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         .body(request_body)
         .send()
         .await?;
-    
+    log.info(format!("🛰️ Response status for share submission: {}", response.status()), Some("RPC"));
     let status = response.status();
     let response_text = response.text().await?;
     
@@ -363,8 +278,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                             log.info(
                                 format!(
                                     "Share accepted by \"{}\" for \"{}\" !",
-                                    server.node_settings.lock().await.bitcoind_url,
-                                    server.node_settings.lock().await.miner_addr
+                                    url, miner_addr
                                 ),
                                 Some("Share")
                             );
@@ -379,8 +293,7 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                             log.info(
                                 format!(
                                     "Share accepted by \"{}\" for \"{}\" !",
-                                    server.node_settings.lock().await.bitcoind_url,
-                                    server.node_settings.lock().await.miner_addr
+                                    url, miner_addr
                                 ),
                                 Some("Share")
                             );
@@ -413,5 +326,155 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
                 e, status, response_text), Some("Miner"));
         }
     }
+    
+    // Add a debug log to confirm we've completed the share submission
+    log.info("✅ Share submission process completed, resuming mining...", Some("Miner"));
+    
+    Ok(())
+}
+
+async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let log = server.log();
+    let pool_mining = server.node_settings.lock().await.pool_mining;
+    
+    log.info(format!("🚀 Starting mining loop (pool mode: {})", if pool_mining { "enabled" } else { "disabled" }), Some("Miner"));
+    
+    loop {
+        // Get the current block to mine on
+        let (current_work, has_next_block) = {
+            let mut block_state = server.block_state.lock().await;
+            
+            // If we have a next_block, use it
+            if let Some(next_block) = block_state.next_block.take() {
+                block_state.current_work = Work::from_header(next_block.header, next_block.target);
+                block_state.current_block = Some(next_block);
+                log.info("🛰️ Set current_block from next_block in mining loop", Some("RPC"));
+            }
+            
+            // Check if we have a current block to mine on
+            if block_state.current_block.is_none() {
+                // No current block, so we need to get one
+                drop(block_state);
+                if let Err(err) = update_next_block(&server).await {
+                    log.error(format!("Failed to update next block: {:?}", err), Some("Miner"));
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                continue; // Try again
+            }
+            
+            // We have a current block, let's mine on it
+            (block_state.current_work.clone(), block_state.next_block.is_some())
+        };
+        
+        // Mine on the current work
+        let mut work = current_work;
+        let big_nonce = server.rng.lock().await.gen();
+        work.set_big_nonce(big_nonce);
+        
+        // Run the mining operation on the GPU
+        let (nonce, num_nonces_per_search) = tokio::task::spawn_blocking({
+            let server = Arc::clone(&server);
+            move || {
+                let log = server.log();
+                let mut miner = server.miner.lock().unwrap();
+                if !miner.has_nonces_left(&work) {
+                    log.error(format!(
+                        "Error: Exhaustively searched nonces. This could be fixed by lowering \
+                               rpc_poll_interval."
+                    ), Some("Miner"));
+                    return Ok((None, 0));
+                }
+                miner
+                    .find_nonce(&work, server.log())
+                    .map(|nonce| (nonce, miner.num_nonces_per_search()))
+            }
+        })
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)??;
+        
+        // Handle found nonce (share/block)
+        if let Some(nonce) = nonce {
+            work.set_big_nonce(nonce);
+            log.info(format!("💎 Block hash below target with nonce: {}", nonce), Some("Share"));
+            
+            // Get the block for submission
+            let block = {
+                let mut block_state = server.block_state.lock().await;
+                if let Some(mut block) = block_state.current_block.take() {
+                    block.header = *work.header();
+                    Some(block)
+                } else {
+                    log.bug("Bug: Found nonce but no block! Contact the developers.", Some("Share"));
+                    None
+                }
+            };
+            
+            // Submit the block/share
+            if let Some(block) = block {
+                if let Err(err) = submit_block(&server, &block).await {
+                    log.error(format!(
+                        "submit_block error: {:?}. This could be a connection issue.",
+                        err
+                    ), Some("Miner"));
+                }
+            }
+            
+            // For pool mining, get new work right after finding a share
+            if pool_mining {
+                log.info("⚡ Share submitted, requesting fresh work...", Some("Miner"));
+                if let Err(err) = update_next_block(&server).await {
+                    log.error(format!("Failed to update next block after share: {:?}", err), Some("Miner"));
+                }
+            }
+            
+            // Continue the mining loop
+            continue;
+        }
+        
+        // Update statistics
+        {
+            let mut block_state = server.block_state.lock().await;
+            block_state.current_work.nonce_idx += 1;
+            server.metrics_nonces.fetch_add(num_nonces_per_search, Ordering::AcqRel);
+        }
+        
+        // Update and report hashrate if needed
+        {
+            let mut timestamp = server.metrics_timestamp.lock().await;
+            let elapsed = match SystemTime::now().duration_since(*timestamp) {
+                Ok(elapsed) => elapsed,
+                Err(err) => {
+                    log.bug(format!("Bug: Elapsed time error: {}. Contact the developers.", err), Some("Miner"));
+                    return Ok(());
+                }
+            };
+            
+            if elapsed > server.report_hashrate_interval {
+                let num_nonces = server.metrics_nonces.load(Ordering::Acquire);
+                let hashrate = num_nonces as f64 / elapsed.as_secs_f64();
+                log.report_hashrate(hashrate);
+                server.metrics_nonces.store(0, Ordering::Release);
+                *timestamp = SystemTime::now();
+            }
+        }
+        
+        // For solo mining, break after one attempt
+        if !pool_mining {
+            break;
+        }
+        
+        // For pool mining, check if we need to get new work based on interval
+        // Only request new work if we don't already have a next_block
+        if pool_mining && !has_next_block {
+            let interval = server.node_settings.lock().await.rpc_poll_interval;
+            if interval <= 1 {
+                // For very short intervals, request new work on every iteration
+                if let Err(err) = update_next_block(&server).await {
+                    log.error(format!("Failed to update next block on interval: {:?}", err), Some("Miner"));
+                }
+            }
+        }
+    }
+    
     Ok(())
 }
