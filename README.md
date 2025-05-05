@@ -127,11 +127,16 @@ You can download the latest Lotus Root binaries from the [Releases page](https:/
 For detailed GPU miner documentation, see the [GPU Mining Documentation](gpuminer/README.md).
 
 #### 🏊‍♂️ Example: Mining on a Pool
-
+##### Using the CLI Miner
 ```bash
 # Replace with your own mining pool details and address
 # Note: For pool mining, username and password can be any dummy values
 lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+```
+
+##### Using the Docker Miner
+```bash
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
 ```
 
 ## 🌐 Community Resources
@@ -139,6 +144,8 @@ lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://
 - 🏠 Website: [https://lotusia.org/](https://lotusia.org/)
 - 🔍 Block Explorer: [https://explorer.lotusia.org/](https://explorer.lotusia.org/)
 - 💬 Telegram Channel: [https://t.me/LotusiaStewardship](https://t.me/LotusiaStewardship)
+- 📚 Documentation: [https://docs.lotusia.org/](https://docs.lotusia.org/)
+- 🌐 Pool: [https://burnlotus.org/](https://burnlotus.org/)
 
 ## 📜 License
 
