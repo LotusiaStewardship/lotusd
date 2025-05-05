@@ -225,9 +225,27 @@ jobs:
     - name: Download package artifacts
       uses: actions/download-artifact@v4
       with:
-        pattern: "lotus-*-${{ inputs.version }}"
-        path: ./release-packages
-        merge-multiple: true
+        path: ./all-artifacts
+        merge-multiple: false
+
+    # Create the release-packages directory structure
+    - name: Prepare release packages
+      run: |
+        mkdir -p ./release-packages
+        
+        # Copy combined packages
+        if [ -d "./all-artifacts/lotus-combined-packages-${{ inputs.version }}" ]; then
+          cp -r ./all-artifacts/lotus-combined-packages-${{ inputs.version }}/* ./release-packages/
+        fi
+        
+        # Copy individual packages
+        if [ -d "./all-artifacts/lotus-individual-packages-${{ inputs.version }}" ]; then
+          cp -r ./all-artifacts/lotus-individual-packages-${{ inputs.version }}/* ./release-packages/
+        fi
+        
+        # List all files in release-packages for debugging
+        echo "Files to be included in release:"
+        ls -la ./release-packages/
 
     # Generate release notes with key information
     - name: Generate release notes
@@ -334,14 +352,14 @@ jobs:
         echo "$(cat release_notes.md)" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
-    # Create GitHub Release
+    # Create GitHub Release with all packages
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: v${{ inputs.version }}
         name: Lotus Core v${{ inputs.version }}
         body: ${{ steps.generate-notes.outputs.release_notes }}
-        files: ./release-packages/**/*
+        files: ./release-packages/*
         draft: false
         prerelease: false
       env:
