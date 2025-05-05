@@ -13,7 +13,7 @@ use thiserror::Error;
 use log::{debug, info, error};
 use chrono::Local;
 
-use crate::{sha256::lotus_hash, block::Block, Log, LogSeverity};
+use crate::{sha256::lotus_hash, block::Block, Log};
 
 // Counter for successful shares/blocks found
 static SHARES_FOUND: AtomicU64 = AtomicU64::new(0);
@@ -86,6 +86,62 @@ impl Default for Work {
     }
 }
 
+pub fn format_hashes(value: u64) -> String {
+    let units = ["H", "kH", "MH", "GH", "TH", "PH", "EH", "ZH", "YH"];
+    let mut unit = 0;
+    let mut float_value = value as f64;
+    while float_value >= 1000.0 && unit < units.len() - 1 {
+        float_value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", format_number(value), units[unit])
+    } else {
+        format!("{:.2} {}", float_value, units[unit])
+    }
+}
+
+pub fn format_number(value: u64) -> String {
+    let s = value.to_string();
+    let mut chars = s.chars().rev().collect::<Vec<_>>();
+    for i in (3..chars.len()).step_by(4) {
+        chars.insert(i, ',');
+    }
+    chars.into_iter().rev().collect()
+}
+
+// Format bytes as B, kB, MB, GB, etc.
+pub fn format_bytes(value: u64) -> String {
+    let units = ["B", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+    let mut unit = 0;
+    let mut float_value = value as f64;
+    while float_value >= 1000.0 && unit < units.len() - 1 {
+        float_value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", format_number(value), units[unit])
+    } else {
+        format!("{:.2} {}", float_value, units[unit])
+    }
+}
+
+// Format hashes, with optional /s for hashrate
+pub fn format_hashes_per_sec(value: u64) -> String {
+    let units = ["H/s", "kH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s", "ZH/s", "YH/s"];
+    let mut unit = 0;
+    let mut float_value = value as f64;
+    while float_value >= 1000.0 && unit < units.len() - 1 {
+        float_value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", format_number(value), units[unit])
+    } else {
+        format!("{:.2} {}", float_value, units[unit])
+    }
+}
+
 fn mining_runtime_stats() -> String {
     let runtime = MINING_START_TIME.elapsed();
     let hours = runtime.as_secs() / 3600;
@@ -104,13 +160,13 @@ fn mining_runtime_stats() -> String {
     
     format!(
         "⏱️ Runtime: {:02}:{:02}:{:02} | 🎯 Shares: {} | 📊 Shares/h: {:.2} | 💯 Total hashes: {}",
-        hours, minutes, seconds, total_shares, shares_per_hour, total_hashes
+        hours, minutes, seconds, format_number(total_shares), shares_per_hour, format_hashes(total_hashes)
     )
 }
 
 impl Miner {
     pub fn setup(settings: MiningSettings) -> Result<Self> {
-        info!("Setting up OpenCL miner");
+        info!("🛠️ Setting up OpenCL miner");
         
         // List platforms to get platform id
         let platforms = Platform::list();
@@ -204,7 +260,11 @@ impl Miner {
             .arg_named("output", None::<&Buffer<u32>>)
             .build()?;
             
-        info!("🚀 Lotus miner initialized with kernel size {}, ready to mine!", settings.kernel_size);
+        info!(
+            "🚀 Lotus miner initialized with kernel size {} ({}), ready to mine!",
+            crate::miner::format_bytes(settings.kernel_size as u64),
+            crate::miner::format_number(settings.kernel_size as u64)
+        );
         
         Ok(Miner {
             search_kernel,
@@ -361,14 +421,16 @@ impl Miner {
                             let _timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
                             
                             // Celebratory log message with stats
-                            log.log_str(
-                                format!("💰 Found valid share #{} at nonce {} 💰\n🎊 Hash: {} 🎊\n📊 Stats: {}", 
-                                    shares, 
-                                    result_nonce,
-                                    hex::encode(&candidate_hash),
-                                    mining_runtime_stats()
-                                ), 
-                                LogSeverity::Info,
+                            log.info(
+                                format!("💰 Found valid share #{} at nonce {} 💰", shares, result_nonce),
+                                Some("Share")
+                            );
+                            log.info(
+                                format!("🎊 Hash: {} 🎊", hex::encode(&candidate_hash)),
+                                Some("Share")
+                            );
+                            log.info(
+                                format!("📊 Stats: {}", mining_runtime_stats()),
                                 Some("Share")
                             );
                             
