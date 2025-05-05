@@ -1,6 +1,44 @@
 use std::io::Write;
-use serde::Deserialize;
+use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 use config::{Config, ConfigError, File};
+use crate::miner::KernelType;
+
+// Custom implementation to allow string deserialization of KernelType
+impl FromStr for KernelType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "lotus_og" => Ok(KernelType::LotusOG),
+            "poclbm" => Ok(KernelType::POCLBM),
+            _ => Err(format!("Unknown kernel type: {}. Valid options are 'lotus_og' or 'poclbm'", s)),
+        }
+    }
+}
+
+// Implement Serialize and Deserialize for KernelType
+impl<'de> Deserialize<'de> for KernelType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        FromStr::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for KernelType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            KernelType::LotusOG => serializer.serialize_str("lotus_og"),
+            KernelType::POCLBM => serializer.serialize_str("poclbm"),
+        }
+    }
+}
 
 // Removed deprecated clap macros and APIs. All config loading is now handled directly below.
 
@@ -11,6 +49,7 @@ pub const DEFAULT_RPC_POLL_INTERVAL: i64 = 3;
 pub const FOLDER_DIR: &str = ".lotus-miner";
 pub const DEFAULT_KERNEL_SIZE: i64 = 21;
 pub const DEFAULT_GPU_INDEX: i64 = 0;
+pub const DEFAULT_KERNEL_TYPE: KernelType = KernelType::LotusOG;
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigSettings {
@@ -22,6 +61,7 @@ pub struct ConfigSettings {
     pub kernel_size: i64,
     pub gpu_index: i64,
     pub pool_mining: bool,
+    pub kernel_type: KernelType,
 }
 
 const DEFAULT_CONFIG_FILE_CONTENT: &str = r#"mine_to_address = "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt"
@@ -32,6 +72,7 @@ rpc_password = "lotus"
 gpu_index = 0
 kernel_size = 23
 pool_mining = false
+kernel_type = "lotus_og"
 "#;
 
 impl ConfigSettings {
@@ -51,6 +92,10 @@ impl ConfigSettings {
         s.set_default("gpu_index", DEFAULT_GPU_INDEX)?;
         s.set_default("mine_to_address", "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt")?;
         s.set_default("pool_mining", false)?;
+        s.set_default("kernel_type", match DEFAULT_KERNEL_TYPE {
+            KernelType::LotusOG => "lotus_og",
+            KernelType::POCLBM => "poclbm",
+        })?;
 
         // Load config from file
         let default_config = home_dir;

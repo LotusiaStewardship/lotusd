@@ -35,6 +35,7 @@ The Lotus GPU miner enables high-performance mining for the Lotus network, using
 - **Stabilized Hashrate Metrics**: 60-second moving average with 15-second warm-up period
 - **Asynchronous Share Submission**: Continues mining while shares are being submitted
 - **Intelligent Nonce Management**: Prevents exhaustion by automatically resetting nonce indexes
+- **Embedded OpenCL Kernels**: Multiple kernel implementations included to optimize for different GPUs
 - **OpenCL-based Mining**: Works with a wide variety of GPUs from NVIDIA, AMD, and Intel
 - **Pool and Solo Mining**: Support for both mining modes with seamless transitions
 
@@ -105,7 +106,7 @@ cd gpu-miner-package
 chmod +x lotus-miner-cli
 ```
 
-> **⚠️ Important**: Always ensure you have the `kernels` directory in the same location as the binary. The OpenCL kernel files are required for the GPU miner to function correctly. Both the individual and combined packages include this directory structure.
+> **ℹ️ Note**: The OpenCL kernel code is now embedded directly in the binary, eliminating the need for the external `kernels` directory. This provides a cleaner, more reliable distribution and a fully self-contained binary.
 
 #### 🏊‍♂️ Example: Mining on a Pool
 
@@ -348,6 +349,34 @@ The Lotus GPU Miner is open source and welcomes contributions. Key components:
 - **sha256.rs**: Lotus-specific hash implementation
 - **lotus_og.cl**: OpenCL mining kernel
 - **main.rs**: CLI interface and program entry point
+
+## ⚙️ Kernel Options
+
+The Lotus GPU Miner includes two different OpenCL kernel implementations that you can choose from based on your hardware and mining preferences:
+
+### 🌸 Lotus Original Kernel (Default)
+
+```bash
+lotus-miner-cli --kernel-type lotus_og [other parameters]
+```
+
+This is the default kernel optimized specifically for Lotus mining. It typically offers the best performance and is recommended for most users.
+
+### 🧮 POCLBM Kernel
+
+```bash
+lotus-miner-cli --kernel-type poclbm [other parameters]
+```
+
+This alternative kernel is based on the POCLBM project (PyOpenCL Bitcoin Miner). It may offer better performance on some older or specific GPU architectures.
+
+### 🔍 Choosing the Right Kernel
+
+- **For newer GPUs**: Start with the default `lotus_og` kernel as it's optimized for modern architectures
+- **For older GPUs**: Try the `poclbm` kernel which might work better with legacy hardware
+- **For maximum efficiency**: Test both kernels and monitor your hashrate to see which one performs better on your specific hardware
+
+Both kernels are embedded directly in the binary, so no external files are needed regardless of which one you choose.
 
 ---
 

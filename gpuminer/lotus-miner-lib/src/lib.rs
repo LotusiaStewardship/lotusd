@@ -1,5 +1,5 @@
 mod block;
-mod miner;
+pub mod miner;
 pub mod settings;
 mod sha256;
 pub mod logger;
@@ -63,9 +63,9 @@ impl Server {
             local_work_size: 256,
             inner_iter_size: 16,
             kernel_size: 1 << config.kernel_size,
-            kernel_name: "lotus_og".to_string(),
             sleep: 0,
             gpu_indices: vec![config.gpu_index as usize],
+            kernel_type: config.kernel_type,
         };
         let miner = Miner::setup(mining_settings.clone()).unwrap();
         Server {
