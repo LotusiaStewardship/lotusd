@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /lotus-source
 
 # Copy only the necessary files for building
-COPY gpuminer gpuminer/
+COPY gpuminer/ /lotus-source/gpuminer/
 WORKDIR /lotus-source/gpuminer
 
 # Build the application
