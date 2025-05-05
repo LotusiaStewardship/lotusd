@@ -1,95 +1,29 @@
-# Build stage for GPU Miner (Rust application)
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
+# Build stage using a minimal Rust build image
+FROM rust:slim-bookworm AS builder
 
-# Install build dependencies for Rust and OpenCL
+# Install minimal build dependencies for Rust and OpenCL
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     libssl-dev \
-    curl \
-    git \
     ocl-icd-opencl-dev \
     opencl-headers \
-    clinfo \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Set working directory
 WORKDIR /lotus-source
 
-# Copy the source code
-COPY . .
-
-# Build the Rust application
+# Copy only the necessary files for building
+COPY gpuminer gpuminer/
 WORKDIR /lotus-source/gpuminer
+
+# Build the application
 RUN cargo build --release
 
-# Runtime stage
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+# Intermediate stage to create the startup script
+FROM rust:slim-bookworm AS script-builder
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl3 \
-    ca-certificates \
-    ocl-icd-libopencl1 \
-    clinfo \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create symbolic link to the NVIDIA OpenCL library
-RUN mkdir -p /etc/OpenCL/vendors && \
-    echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd
-
-# Create directory structure
-RUN mkdir -p /opt/lotus/bin /opt/lotus/kernels
-
-# Copy built binary from builder stage
-COPY --from=builder /lotus-source/gpuminer/target/release/lotus-miner-cli /opt/lotus/bin/lotus-miner-cli
-# Create a symlink to avoid the "Could not find the file /opt/lotus/bin/lotus-gpu-miner" error
-RUN ln -s /opt/lotus/bin/lotus-miner-cli /opt/lotus/bin/lotus-gpu-miner
-
-# Copy kernels folder which is required at runtime
-COPY --from=builder /lotus-source/gpuminer/kernels /opt/lotus/kernels
-
-# Set permissions
-RUN chmod +x /opt/lotus/bin/*
-
-# Add to PATH
-ENV PATH="/opt/lotus/bin:${PATH}"
-
-# Set NVIDIA runtime requirements
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
-
-# Set working directory
-WORKDIR /opt/lotus
-
-# Create the startup script to detect GPUs and launch miners
-# This script accepts various parameters as environment variables to customize the miners
-# Usage examples:
-#
-# Basic usage with default settings:
-#   docker run --gpus all lotus-gpu-miner
-#
-# Using a custom miner address:
-#   docker run --gpus all lotus-gpu-miner YOUR_LOTUS_ADDRESS
-#
-# Customizing parameters via environment variables:
-#   docker run --gpus all -e KERNEL_SIZE=24 -e INSTANCES_PER_GPU=2 lotus-gpu-miner YOUR_LOTUS_ADDRESS
-#
-# Available environment variables:
-#   - MINER_ADDRESS: Your Lotus address (can also be passed as the first argument)
-#   - KERNEL_SIZE: The kernel size parameter (default: 22)
-#   - RPC_URL: The mining pool URL (default: https://burnlotus.org)
-#   - RPC_USER: RPC username (default: miner)
-#   - RPC_PASSWORD: RPC password (default: password)
-#   - RPC_POLL_INTERVAL: Block template polling interval (default: 1)
-#   - POOL_MINING: Whether to use pool mining (default: true)
-#                  Note: The CLI parameter is --poolmining (lowercase 'm'), not --poolMining (capital 'M')
-#   - INSTANCES_PER_GPU: Number of miner instances per GPU (default: 4)
-#   - CONFIG_FILE: Path to a config file (default: not used)
+# Create the startup script
 RUN echo '#!/bin/bash\n\
 # Define an array of addresses\n\
 ADDRESSES=(\n\
@@ -122,8 +56,13 @@ ADDRESSES=(\n\
   "lotus_16PSJQm6taghN5LUd8kKT9StUcJKDkBGCU6BnCyM3"\n\
 )\n\
 \n\
-# Get the number of available GPUs\n\
-GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)\n\
+# Get the number of available GPUs (with error handling)\n\
+if command -v nvidia-smi &> /dev/null; then\n\
+  GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)\n\
+else\n\
+  echo "Warning: nvidia-smi not found. Setting GPU count to 1."\n\
+  GPU_COUNT=1\n\
+fi\n\
 echo "Detected $GPU_COUNT GPUs"\n\
 \n\
 # Set default values for parameters\n\
@@ -203,16 +142,46 @@ done\n\
 \n\
 # Keep the container running\n\
 wait\n\
-' > /opt/lotus/start-miners.sh && chmod +x /opt/lotus/start-miners.sh
+' > /start-miners.sh && chmod +x /start-miners.sh
+
+# Runtime stage - using latest NVIDIA base container to fix vulnerabilities
+FROM nvidia/cuda:12.3.1-base-ubuntu22.04 AS runtime
+
+# Install only essential runtime dependencies including nvidia-utils for nvidia-smi
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    ocl-icd-libopencl1 \
+    nvidia-opencl-dev \
+    nvidia-utils-535 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symbolic link to the NVIDIA OpenCL library
+RUN mkdir -p /etc/OpenCL/vendors && \
+    echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd
+
+# Create minimal directory structure
+RUN mkdir -p /opt/lotus/bin
+
+# Copy only the built binary from builder stage
+COPY --from=builder /lotus-source/gpuminer/target/release/lotus-miner-cli /opt/lotus/bin/lotus-miner-cli
+RUN ln -s /opt/lotus/bin/lotus-miner-cli /opt/lotus/bin/lotus-gpu-miner
+
+# Copy startup script
+COPY --from=script-builder /start-miners.sh /opt/lotus/start-miners.sh
+
+# Set permissions
+RUN chmod +x /opt/lotus/bin/* /opt/lotus/start-miners.sh
+
+# Add to PATH
+ENV PATH="/opt/lotus/bin:${PATH}"
+
+# Set NVIDIA runtime requirements
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Set working directory
+WORKDIR /opt/lotus
 
 # Command to run when container starts
-# Usage:
-# 1. Basic usage with default settings:
-#    docker run --gpus all lotus-gpu-miner
-#
-# 2. Using a custom miner address:
-#    docker run --gpus all lotus-gpu-miner YOUR_LOTUS_ADDRESS
-#
-# 3. Customizing parameters via environment variables:
-#    docker run --gpus all -e KERNEL_SIZE=24 -e INSTANCES_PER_GPU=2 lotus-gpu-miner YOUR_LOTUS_ADDRESS
 ENTRYPOINT ["/opt/lotus/start-miners.sh"] 
