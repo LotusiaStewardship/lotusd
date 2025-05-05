@@ -273,6 +273,7 @@ impl Miner {
             None => {
                 log.error(
                     "🚨 Error: Nonce base overflow, skipping. This could be fixed by lowering rpc_poll_interval.",
+                    Some("Miner")
                 );
                 return Ok(None);
             }
@@ -334,15 +335,19 @@ impl Miner {
                     let mut candidate_hash = hash;
                     candidate_hash.reverse();
                     
-                    log.info(format!(
-                        "🔍 Candidate: nonce={}, hash={}",
-                        result_nonce,
-                        hex::encode(&candidate_hash)
-                    ));
+                    log.info(
+                        format!(
+                            "🔍 Candidate: nonce={}, hash={}",
+                            result_nonce,
+                            hex::encode(&candidate_hash)
+                        ),
+                        Some("Share")
+                    );
                     
                     if hash.last() != Some(&0) {
                         log.bug(
-                            "🐞 BUG: found nonce's hash has no leading zero byte. Contact the developers.",
+                            "🐞 Bug: found nonce's hash has no leading zero byte. Contact the developers.",
+                            Some("Share")
                         );
                     }
                     
@@ -357,13 +362,14 @@ impl Miner {
                             
                             // Celebratory log message with stats
                             log.log_str(
-                                format!("💰 FOUND VALID SHARE #{} AT NONCE {} 💰\n🎊 Hash: {} 🎊\n📊 Stats: {}", 
+                                format!("💰 Found valid share #{} at nonce {} 💰\n🎊 Hash: {} 🎊\n📊 Stats: {}", 
                                     shares, 
                                     result_nonce,
                                     hex::encode(&candidate_hash),
                                     mining_runtime_stats()
                                 ), 
-                                LogSeverity::Info
+                                LogSeverity::Info,
+                                Some("Share")
                             );
                             
                             return Ok(Some(result_nonce));
@@ -403,22 +409,25 @@ impl Miner {
         let _body_bytes = tmp_block.get_body();
         
         // Log some mining information including the body data
-        log.info(format!(
-            "🧮 Mining with header: {} | Body size: {}",
-            hex::encode(&work.header[..16]), // Show part of the header
-            tmp_block.body_size()
-        ));
+        log.info(
+            format!(
+                "🧮 Mining with header: {} | Body size: {}",
+                hex::encode(&work.header[..16]), // Show part of the header
+                tmp_block.body_size()
+            ),
+            Some("Miner")
+        );
         
         // Proceed with standard mining operation
         match self.find_nonce(work, log) {
             Ok(Some(nonce)) => {
-                log.info(format!("💎 Found potential solution with nonce: {}", nonce));
+                log.info(format!("💎 Found potential solution with nonce: {}", nonce), Some("Share"));
             }
             Ok(None) => {
                 debug!("⏭️ Round completed without finding a solution");
             }
             Err(e) => {
-                log.error(format!("❌ Error during mining: {:?}", e));
+                log.error(format!("❌ Error during mining: {:?}", e), Some("Miner"));
             }
         }
         
