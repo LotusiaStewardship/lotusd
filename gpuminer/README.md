@@ -215,13 +215,13 @@ docker build -t lotus-gpu-miner -f dockerfiles/Dockerfile.lotus-gpu-miner .
 #### Basic Usage
 ```bash
 # Using a Lotus address - both short and long-form arguments work
-docker run --gpus all -it --rm lotusd/lotus-gpu-miner:latest lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo
 
 # With short-form arguments
-docker run --gpus all -it --rm lotusd/lotus-gpu-miner:latest -g 0 -s 22 -o lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo -a https://burnlotus.org -m
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest -g 0 -s 22 -o lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo -a https://burnlotus.org -m
 
 # With long-form arguments
-docker run --gpus all -it --rm lotusd/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
 ```
 
 #### Using Environment Variables (Recommended Method)
@@ -233,7 +233,7 @@ docker run --gpus all -it --rm \
   -e RPC_URL="https://burnlotus.org" \
   -e POOL_MINING=true \
   -e INSTANCES_PER_GPU=4 \
-  lotusd/lotus-gpu-miner:latest
+  ghcr.io/boblepointu/lotus-gpu-miner:latest
 ```
 
 #### Advanced Usage
@@ -245,7 +245,7 @@ docker run --gpus all -it --rm \
   -e RPC_USER="your-username" \
   -e RPC_PASSWORD="your-password" \
   -e RPC_POLL_INTERVAL=2 \
-  lotusd/lotus-gpu-miner:latest
+  ghcr.io/boblepointu/lotus-gpu-miner:8.3.47
 ```
 
 ### Docker Environment Variables
