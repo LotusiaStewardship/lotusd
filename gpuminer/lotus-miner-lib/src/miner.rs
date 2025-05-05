@@ -6,11 +6,11 @@ use sha2::Digest;
 use std::{
     convert::TryInto,
     sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use eyre::Result;
 use thiserror::Error;
-use log::{debug, info, warn, error};
+use log::{debug, info, error};
 use chrono::Local;
 
 use crate::{sha256::lotus_hash, block::Block, Log, LogSeverity};
