@@ -205,6 +205,13 @@ You can view all available tags at [GitHub Container Registry](https://github.co
 
 The easiest way to use the Lotus GPU miner is through Docker. This ensures you have all the necessary dependencies without having to install them on your host system.
 
+## Building the Docker Image
+
+```bash
+# Build from the root directory of the repository
+docker build -t lotus-gpu-miner -f dockerfiles/Dockerfile.lotus-gpu-miner .
+```
+
 #### Basic Usage
 ```bash
 # Using a Lotus address - both short and long-form arguments work
