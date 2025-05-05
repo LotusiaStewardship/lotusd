@@ -393,108 +393,172 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
         }
     }
     
-    // Always ensure we have work ready for immediate mining
-    if pool_mining {
-        let server_clone = Arc::clone(&server);
-        tokio::spawn(async move {
-            let log = server_clone.log();
-            log.debug("🔄 Starting background work prefetcher", Some("Miner"));
-            loop {
-                // Check if we need to fetch next work item
-                let needs_work = {
-                    let block_state = server_clone.block_state.lock().await;
-                    block_state.next_block.is_none()
-                };
-                
-                if needs_work {
-                    log.debug("🔍 Work queue needs refill, prefetching next block", Some("Miner"));
-                    if let Err(err) = update_next_block(&server_clone).await {
-                        log.error(format!("Background prefetch failed: {:?}", err), Some("Miner"));
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    } else {
-                        log.debug("✅ Successfully prefetched next work item", Some("Miner"));
-                    }
-                }
-                
-                // Very short sleep to prevent CPU spinning
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        });
-    }
-    
     // Create a continuous work processor that feeds work to the miner
     if pool_mining {
         let server_clone = Arc::clone(&server);
         tokio::spawn(async move {
             let log = server_clone.log();
-            log.debug("🔄 Starting continuous work processor", Some("Miner"));
-            loop {
-                // Keep track of time for performance monitoring
-                let loop_start = std::time::Instant::now();
-                
-                // Get the current block to mine on
-                let (current_work, has_next_block) = {
-                    let mut block_state = server_clone.block_state.lock().await;
-                    
-                    // If we have a next_block, use it
-                    if let Some(next_block) = block_state.next_block.take() {
-                        block_state.current_work = Work::from_header(next_block.header, next_block.target);
-                        block_state.current_block = Some(next_block);
-                        log.debug("🛰️ Set current_block from next_block in worker thread", Some("RPC"));
-                    }
-                    
-                    // Check if we have a current block to mine on
-                    if block_state.current_block.is_none() {
-                        // No current block, so we need to get one
-                        drop(block_state);
-                        log.info("⏳ No work available in worker thread, fetching immediately...", Some("Miner"));
-                        if let Err(err) = update_next_block(&server_clone).await {
-                            log.error(format!("Failed to update next block in worker: {:?}", err), Some("Miner"));
-                            tokio::time::sleep(Duration::from_millis(100)).await;
+            log.info("🚀 Starting high-efficiency mining processor", Some("Miner"));
+            
+            // Continuous prefetching to ensure zero wait time
+            tokio::spawn({
+                let inner_server = Arc::clone(&server_clone);
+                async move {
+                    let log = inner_server.log();
+                    log.debug("🔄 Starting zero-latency work prefetcher", Some("Miner"));
+                    loop {
+                        // Always try to have next work ready
+                        let needs_work = {
+                            let block_state = inner_server.block_state.lock().await;
+                            block_state.next_block.is_none()
+                        };
+                        
+                        if needs_work {
+                            if let Err(err) = update_next_block(&inner_server).await {
+                                log.error(format!("Failed to prefetch next block: {:?}", err), Some("Miner"));
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            } else {
+                                log.debug("✅ Successfully prefetched next work", Some("Miner"));
+                            }
                         }
-                        continue; // Try again
+                        
+                        tokio::time::sleep(Duration::from_millis(5)).await;
                     }
-                    
-                    // We have a current block, let's mine on it
-                    (block_state.current_work.clone(), block_state.next_block.is_some())
+                }
+            });
+            
+            // Core high-efficiency mining loop
+            loop {
+                // Before starting a mining operation, ensure we have a next block ready
+                let has_next_block = {
+                    let block_state = server_clone.block_state.lock().await;
+                    block_state.next_block.is_some()
                 };
                 
-                // Immediately trigger fetching the next block if we don't have one
+                // If we don't have a next block ready, wait for it (preventing wasted GPU time)
                 if !has_next_block {
-                    let prefetch_server = Arc::clone(&server_clone);
-                    tokio::spawn(async move {
-                        let log = prefetch_server.log();
-                        log.debug("🔄 Proactively prefetching next work in worker thread", Some("Miner"));
-                        if let Err(err) = update_next_block(&prefetch_server).await {
-                            log.error(format!("Proactive prefetch failed in worker: {:?}", err), Some("Miner"));
+                    log.debug("⏳ Waiting for prefetch to complete before mining", Some("Miner"));
+                    let mut wait_count = 0;
+                    while !has_next_block && wait_count < 20 { // Max 100ms wait
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        wait_count += 1;
+                        
+                        let block_state = server_clone.block_state.lock().await;
+                        if block_state.next_block.is_some() {
+                            break;
                         }
-                    });
+                    }
+                    
+                    // If we still don't have next work, trigger fetch directly
+                    if !has_next_block {
+                        log.info("⚠️ Prefetch not completed in time, fetching directly", Some("Miner"));
+                        if let Err(err) = update_next_block(&server_clone).await {
+                            log.error(format!("Failed to fetch work: {:?}", err), Some("Miner"));
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            continue;
+                        }
+                    }
                 }
                 
-                // Mine on the current work
-                let mut work = current_work;
+                // Get the current block to mine on with zero wait
+                let current_work = {
+                    let mut block_state = server_clone.block_state.lock().await;
+                    
+                    // Take the next block as current
+                    if let Some(next_block) = block_state.next_block.take() {
+                        // Check if we're already mining this exact header (compare first 32 bytes)
+                        let next_header_start = hex::encode(&next_block.header[0..16]);
+                        
+                        if let Some(current_block) = &block_state.current_block {
+                            let current_header_start = hex::encode(&current_block.header[0..16]);
+                            
+                            if current_header_start == next_header_start {
+                                log.debug(format!("🔄 Skipping identical work header: {}", current_header_start), Some("Miner"));
+                                // Put it back and continue with current
+                                block_state.next_block = Some(next_block);
+                                // Reset nonce index to prevent exhaustion
+                                block_state.current_work.nonce_idx = 0;
+                                log.debug("♻️ Reset nonce index for existing work to prevent exhaustion", Some("Miner"));
+                                // Return current work with reset index
+                                Some(block_state.current_work.clone())
+                            } else {
+                                // Different header, use the new one
+                                log.debug(format!("📝 Switching work from {} to {}", 
+                                    current_header_start, next_header_start), Some("Miner"));
+                                block_state.current_work = Work::from_header(next_block.header, next_block.target);
+                                block_state.current_block = Some(next_block);
+                                Some(block_state.current_work.clone())
+                            }
+                        } else {
+                            // No current block
+                            log.debug(format!("📝 Setting new work with header: {}", next_header_start), Some("Miner"));
+                            block_state.current_work = Work::from_header(next_block.header, next_block.target);
+                            block_state.current_block = Some(next_block);
+                            Some(block_state.current_work.clone())
+                        }
+                    } else {
+                        // No next block available
+                        if let Some(_) = &block_state.current_block {
+                            // We still have a current block, keep using it but reset nonce index
+                            block_state.current_work.nonce_idx = 0;
+                            log.debug("♻️ Reset nonce index for reused work to prevent exhaustion", Some("Miner"));
+                            Some(block_state.current_work.clone())
+                        } else {
+                            None
+                        }
+                    }
+                };
+                
+                // If we still don't have work (shouldn't happen), try again
+                if current_work.is_none() {
+                    log.error("❌ No work available despite prefetching, retrying...", Some("Miner"));
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+                
+                // We have work, start mining immediately
+                let mut work = current_work.unwrap();
+                
+                // Safety check to prevent nonce exhaustion
+                if work.nonce_idx > 1000 {
+                    log.debug("♻️ Resetting high nonce index to prevent exhaustion", Some("Miner"));
+                    work.nonce_idx = 0;
+                    
+                    // Also update the block state to maintain consistency
+                    let mut block_state = server_clone.block_state.lock().await;
+                    if let Some(_) = &block_state.current_block {
+                        block_state.current_work.nonce_idx = 0;
+                    }
+                }
+                
                 let big_nonce = server_clone.rng.lock().await.gen();
                 work.set_big_nonce(big_nonce);
                 
+                // Launch mining with performance timing
+                let start_time = std::time::Instant::now();
+                log.debug(format!("⚡ Starting mining with nonce base {}", big_nonce), Some("Miner"));
+                
                 // Run the mining operation on the GPU
                 let mining_result = tokio::task::spawn_blocking({
-                    let server = Arc::clone(&server_clone);
+                    let inner_server = Arc::clone(&server_clone);
                     move || {
-                        let log = server.log();
-                        let mut miner = server.miner.lock().unwrap();
+                        let log = inner_server.log();
+                        let mut miner = inner_server.miner.lock().unwrap();
                         if !miner.has_nonces_left(&work) {
-                            log.error(format!(
-                                "Error: Exhaustively searched nonces. This could be fixed by lowering \
-                                       rpc_poll_interval."
-                            ), Some("Miner"));
+                            log.error("Error: Exhaustively searched nonces", Some("Miner"));
                             return Ok((None, 0));
                         }
                         miner
-                            .find_nonce(&work, server.log())
+                            .find_nonce(&work, inner_server.log())
                             .map(|nonce| (nonce, miner.num_nonces_per_search()))
                     }
                 })
                 .await;
+                
+                // Log mining performance 
+                let mining_duration = start_time.elapsed();
+                log.debug(format!("✅ Mining batch completed in {}ms", 
+                    mining_duration.as_millis()), Some("Miner"));
                 
                 // Handle the mining result
                 let (nonce, num_nonces_per_search) = match mining_result {
@@ -514,7 +578,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                     work.set_big_nonce(nonce);
                     log.info(format!("💎 Block hash below target with nonce: {}", nonce), Some("Share"));
                     
-                    // Start a background task to fetch new work immediately
+                    // Start a background task to fetch new work immediately (without waiting)
                     let fetch_server = Arc::clone(&server_clone);
                     tokio::spawn(async move {
                         let log = fetch_server.log();
@@ -526,7 +590,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                         }
                     });
                     
-                    // Get the block for submission
+                    // Get the block for submission without blocking the mining loop
                     let block = {
                         let mut block_state = server_clone.block_state.lock().await;
                         if let Some(mut block) = block_state.current_block.take() {
@@ -552,6 +616,9 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                             }
                         });
                     }
+                    
+                    // Continue mining immediately without waiting for share submission
+                    // The mining loop will immediately fetch the next work item
                 } else if num_nonces_per_search > 0 {
                     // Update statistics even when no nonce is found
                     let mut block_state = server_clone.block_state.lock().await;
@@ -579,13 +646,8 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                     }
                 }
                 
-                // Log performance metrics for this mining loop iteration
-                let loop_duration = loop_start.elapsed();
-                log.debug(format!("🔄 Mining loop iteration completed in {}ms", 
-                    loop_duration.as_millis()), Some("Miner"));
-                
-                // Minimize delay between mining operations
-                tokio::time::sleep(Duration::from_micros(1)).await;
+                // Next iteration will immediately get the already prefetched work
+                // This creates a zero-wait mining cycle
             }
         });
     }
@@ -648,6 +710,19 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
             
             // Mine on the current work
             let mut work = current_work;
+            
+            // Safety check to prevent nonce exhaustion
+            if work.nonce_idx > 1000 {
+                log.debug("♻️ Resetting high nonce index to prevent exhaustion", Some("Miner"));
+                work.nonce_idx = 0;
+                
+                // Also update the block state to maintain consistency
+                let mut block_state = server.block_state.lock().await;
+                if let Some(_) = &block_state.current_block {
+                    block_state.current_work.nonce_idx = 0;
+                }
+            }
+            
             let big_nonce = server.rng.lock().await.gen();
             work.set_big_nonce(big_nonce);
             
