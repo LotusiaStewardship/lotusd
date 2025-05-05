@@ -58,10 +58,6 @@ jobs:
         
         echo "Docker image built successfully."
         
-        # List docker images to confirm 
-        echo "Listing Docker images:"
-        docker images | grep lotus-gpu-miner
-        
         # Extract the binary from the local image with error checking
         echo "Creating container from image to extract binary..."
         container_id=$(docker create lotus-gpu-miner:local)
@@ -72,74 +68,64 @@ jobs:
         fi
         
         echo "Container created with ID: $container_id"
-        echo "Extracting binary from container..."
         
         # Inspect the container to see what's inside
         echo "Container filesystem contents at /opt/lotus/bin/:"
         docker exec $container_id ls -la /opt/lotus/bin/ || echo "WARNING: Unable to list directory contents"
         
-        # Copy the binary with error handling
-        docker cp $container_id:/opt/lotus/bin/lotus-gpu-miner ./artifacts/ || docker cp $container_id:/opt/lotus/bin/lotus-miner-cli ./artifacts/
+        # Per Dockerfile, the primary binary is lotus-miner-cli at /opt/lotus/bin/lotus-miner-cli
+        # and lotus-gpu-miner is a symlink to it
+        echo "Extracting primary binary lotus-miner-cli..."
+        docker cp $container_id:/opt/lotus/bin/lotus-miner-cli ./artifacts/
         
         cp_status=$?
+        
+        if [ $cp_status -ne 0 ]; then
+          echo "ERROR: Failed to copy primary binary. Will try the symlink instead..."
+          docker cp $container_id:/opt/lotus/bin/lotus-gpu-miner ./artifacts/
+          cp_status=$?
+        fi
+        
         docker rm $container_id
         
         if [ $cp_status -ne 0 ]; then
-          echo "ERROR: Failed to copy binary from container!"
-          # Try alternative location or name 
-          echo "Trying alternative binary name or location..."
+          echo "ERROR: All attempts to extract binary failed! Creating empty debug container to explore..."
           
-          # Create new container and try alternative paths
-          alt_container_id=$(docker create lotus-gpu-miner:local)
+          # Create new container for debugging
+          debug_container_id=$(docker create lotus-gpu-miner:local)
           
-          # Try to find the binary anywhere in the container
-          echo "Searching for binary in container:"
-          docker exec $alt_container_id find /opt -name "lotus-*" || echo "WARNING: Find command failed"
+          # Try to find any binaries in the container for debugging
+          echo "DEBUG: Searching for any binaries in container:"
+          docker exec $debug_container_id find / -name "lotus-*" 2>/dev/null || echo "WARNING: Find command failed"
+          docker exec $debug_container_id find /opt -type f -executable 2>/dev/null || echo "WARNING: Find executable command failed"
           
-          # Try various possible locations and names
-          docker cp $alt_container_id:/opt/lotus/bin/lotus-miner-cli ./artifacts/ || \
-          docker cp $alt_container_id:/usr/local/bin/lotus-gpu-miner ./artifacts/ || \
-          docker cp $alt_container_id:/usr/local/bin/lotus-miner-cli ./artifacts/ || \
-          docker cp $alt_container_id:/bin/lotus-gpu-miner ./artifacts/ || \
-          docker cp $alt_container_id:/bin/lotus-miner-cli ./artifacts/
-          
-          cp_alt_status=$?
-          docker rm $alt_container_id
-          
-          if [ $cp_alt_status -ne 0 ]; then
-            echo "ERROR: All attempts to extract binary failed!"
-            exit 1
-          fi
+          docker rm $debug_container_id
+          echo "ERROR: Could not extract miner binary from container!"
+          exit 1
         fi
         
         # Verify extracted file exists and has content
         echo "Contents of artifacts directory:"
         ls -la ./artifacts/
         
-        # Check if the binary exists and has reasonable size
-        if [ -f "./artifacts/lotus-gpu-miner" ]; then
+        # Create the other binary name as a symlink for compatibility
+        if [ -f "./artifacts/lotus-miner-cli" ]; then
+          file_size=$(du -k "./artifacts/lotus-miner-cli" | cut -f1)
+          echo "Binary found: lotus-miner-cli (${file_size}KB)"
+          
+          # Create symlink for compatibility
+          cd ./artifacts
+          ln -sf lotus-miner-cli lotus-gpu-miner
+          echo "Created symlink: lotus-gpu-miner -> lotus-miner-cli"
+          cd ..
+        elif [ -f "./artifacts/lotus-gpu-miner" ]; then
           file_size=$(du -k "./artifacts/lotus-gpu-miner" | cut -f1)
           echo "Binary found: lotus-gpu-miner (${file_size}KB)"
           
-          if [ "$file_size" -lt 100 ]; then
-            echo "WARNING: Binary file is suspiciously small (${file_size}KB)"
-          fi
-          
-          # Create symlink for backward compatibility
+          # Create symlink for compatibility
           cd ./artifacts
           ln -sf lotus-gpu-miner lotus-miner-cli
-          cd ..
-        elif [ -f "./artifacts/lotus-miner-cli" ]; then
-          file_size=$(du -k "./artifacts/lotus-miner-cli" | cut -f1)
-          echo "Binary found: lotus-miner-cli (${file_size}KB)" 
-          
-          if [ "$file_size" -lt 100 ]; then
-            echo "WARNING: Binary file is suspiciously small (${file_size}KB)"
-          fi
-          
-          # Create symlink for compatibility in reverse
-          cd ./artifacts
-          ln -sf lotus-miner-cli lotus-gpu-miner
+          echo "Created symlink: lotus-miner-cli -> lotus-gpu-miner"
           cd ..
         else
           echo "ERROR: No usable binary found after extraction!"
@@ -151,20 +137,9 @@ jobs:
         ls -la ./artifacts > ./debug-info/artifacts-list.txt
         file ./artifacts/lotus* > ./debug-info/file-type-info.txt
         
-        echo "Checking for executable status:"
-        if [ -x "./artifacts/lotus-gpu-miner" ]; then
-          echo "lotus-gpu-miner is executable"
-        else
-          echo "Setting executable permissions on lotus-gpu-miner"
-          chmod +x ./artifacts/lotus-gpu-miner
-        fi
-        
-        if [ -x "./artifacts/lotus-miner-cli" ]; then
-          echo "lotus-miner-cli is executable"
-        else  
-          echo "Setting executable permissions on lotus-miner-cli"
-          chmod +x ./artifacts/lotus-miner-cli
-        fi
+        # Ensure binaries are executable
+        chmod +x ./artifacts/lotus*
+        echo "Set executable permissions on all binaries"
 
     # If not a PR, tag and push to registry
     - name: Tag and push Docker image
