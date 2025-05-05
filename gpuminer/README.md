@@ -201,45 +201,61 @@ The official Lotus GPU Miner images are available on GitHub Container Registry:
 
 You can view all available tags at [GitHub Container Registry](https://github.com/Boblepointu/lotusd/pkgs/container/lotus-gpu-miner).
 
-### Running with Docker
+### Docker Usage Examples
 
+The easiest way to use the Lotus GPU miner is through Docker. This ensures you have all the necessary dependencies without having to install them on your host system.
+
+#### Basic Usage
 ```bash
-# Pull the Docker image
-docker pull ghcr.io/boblepointu/lotus-gpu-miner:latest
+# Using a Lotus address - both short and long-form arguments work
+docker run --gpus all -it --rm lotusd/lotus-gpu-miner:latest lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo
 
-# Run with GPU passthrough
+# With short-form arguments
+docker run --gpus all -it --rm lotusd/lotus-gpu-miner:latest -g 0 -s 22 -o lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo -a https://burnlotus.org -m
+
+# With long-form arguments
+docker run --gpus all -it --rm lotusd/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
+```
+
+#### Using Environment Variables (Recommended Method)
+```bash
 docker run --gpus all -it --rm \
-  -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
-  -v /etc/OpenCL:/etc/OpenCL \
-  ghcr.io/boblepointu/lotus-gpu-miner:latest \
-  -g 0 -s 27 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org -m
+  -e MINER_ADDRESS="lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo" \
+  -e GPU_INDEX=0 \
+  -e KERNEL_SIZE=22 \
+  -e RPC_URL="https://burnlotus.org" \
+  -e POOL_MINING=true \
+  -e INSTANCES_PER_GPU=4 \
+  lotusd/lotus-gpu-miner:latest
 ```
 
-### Multi-GPU Container
-
-We provide a Docker container with automatic multi-GPU detection:
-
+#### Advanced Usage
 ```bash
-# Build the Docker container
-docker build -t lotus-miner-cuda ./gpuminer
-
-# Run with your own miner address
-docker run --gpus all lotus-miner-cuda YOUR_LOTUS_ADDRESS
+# Custom RPC settings
+docker run --gpus all -it --rm \
+  -e MINER_ADDRESS="lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo" \
+  -e RPC_URL="http://your-lotus-node:9052" \
+  -e RPC_USER="your-username" \
+  -e RPC_PASSWORD="your-password" \
+  -e RPC_POLL_INTERVAL=2 \
+  lotusd/lotus-gpu-miner:latest
 ```
 
-### Environment Variables
+### Docker Environment Variables
 
-| Environment Variable | CLI Equivalent        | Description                              | Default Value        |
-|----------------------|-----------------------|------------------------------------------|----------------------|
-| `MINER_ADDRESS`      | `-o, --mine-to-address` | Your Lotus address                      | (Random from list)   |
-| `KERNEL_SIZE`        | `-s, --kernel-size`    | Kernel size parameter                    | 22                   |
-| `RPC_URL`            | `-a, --rpc-url`        | Mining pool URL                          | https://burnlotus.org |
-| `RPC_USER`           | `-u, --rpc-user`       | RPC username                             | miner                |
-| `RPC_PASSWORD`       | `-p, --rpc-password`   | RPC password                             | password             |
-| `RPC_POLL_INTERVAL`  | `-i, --rpc-poll-interval` | Block template polling interval       | 1                    |
-| `POOL_MINING`        | `-m, --poolmining`     | Whether to use pool mining mode          | true                 |
-| `INSTANCES_PER_GPU`  | N/A                    | Number of miner instances per GPU        | 4                    |
-| `DEBUG`              | `-d, --debug`          | Enable debug logging                     | false                |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MINER_ADDRESS` | Lotus address to mine to | Random from built-in list |
+| `GPU_INDEX` | GPU index to use | 0 |
+| `KERNEL_SIZE` | Kernel size (20-22) | 22 |
+| `RPC_URL` | RPC server URL | https://burnlotus.org |
+| `RPC_USER` | RPC username | miner |
+| `RPC_PASSWORD` | RPC password | password |
+| `RPC_POLL_INTERVAL` | RPC polling interval in seconds | 1 |
+| `POOL_MINING` | Enable pool mining | true |
+| `INSTANCES_PER_GPU` | Mining instances per GPU | 4 |
+
+The Docker container will automatically spawn mining instances for each detected NVIDIA GPU, running multiple instances per GPU to maximize hash rate.
 
 ## 🔧 Performance Tuning
 
