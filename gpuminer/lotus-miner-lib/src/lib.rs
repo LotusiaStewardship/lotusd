@@ -2,14 +2,15 @@ mod block;
 mod miner;
 pub mod settings;
 mod sha256;
+pub mod logger;
 
 use eyre::Result;
 pub use miner::Miner;
 pub use settings::ConfigSettings;
+pub use logger::{Log, LogSeverity, HashrateEntry, LoggerConfig, init_global_logger, LogEntry};
 
 use std::{
     convert::TryInto,
-    fmt::Display,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -43,30 +44,6 @@ pub struct NodeSettings {
     pub rpc_poll_interval: u64,
     pub miner_addr: String,
     pub pool_mining: bool,
-}
-
-pub struct Log {
-    logs: std::sync::RwLock<Vec<LogEntry>>,
-    hashrates: std::sync::RwLock<Vec<HashrateEntry>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogSeverity {
-    Info,
-    Warn,
-    Error,
-    Bug,
-}
-
-pub struct LogEntry {
-    pub msg: String,
-    pub severity: LogSeverity,
-    pub timestamp: chrono::DateTime<chrono::Local>,
-}
-
-pub struct HashrateEntry {
-    pub hashrate: f64,
-    pub timestamp: chrono::DateTime<chrono::Local>,
 }
 
 struct BlockState {
@@ -114,7 +91,7 @@ impl Server {
         }
     }
 
-    pub async fn run(self: ServerRef) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(self: ServerRef) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let t1 = tokio::spawn({
             let server = Arc::clone(&self);
             async move {
@@ -172,7 +149,7 @@ fn display_hash(hash: &[u8]) -> String {
     hex::encode(&hash)
 }
 
-async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Error>> {
+async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let log = server.log();
     let response = init_request(&server)
         .await
@@ -228,7 +205,7 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-async fn mine_some_nonces(server: ServerRef) -> Result<()> {
+async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let log = server.log();
     let mut block_state = server.block_state.lock().await;
     if let Some(next_block) = block_state.next_block.take() {
@@ -260,7 +237,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<()> {
         }
     })
     .await
-    .unwrap()?;
+    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)??;
     
     // Handle found nonce and submit block if needed
     if let Some(nonce) = nonce {
@@ -317,7 +294,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<()> {
     Ok(())
 }
 
-async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std::error::Error>> {
+async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[derive(Deserialize)]
     struct SubmitBlockResponse {
         result: Option<String>,
@@ -423,84 +400,4 @@ async fn submit_block(server: &Server, block: &Block) -> Result<(), Box<dyn std:
         }
     }
     Ok(())
-}
-
-impl Log {
-    pub fn new() -> Self {
-        Log {
-            logs: std::sync::RwLock::new(Vec::new()),
-            hashrates: std::sync::RwLock::new(Vec::new()),
-        }
-    }
-
-    pub fn log(&self, entry: impl Into<LogEntry>) {
-        let mut logs = self.logs.write().unwrap();
-        let entry = entry.into();
-        println!("{}", entry);
-        logs.push(entry);
-    }
-
-    pub fn log_str(&self, msg: impl ToString, severity: LogSeverity) {
-        self.log(LogEntry {
-            msg: msg.to_string(),
-            severity,
-            timestamp: chrono::Local::now(),
-        })
-    }
-
-    pub fn info(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Info)
-    }
-
-    pub fn warn(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Warn)
-    }
-
-    pub fn error(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Error)
-    }
-
-    pub fn bug(&self, msg: impl ToString) {
-        self.log_str(msg, LogSeverity::Bug)
-    }
-
-    pub fn get_logs_and_clear(&self) -> Vec<LogEntry> {
-        let mut logs = self.logs.write().unwrap();
-        logs.drain(..).collect()
-    }
-
-    pub fn report_hashrate(&self, hashrate: f64) {
-        let mut hashrates = self.hashrates.write().unwrap();
-        hashrates.push(HashrateEntry {
-            hashrate,
-            timestamp: chrono::Local::now(),
-        });
-    }
-
-    pub fn hashrates<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, Vec<HashrateEntry>> {
-        self.hashrates.read().unwrap()
-    }
-}
-
-impl Display for LogEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} [{:?}] {}",
-            self.timestamp.to_rfc3339(),
-            self.severity,
-            self.msg
-        )
-    }
-}
-
-impl Display for HashrateEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} Hashrate {:.3} MH/s",
-            self.timestamp.to_rfc3339(),
-            self.hashrate / 1_000_000.0
-        )
-    }
 }
