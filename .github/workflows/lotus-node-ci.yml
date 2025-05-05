@@ -1398,7 +1398,7 @@ jobs:
           
           # Create release notes file
           cat > release_notes.md << EOF
-          # 🚀 Lotus Core v${VERSION} Release
+          # 🚀 Lotus Root v${VERSION} Release
 
           ![Lotus Logo](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/master/share/pixmaps/lotus64.png)
 
@@ -1528,7 +1528,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.get-version.outputs.version }}
-          name: Lotus Core v${{ steps.get-version.outputs.version }}
+          name: Lotus Root v${{ steps.get-version.outputs.version }}
           body: ${{ steps.generate-notes.outputs.release_notes }}
           files: ./artifacts/lotus-binaries-*.tar.gz
           draft: false
