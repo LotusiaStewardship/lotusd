@@ -264,7 +264,7 @@ jobs:
 
         # Create release notes
         cat > release_notes.md << EOF
-        # 🚀 Lotus Core v${VERSION} Release
+        # 🚀 Lotus Root v${VERSION} Release
 
         ![Lotus Logo](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/master/share/pixmaps/lotus64.png)
 
