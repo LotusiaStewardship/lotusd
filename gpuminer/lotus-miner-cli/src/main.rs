@@ -124,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Start mining
     let report_interval = Duration::from_secs(5);
-    info!("⏱️ Reporting hashrate every {} seconds", report_interval.as_secs());
+    info!("⏱️ Reporting hashrate every {} seconds (using 60s moving average with 15s warm-up period)", report_interval.as_secs());
     
     if cli.debug {
         info!("🔍 Debug mode enabled - showing detailed RPC logs");
