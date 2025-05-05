@@ -39,4 +39,20 @@ impl Block {
     pub fn prev_hash(&self) -> &[u8] {
         &self.header[..32]
     }
+    
+    pub fn empty() -> Self {
+        Block {
+            header: [0; 160],
+            body: Vec::new(),
+            target: [0; 32],
+        }
+    }
+    
+    pub fn body_size(&self) -> usize {
+        self.body.len()
+    }
+    
+    pub fn get_body(&self) -> &[u8] {
+        &self.body
+    }
 }
