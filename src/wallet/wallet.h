@@ -701,7 +701,6 @@ private:
     int nWalletMaxVersion GUARDED_BY(cs_wallet) = FEATURE_BASE;
 
     int64_t nNextResend = 0;
-    int64_t nNextStuckTxCleanup = 0;
     bool fBroadcastTransactions = false;
     // Local time that the tip block was received. Used to schedule wallet
     // rebroadcasts.
@@ -1576,15 +1575,6 @@ public:
     AddWalletDescriptor(WalletDescriptor &desc,
                         const FlatSigningProvider &signing_provider,
                         const std::string &label, bool internal);
-
-    /**
-     * Delete transactions that are not in the mempool and have been in the wallet
-     * for more than the specified number of seconds.
-     * 
-     * @param max_tx_age Maximum age of transactions in seconds
-     * @return Number of transactions removed
-     */
-    int DeleteStuckTransactions(int64_t max_tx_age = 10);
 };
 
 /**
