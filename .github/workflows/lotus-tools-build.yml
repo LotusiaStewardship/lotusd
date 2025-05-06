@@ -49,6 +49,14 @@ jobs:
         docker cp $container_id:/opt/lotus/bin/lotus-seeder ./artifacts/
         docker rm $container_id
 
+        # Build the Docker image with buildx and load it into Docker
+        docker buildx build --load -t lotus-seeder:local -f dockerfiles/Dockerfile.lotus-seeder .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-seeder:local)
+        docker cp $container_id:/opt/lotus/bin/lotus-seeder ./artifacts/
+        docker rm $container_id
+
         # If not a PR, tag and push to registry
         if [ "${{ github.event_name }}" != "pull_request" ]; then
           # Tag for registry
@@ -102,6 +110,14 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+
+        # Build the Docker image with buildx and load it into Docker
+        docker buildx build --load -t lotus-wallet:local -f dockerfiles/Dockerfile.lotus-wallet .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-wallet:local)
+        docker cp $container_id:/opt/lotus/bin/lotus-wallet ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with buildx and load it into Docker
         docker buildx build --load -t lotus-wallet:local -f dockerfiles/Dockerfile.lotus-wallet .

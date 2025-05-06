@@ -103,23 +103,50 @@ For detailed instructions on setting up and using the GPU miner, see the [GPU Mi
 
 ## 🚀 Quick Start Examples
 
-### 📦 Using Pre-built Binary
+### 📦 Available Binary Packages
 
-You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases).
+You can download the latest Lotus Root binaries from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases):
+
+#### Package Options
+- **Combined Packages**:
+  - `lotus-binaries-[VERSION].tar.gz` - All Lotus binaries in a single tarball
+  - `lotus-binaries-[VERSION].zip` - All Lotus binaries in a single zip file
+
+- **Individual Component Packages**:
+  - `lotus-gpu-miner-[VERSION].tar.gz` - GPU miner with required kernels (tar.gz format)
+  - `lotus-gpu-miner-[VERSION].zip` - GPU miner with required kernels (zip format)
+  - `lotus-node-[VERSION].tar.gz` - Lotus full node daemon (tar.gz format)
+  - `lotus-node-[VERSION].zip` - Lotus full node daemon (zip format)
+  - `lotus-qt-[VERSION].tar.gz` - Lotus desktop wallet (tar.gz format)
+  - `lotus-qt-[VERSION].zip` - Lotus desktop wallet (zip format)
+  - `lotus-cli-[VERSION].tar.gz` - Lotus command-line tools (tar.gz format)
+  - `lotus-cli-[VERSION].zip` - Lotus command-line tools (zip format)
+
+> **Note:** The GPU miner now includes embedded OpenCL kernel code, making it a completely self-contained binary.
+
+For detailed GPU miner documentation, see the [GPU Mining Documentation](gpuminer/README.md).
 
 #### 🏊‍♂️ Example: Mining on a Pool
-
+##### Using the CLI Miner
 ```bash
 # Replace with your own mining pool details and address
 # Note: For pool mining, username and password can be any dummy values
 lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
 ```
 
+##### Using the Docker Miner
+```bash
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
+```
+
 ## 🌐 Community Resources
 
 - 🏠 Website: [https://lotusia.org/](https://lotusia.org/)
 - 🔍 Block Explorer: [https://explorer.lotusia.org/](https://explorer.lotusia.org/)
-- 💬 Telegram Channel: [https://t.me/LotusiaStewardship](https://t.me/LotusiaStewardship)
+- 💬 Telegram Airdrop Channel: [https://t.me/LotusiaStewardship](https://t.me/LotusiaStewardship)
+- 💬 Telegram Talk Channel: [https://t.me/LotusiaDiscourse](https://t.me/LotusiaDiscourse)
+- 📚 Documentation: [https://docs.lotusia.org/](https://docs.lotusia.org/)
+- 🌐 Pool: [https://burnlotus.org/](https://burnlotus.org/)
 
 ## 📜 License
 

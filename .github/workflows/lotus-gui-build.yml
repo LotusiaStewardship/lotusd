@@ -49,6 +49,14 @@ jobs:
         docker cp $container_id:/opt/lotus/bin/lotus-qt ./artifacts/
         docker rm $container_id
 
+        # Build the Docker image with --load flag to ensure it's available locally
+        docker buildx build --load -t lotus-qt:local -f dockerfiles/Dockerfile.lotus-qt .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-qt:local)
+        docker cp $container_id:/opt/lotus/bin/lotus-qt ./artifacts/
+        docker rm $container_id
+
         # If not a PR, tag and push to registry
         if [ "${{ github.event_name }}" != "pull_request" ]; then
           # Tag for registry

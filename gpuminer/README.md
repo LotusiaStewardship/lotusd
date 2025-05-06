@@ -22,225 +22,396 @@
   > *"Harness the power of your GPU for optimal Lotus mining"*
   
   <hr>
+  
+  **[📦 Download](#-using-pre-built-binaries)** • **[🐳 Docker Images](#docker-images)** • **[🚀 Quick Start](#-quick-start-examples)** • **[📚 Documentation](#-advanced-architecture)**
 </div>
 
 The Lotus GPU miner enables high-performance mining for the Lotus network, using OpenCL to harness the power of your GPU for optimal mining efficiency.
 
-## ⚙️ Configuration
+## ✨ Features
 
-Configuration may be specified on the command line or via a toml file. 
-The configuration file location by default is: `~/.lotus-miner/config.toml`
-
-The configuration file looks like the following:
-
-```
-mine_to_address = "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt"
-rpc_url = "http://127.0.0.1:10605"
-rpc_poll_interval = 3
-rpc_user = "lotus"
-rpc_password = "lotus"
-gpu_index = 0
-kernel_size = 23
-pool_mining = false
-```
-
-See `lotus-miner --help` for a description of the parameters.
+- **Zero-Stall Mining Architecture**: Maximizes GPU utilization with continuous mining cycles
+- **Intelligent Header Management**: Avoids redundant work through smart block header comparison
+- **Stabilized Hashrate Metrics**: 60-second moving average with 15-second warm-up period
+- **Asynchronous Share Submission**: Continues mining while shares are being submitted
+- **Intelligent Nonce Management**: Prevents exhaustion by automatically resetting nonce indexes
+- **Embedded OpenCL Kernels**: Multiple kernel implementations included to optimize for different GPUs
+- **OpenCL-based Mining**: Works with a wide variety of GPUs from NVIDIA, AMD, and Intel
+- **Pool and Solo Mining**: Support for both mining modes with seamless transitions
 
 ## 🏊‍♂️ Mining Modes
 
 ### 🌊 Pool Mining
 
-You can enable pool mining mode with the `--poolmining` flag. When this flag is set, the miner will submit blocks using a format compatible with mining pools.
+Pool mining mode submits shares to a mining pool, allowing you to receive more frequent but smaller rewards. Enable this mode with the `--poolmining` flag:
 
 ```bash
-./lotus-miner --poolmining
+./lotus-miner-cli --poolmining -a https://burnlotus.org -o YOUR_LOTUS_ADDRESS
 ```
 
-You can also enable pool mining in the config file:
+### 🔒 Solo Mining
 
-```
-pool_mining = true
+Solo mining connects directly to a Lotus node, granting you the full block reward when you find a block. This mode is used when the `--poolmining` flag is not present:
+
+```bash
+./lotus-miner-cli -a http://127.0.0.1:10604 -u username -p password -o YOUR_LOTUS_ADDRESS
 ```
 
 ## 🚀 Quick Start Examples
 
-### 📦 Using Pre-built Binary
+### 📦 Using Pre-built Binaries
 
-You can download the latest release of the Lotus GPU Miner from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases).
+You can download the latest Lotus GPU Miner binaries from the [GitHub Releases page](https://github.com/LotusiaStewardship/lotusd/releases/latest):
+
+#### Available Package Options
+
+##### Combined Packages (All Lotus Components)
+- **Tar Archive**: `lotus-binaries-[VERSION].tar.gz` - Contains all Lotus binaries including node, wallet, and GPU miner
+- **Zip Archive**: `lotus-binaries-[VERSION].zip` - Same contents as the tar.gz but in zip format
+
+##### GPU Miner Specific Packages
+- **Tar Archive**: `lotus-gpu-miner-[VERSION].tar.gz` - Contains only the GPU miner with required OpenCL kernels
+- **Zip Archive**: `lotus-gpu-miner-[VERSION].zip` - Same as above but in zip format
+
+#### Installation Instructions
+
+##### Using the GPU Miner Package
+
+```bash
+# For tar.gz format
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-gpu-miner-0.4.0.tar.gz
+tar -xzf lotus-gpu-miner-0.4.0.tar.gz -C .
+cd gpu-miner-dir
+chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+
+# You can also use the symlink if you prefer:
+# ./lotus-gpu-miner -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+
+# For zip format
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-gpu-miner-0.4.0.zip
+unzip lotus-gpu-miner-0.4.0.zip -d gpu-miner-dir
+cd gpu-miner-dir
+chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+```
+
+##### Extracting from the Combined Package
+
+```bash
+# For tar.gz format
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-binaries-0.4.0.tar.gz
+tar -xzf lotus-binaries-0.4.0.tar.gz
+cd gpu-miner-package
+chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+
+# For zip format
+wget https://github.com/LotusiaStewardship/lotusd/releases/download/v0.4.0/lotus-binaries-0.4.0.zip
+unzip lotus-binaries-0.4.0.zip -d gpu-miner-package
+cd gpu-miner-package
+chmod +x lotus-miner-cli
+./lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+```
+
+> **ℹ️ Note**: The OpenCL kernel code is now embedded directly in the binary, eliminating the need for the external `kernels` directory. This provides a cleaner, more reliable distribution and a fully self-contained binary.
 
 #### 🏊‍♂️ Example: Mining on a Pool
 
 ```bash
-# Replace with your own mining pool details and address
-# Note: For pool mining, username and password can be any dummy values
-lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+# Replace with your own address
+lotus-miner-cli -g 0 -s 27 -o lotus_16PSJNgWFFf14otE17Fp43HhjbkFchk4Xgvwy2X27 -i 1 -a https://burnlotus.org -m
 ```
 
 #### 🔒 Example: Solo Mining
 
 ```bash
-lotus-miner-cli --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://127.0.0.1:10604 --rpc-user your_username --mine-to-address your_lotus_address --kernel-size 21
+lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 3 -a http://127.0.0.1:10604 -u your_username -p your_password
 ```
 
-### 🐳 Using Docker
+### 🔍 Command Line Parameters
 
-You can also run the Lotus GPU Miner using Docker:
+```
+USAGE:
+    lotus-miner-cli [FLAGS] [OPTIONS]
+
+FLAGS:
+    -h, --help          Prints help information
+    -m, --poolmining    Enable pool mining mode
+    -d, --debug         Enable debug logging
+    -V, --version       Prints version information
+
+OPTIONS:
+    -g, --gpu-index <gpu_index>                    GPU index to use (default: 0)
+    -s, --kernel-size <kernel_size>                Kernel size parameter (default: 23)
+    -o, --mine-to-address <mine_to_address>        Coinbase Output Address
+    -p, --rpc-password <rpc_password>              Lotus RPC password
+    -i, --rpc-poll-interval <rpc_poll_interval>    Block template polling interval (seconds)
+    -a, --rpc-url <rpc_url>                        Lotus RPC address
+    -u, --rpc-user <rpc_user>                      Lotus RPC username
+```
+
+## 🔬 Advanced Architecture
+
+### ⚡ Zero-Stall Mining Architecture
+
+The Lotus GPU Miner implements a sophisticated zero-stall mining architecture designed to maximize GPU efficiency:
+
+1. **Strategic Work Prefetching**: A dedicated background thread consistently fetches new work before it's needed, ensuring no GPU stalls occur while waiting for the next job.
+
+2. **Smart Header Management**: Intelligent block header comparison avoids redundant mining operations:
+   - New headers are compared against current ones to prevent mining the same block twice
+   - Identical headers are detected, allowing the miner to continue on the current work with reset nonces
+   - Provides detailed logging of header transitions for better debugging
+
+3. **Asynchronous Share Submission**: When a valid share is found:
+   - The share is submitted in the background
+   - Mining continues immediately with the next block
+   - The GPU experiences zero downtime during share submission
+
+4. **Continuous Mining Loop**: The zero-wait mining cycle creates a continuous flow of work for the GPU:
+   ```
+   ┌─────────────────┐    ┌────────────────┐    ┌────────────────┐
+   │ Prefetch Work   │───▶│ Process Mining │───▶│ Submit Results │
+   └─────────────────┘    └────────────────┘    └────────────────┘
+           ▲                                            │
+           └────────────────────────────────────────────┘
+   ```
+
+5. **Nonce Exhaustion Prevention**: Automatic nonce index resets prevent the "Exhaustively searched nonces" error, ensuring continuous mining.
+
+### 📊 Stabilized Hashrate Reporting
+
+The miner implements an intelligent hashrate calculation system:
+
+- **60-Second Moving Average**: Hashrate is calculated over a 60-second window for stable readings
+- **15-Second Warm-Up Period**: Initial hashrate estimates are stabilized to prevent unrealistically high readings
+- **Intelligent Blending**: Gradually transitions from conservative estimates to measured values during warm-up
+- **Self-Adjusting Algorithm**: Adapts to different hardware performance characteristics
+- **Debug Logging**: Logs show the stabilization process when using the `--debug` flag
+
+## 🐳 Docker Support
+
+### Docker Images
+
+The official Lotus GPU Miner images are available on GitHub Container Registry:
+
+- **Latest Image**: `ghcr.io/boblepointu/lotus-gpu-miner:latest`
+- **Versioned Images**: `ghcr.io/boblepointu/lotus-gpu-miner:v0.4.0` (replace with specific version)
+
+You can view all available tags at [GitHub Container Registry](https://github.com/Boblepointu/lotusd/pkgs/container/lotus-gpu-miner).
+
+### Docker Usage Examples
+
+The easiest way to use the Lotus GPU miner is through Docker. This ensures you have all the necessary dependencies without having to install them on your host system.
+
+## Building the Docker Image
 
 ```bash
-# Pull the Docker image
-docker pull ghcr.io/boblepointu/lotus-gpu-miner:latest
-
-# Run the container with pool mining
-# Note: For pool mining, username and password can be any dummy values
-docker run --gpus all -it --rm \
-  -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
-  -v /etc/OpenCL:/etc/OpenCL \
-  ghcr.io/boblepointu/lotus-gpu-miner:latest \
-  --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner \
-  --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
-
-# Run the container for solo mining
-docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest \
-  --rpc-password your_password --rpc-poll-interval 3 --rpc-url http://your_node_ip:10604 --rpc-user your_username \
-  --mine-to-address your_lotus_address --kernel-size 21
+# Build from the root directory of the repository
+docker build -t lotus-gpu-miner -f dockerfiles/Dockerfile.lotus-gpu-miner .
 ```
 
-**Note**: The `--gpus all` flag requires the NVIDIA Container Toolkit to be installed if you're using NVIDIA GPUs. For AMD GPUs, you may need a different configuration.
+#### Basic Usage
+```bash
+# Using a Lotus address - both short and long-form arguments work
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo
 
-### 🛠️ Docker Setup on Ubuntu 24.04
+# With short-form arguments
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest -g 0 -s 22 -o lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo -a https://burnlotus.org -m
 
-Follow these steps to set up all dependencies needed for running the Lotus GPU Miner in Docker on Ubuntu 24.04:
+# With long-form arguments
+docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
+```
 
-#### 🟢 NVIDIA GPU Setup
+#### Using Environment Variables (Recommended Method)
+```bash
+docker run --gpus all -it --rm \
+  -e MINER_ADDRESS="lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo" \
+  -e GPU_INDEX=0 \
+  -e KERNEL_SIZE=22 \
+  -e RPC_URL="https://burnlotus.org" \
+  -e POOL_MINING=true \
+  -e INSTANCES_PER_GPU=4 \
+  ghcr.io/boblepointu/lotus-gpu-miner:latest
+```
 
-1. Install the NVIDIA driver if not already installed:
-   ```bash
-   sudo apt update
-   sudo apt install -y nvidia-driver-535  # Use the latest version available
-   sudo reboot  # Reboot to load the driver
-   ```
+#### Advanced Usage
+```bash
+# Custom RPC settings
+docker run --gpus all -it --rm \
+  -e MINER_ADDRESS="lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo" \
+  -e RPC_URL="http://your-lotus-node:9052" \
+  -e RPC_USER="your-username" \
+  -e RPC_PASSWORD="your-password" \
+  -e RPC_POLL_INTERVAL=2 \
+  ghcr.io/boblepointu/lotus-gpu-miner:8.3.47
+```
 
-2. Install the NVIDIA Container Toolkit:
-   ```bash
-   # Add the NVIDIA Container Toolkit repository
-   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-   curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-   sudo sed -i -e '/experimental/ s/^#//g' /etc/apt/sources.list.d/nvidia-container-toolkit.list
-   
-   # Install the toolkit
-   sudo apt-get update
-   sudo apt-get install -y nvidia-container-toolkit
-   sudo nvidia-ctk runtime configure --runtime=docker
-   sudo systemctl restart docker
-   ```
+### Docker Environment Variables
 
-3. Install OpenCL libraries:
-   ```bash
-   sudo apt update
-   sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev clinfo
-   ```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MINER_ADDRESS` | Lotus address to mine to | Random from built-in list |
+| `GPU_INDEX` | GPU index to use | 0 |
+| `KERNEL_SIZE` | Kernel size (20-22) | 22 |
+| `RPC_URL` | RPC server URL | https://burnlotus.org |
+| `RPC_USER` | RPC username | miner |
+| `RPC_PASSWORD` | RPC password | password |
+| `RPC_POLL_INTERVAL` | RPC polling interval in seconds | 1 |
+| `POOL_MINING` | Enable pool mining | true |
+| `INSTANCES_PER_GPU` | Mining instances per GPU | 4 |
 
-4. Verify your NVIDIA GPU is detected:
-   ```bash
-   nvidia-smi  # Should show your GPU information
-   clinfo      # Should list your GPU as an OpenCL platform
-   ```
+The Docker container will automatically spawn mining instances for each detected NVIDIA GPU, running multiple instances per GPU to maximize hash rate.
 
-5. Test Docker access to the GPU:
-   ```bash
-   # Test NVIDIA Container Toolkit
-   sudo docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
-   
-   # Test OpenCL in Docker with volume mounts
-   sudo docker run --rm --gpus all \
-     -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
-     -v /etc/OpenCL:/etc/OpenCL \
-     ghcr.io/boblepointu/lotus-gpu-miner:latest clinfo
-   ```
+## 🔧 Performance Tuning
 
-#### 🔴 AMD GPU Setup
+### Kernel Size (`-s, --kernel-size`)
 
-1. Install AMD ROCm drivers:
-   ```bash
-   sudo apt update
-   sudo apt install -y rocm-opencl
-   ```
+The kernel size parameter controls how many nonces are processed in a single GPU kernel invocation. This directly impacts your hashrate:
 
-2. Install Docker:
-   ```bash
-   sudo apt update
-   sudo apt install -y docker.io
-   sudo systemctl enable --now docker
-   sudo usermod -aG docker $USER  # Log out and back in after this
-   ```
+- Higher values = more hashes per second, but potentially higher GPU load
+- Lower values = less GPU load, but fewer hashes per second
+- Recommended ranges:
+  - Entry-level GPUs: 21-24
+  - Mid-range GPUs: 24-27
+  - High-end GPUs: 26-30
 
-3. Install OpenCL libraries:
-   ```bash
-   sudo apt update
-   sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev clinfo
-   ```
+### Poll Interval (`-i, --rpc-poll-interval`)
 
-4. Verify your AMD GPU is detected:
-   ```bash
-   clinfo  # Should list your AMD GPU as an OpenCL platform
-   ```
+This parameter controls how frequently the miner requests new work from the server:
 
-5. Run with AMD GPU:
-   ```bash
-   docker run --device=/dev/kfd --device=/dev/dri \
-     -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
-     -v /etc/OpenCL:/etc/OpenCL \
-     ghcr.io/boblepointu/lotus-gpu-miner:latest \
-     --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner \
-     --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
-   ```
+- Lower values (1-2 seconds): More aggressive polling, better for pools with rapidly changing work
+- Higher values (3-5 seconds): Less network traffic, suitable for solo mining or stable pools
 
-#### 🔍 Troubleshooting
+## 🛠️ Build & Run from Source
 
-If you encounter `Platform::list: Error retrieving platform list: ApiWrapper(GetPlatformIdsPlatformListUnavailable(10))`, it means the Docker container cannot access OpenCL. Check that:
+### 🐧 Linux
 
-1. Your OpenCL libraries are correctly installed on the host:
-   ```bash
-   ls -la /usr/lib/x86_64-linux-gnu/libOpenCL.so.1
-   ls -la /etc/OpenCL
-   ```
+```bash
+# Install dependencies
+sudo apt update
+sudo apt install -y ocl-icd-libopencl1 ocl-icd-opencl-dev clinfo build-essential pkg-config curl
 
-2. You've correctly mounted these libraries into the container:
-   ```bash
-   docker run --rm -it --gpus all \
-     -v /usr/lib/x86_64-linux-gnu/libOpenCL.so.1:/usr/lib/x86_64-linux-gnu/libOpenCL.so.1 \
-     -v /etc/OpenCL:/etc/OpenCL \
-     ubuntu:22.04 ls -la /usr/lib/x86_64-linux-gnu/libOpenCL.so.1
-   ```
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
 
-3. For NVIDIA, make sure the NVIDIA OpenCL ICD is properly installed:
-   ```bash
-   sudo apt install -y nvidia-opencl-icd
-   ```
+# Clone repository
+git clone https://github.com/Boblepointu/lotusd.git
+cd lotusd/gpuminer
 
-## 🛠️ Build & Run
+# Build
+cargo build --release
+
+# Run
+./target/release/lotus-miner-cli -g 0 -s 27 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+```
 
 ### 🪟 Windows
 
-Assuming you are running the lotus daemon with server mode:
-
-1. Install OpenCL for your GPU. [AMD](https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/releases/download/1.0/OCL_SDK_Light_AMD.exe) or [NVidia](https://developer.nvidia.com/cuda-downloads)
-2. Install [rust](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
-3. Build `lotus-miner` using `cargo build`
-4. Run the lotus miner with `./target/debug/lotus-miner.exe --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>`
+1. Install [Rust](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
+2. Install OpenCL for your GPU: [AMD](https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/releases) or [NVIDIA](https://developer.nvidia.com/cuda-downloads)
+3. Clone and build:
+   ```
+   git clone https://github.com/Boblepointu/lotusd.git
+   cd lotusd\gpuminer
+   cargo build --release
+   ```
+4. Run with:
+   ```
+   .\target\release\lotus-miner-cli -g 0 -s 27 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+   ```
 
 ### 🍎 MacOS
 
-1. Install [rustup](https://rustup.rs/)
-2. Install the rust toolchain using rustup
-3. Build `lotus-miner` using `cargo build`
-4. Run the lotus miner with `./target/debug/lotus-miner --rpc-user=<user> --rpc-password=<password> --mine-to-address=<your lotus address>`
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+
+# Clone and build
+git clone https://github.com/Boblepointu/lotusd.git
+cd lotusd/gpuminer
+cargo build --release
+
+# Run
+./target/release/lotus-miner-cli -g 0 -s 25 -o YOUR_LOTUS_ADDRESS -i 1 -a https://burnlotus.org -m
+```
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+1. **"Error: Exhaustively searched nonces"**
+   - This should be fixed by the nonce index reset feature
+   - If you still encounter it, try a larger kernel size with `-s 27` or `-s 28`
+
+2. **OpenCL Initialization Errors**
+   - Ensure your OpenCL drivers are properly installed
+   - Verify GPU compatibility with `clinfo`
+   - Try different GPU with `-g 1` if multiple GPUs are available
+
+3. **Unstable Hashrate**
+   - The 60-second moving average with 15-second warm-up should stabilize readings
+   - Initial high values will normalize within 15 seconds of starting
+
+4. **Connection Issues**
+   - Verify your network connection to the pool/node
+   - Check if the RPC URL is correct
+   - For solo mining, ensure your node is fully synchronized
+
+### Debugging
+
+Enable debug output with `--debug` to see detailed information about:
+- RPC communication with the server
+- Block header transitions
+- Share submission process
+- Hashrate stabilization metrics
+- Nonce management
+
+## 💻 Development & Contribution
+
+The Lotus GPU Miner is open source and welcomes contributions. Key components:
+
+- **lib.rs**: Core mining logic and Zero-Stall Architecture
+- **miner.rs**: OpenCL kernel management and GPU interfacing
+- **block.rs**: Block structure and manipulation
+- **sha256.rs**: Lotus-specific hash implementation
+- **lotus_og.cl**: OpenCL mining kernel
+- **main.rs**: CLI interface and program entry point
+
+## ⚙️ Kernel Options
+
+The Lotus GPU Miner includes two different OpenCL kernel implementations that you can choose from based on your hardware and mining preferences:
+
+### 🌸 Lotus Original Kernel (Default)
+
+```bash
+lotus-miner-cli --kernel-type lotus_og [other parameters]
+```
+
+This is the default kernel optimized specifically for Lotus mining. It typically offers the best performance and is recommended for most users.
+
+### 🧮 POCLBM Kernel
+
+```bash
+lotus-miner-cli --kernel-type poclbm [other parameters]
+```
+
+This alternative kernel is based on the POCLBM project (PyOpenCL Bitcoin Miner). It may offer better performance on some older or specific GPU architectures.
+
+### 🔍 Choosing the Right Kernel
+
+- **For newer GPUs**: Start with the default `lotus_og` kernel as it's optimized for modern architectures
+- **For older GPUs**: Try the `poclbm` kernel which might work better with legacy hardware
+- **For maximum efficiency**: Test both kernels and monitor your hashrate to see which one performs better on your specific hardware
+
+Both kernels are embedded directly in the binary, so no external files are needed regardless of which one you choose.
 
 ---
 
 <p align="center">
-  <strong>🌸 Happy Mining! 🌸</strong>
+  <strong>🌸 Happy Mining! 🌸</strong><br>
+  <em>Authors: Alexandre Guillioud (FrenchBTC) & Tobias Ruck</em>
 </p>
-

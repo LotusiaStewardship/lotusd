@@ -49,6 +49,14 @@ jobs:
         docker cp $container_id:/opt/lotus/bin/lotusd ./artifacts/
         docker rm $container_id
 
+        # Build the Docker image with --load flag to ensure it's available locally
+        docker buildx build --load -t lotus-node:local -f dockerfiles/Dockerfile.lotusd .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-node:local)
+        docker cp $container_id:/opt/lotus/bin/lotusd ./artifacts/
+        docker rm $container_id
+
         # If not a PR, tag and push to registry
         if [ "${{ github.event_name }}" != "pull_request" ]; then
           # Tag for registry
@@ -111,6 +119,14 @@ jobs:
         docker cp $container_id:/opt/lotus/bin/lotus-cli ./artifacts/
         docker rm $container_id
 
+        # Build the Docker image with proper output specification
+        docker buildx build --load -t lotus-cli:local -f dockerfiles/Dockerfile.lotus-cli .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-cli:local)
+        docker cp $container_id:/opt/lotus/bin/lotus-cli ./artifacts/
+        docker rm $container_id
+
         # If not a PR, tag and push to registry
         if [ "${{ github.event_name }}" != "pull_request" ]; then
           # Tag for registry
@@ -164,6 +180,14 @@ jobs:
       run: |
         # Create artifacts directory
         mkdir -p ./artifacts
+
+        # Build the Docker image with proper output specification
+        docker buildx build --load -t lotus-tx:local -f dockerfiles/Dockerfile.lotus-tx .
+
+        # Extract the binary from the local image
+        container_id=$(docker create lotus-tx:local)
+        docker cp $container_id:/opt/lotus/bin/lotus-tx ./artifacts/
+        docker rm $container_id
 
         # Build the Docker image with proper output specification
         docker buildx build --load -t lotus-tx:local -f dockerfiles/Dockerfile.lotus-tx .
