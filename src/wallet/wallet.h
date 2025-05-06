@@ -814,11 +814,6 @@ private:
     // structure
     std::map<uint256, std::unique_ptr<ScriptPubKeyMan>> m_spk_managers;
 
-    // Timer-related members for transaction cleanup
-    boost::asio::io_service m_io_service;
-    std::unique_ptr<boost::asio::deadline_timer> m_tx_cleanup_timer;
-    void ScheduleTransactionCleanup();
-
 public:
     /*
      * Main wallet lock.
