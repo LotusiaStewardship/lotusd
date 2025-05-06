@@ -68,8 +68,8 @@ TransactionError BroadcastTransaction(NodeContext &node, const Config &config,
                 // fails here, return error immediately.
                 Amount fee = Amount::zero();
                 if (!AcceptToMemoryPool(config, *node.mempool, state, tx,
-                                        true /* bypass_limits */,
-                                        /* test_accept */ true, &fee)) {
+                                        false /* bypass_limits */,
+                                        /* test_accept */ false, &fee)) {
                     return HandleATMPError(state, err_string);
                 } else if (fee > max_tx_fee) {
                     return TransactionError::MAX_FEE_EXCEEDED;
