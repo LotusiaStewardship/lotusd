@@ -40,7 +40,6 @@
 #include <utility>
 #include <vector>
 
-#include <boost/asio.hpp>
 #include <boost/signals2/signal.hpp>
 
 using LoadWalletFn =
