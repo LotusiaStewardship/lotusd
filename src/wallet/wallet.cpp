@@ -4666,11 +4666,6 @@ void CWallet::postInitProcess() {
 
     // Update wallet transactions with current mempool transactions.
     chain().requestMempoolTransactions(*this);
-    
-    // Clean up stuck transactions that have been in the wallet too long
-    // Default to removing transactions older than 10 seconds
-    // This function is called every 10 seconds to ensure regular cleanup
-    ScheduleTransactionCleanup();
 }
 
 bool CWallet::BackupWallet(const std::string &strDest) const {
