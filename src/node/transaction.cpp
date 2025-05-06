@@ -69,7 +69,7 @@ TransactionError BroadcastTransaction(NodeContext &node, const Config &config,
                 Amount fee = Amount::zero();
                 if (!AcceptToMemoryPool(config, *node.mempool, state, tx,
                                         false /* bypass_limits */,
-                                        /* test_accept */ false, &fee)) {
+                                        /* test_accept */ true, &fee)) {
                     return HandleATMPError(state, err_string);
                 } else if (fee > max_tx_fee) {
                     return TransactionError::MAX_FEE_EXCEEDED;
@@ -77,7 +77,7 @@ TransactionError BroadcastTransaction(NodeContext &node, const Config &config,
             }
             // Try to submit the transaction to the mempool.
             if (!AcceptToMemoryPool(config, *node.mempool, state, tx,
-                                    true /* bypass_limits */)) {
+                                    false /* bypass_limits */)) {
                 return HandleATMPError(state, err_string);
             }
 
