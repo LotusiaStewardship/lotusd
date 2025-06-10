@@ -5831,8 +5831,6 @@ CBlockFileInfo *GetBlockFileInfo(size_t n) {
 static const uint64_t MEMPOOL_DUMP_VERSION = 1;
 
 bool LoadMempool(const Config &config, CTxMemPool &pool) {
-    int64_t nExpiryTimeout =
-        gArgs.GetArg("-mempoolexpiry", DEFAULT_MEMPOOL_EXPIRY) * 60 * 60;
     FILE *filestr = fsbridge::fopen(GetDataDir() / "mempool.dat", "rb");
     CAutoFile file(filestr, SER_DISK, CLIENT_VERSION);
     if (file.IsNull()) {
@@ -5842,8 +5840,8 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
     }
 
     // Get max mempool size in bytes
-    int64_t maxMempoolSize =
-        gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
+    const size_t maxMempoolSize = static_cast<size_t>(
+        gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000);
 
     // Check if mempool is already too large
     if (pool.DynamicMemoryUsage() >= maxMempoolSize) {
@@ -5853,11 +5851,7 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
     }
 
     int64_t count = 0;
-    int64_t expired = 0;
     int64_t failed = 0;
-    int64_t already_there = 0;
-    int64_t unbroadcast = 0;
-    int64_t nNow = GetTime();
 
     try {
         uint64_t version;
@@ -5886,6 +5880,7 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
             pool.AddUnbroadcastTx(tx->GetId());
 
             LOCK(cs_main);
+            TxValidationState state;
             AcceptToMemoryPoolWithTime(config, pool, state, tx, nTime,
                                        false /* bypass_limits */,
                                        false /* test_accept */);
@@ -5915,9 +5910,9 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
         return false;
     }
 
-    LogPrintf("Imported mempool transactions from disk: %i succeeded, %i "
-              "failed, %i expired\n",
-              count, failed, expired);
+    LogPrintf(
+        "Imported mempool transactions from disk: %i succeeded, %i failed\n",
+        count, failed);
     return true;
 }
 
