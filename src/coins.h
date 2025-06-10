@@ -306,15 +306,7 @@ public:
      * number of invalid transactions that attempt to overrun the in-memory
      * coins cache (CCoinsViewCache::cacheCoins).
      */
-    void Uncache(const COutPoint &outpoint) {
-        auto it = cacheCoins.find(outpoint);
-        if (it != cacheCoins.end() &&
-            !(it->second.flags & CCoinsCacheEntry::DIRTY)) {
-            // Only remove if the entry is not dirty (hasn't been modified)
-            cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();
-            cacheCoins.erase(it);
-        }
-    }
+    void Uncache(const COutPoint &outpoint);
 
     //! Calculate the size of the cache (in number of transaction outputs)
     unsigned int GetCacheSize() const;
