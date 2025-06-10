@@ -765,17 +765,17 @@ bool MemPoolAccept::AcceptSingleTransaction(const CTransactionRef &ptx,
 /**
  * (try to) add transaction to memory pool with a specified acceptance time.
  */
-static bool AcceptToMemoryPoolWithTime(const Config &config, CTxMemPool &pool,
-                                      TxValidationState &state, 
-                                      const CTransactionRef &tx,
-                                      int64_t nAcceptTime, 
-                                      bool bypass_limits,
-                                      bool test_accept, 
-                                      Amount *fee_out = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
+static bool
+AcceptToMemoryPoolWithTime(const Config &config, CTxMemPool &pool,
+                           TxValidationState &state, const CTransactionRef &tx,
+                           int64_t nAcceptTime, bool bypass_limits,
+                           bool test_accept, Amount *fee_out = nullptr)
+    EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
     AssertLockHeld(cs_main);
     std::vector<COutPoint> coins_to_uncache;
-    MemPoolAccept::ATMPArgs args{config, state, nAcceptTime, bypass_limits,
-                                coins_to_uncache, test_accept, fee_out};
+    MemPoolAccept::ATMPArgs args{
+        config,           state,       nAcceptTime, bypass_limits,
+        coins_to_uncache, test_accept, fee_out};
     bool res = MemPoolAccept(pool).AcceptSingleTransaction(tx, args);
     if (!res) {
         // Remove coins that were not present in the coins cache before calling
@@ -791,7 +791,7 @@ static bool AcceptToMemoryPoolWithTime(const Config &config, CTxMemPool &pool,
     // still within its size limits
     BlockValidationState stateDummy;
     ::ChainstateActive().FlushStateToDisk(config.GetChainParams(), stateDummy,
-                                         FlushStateMode::PERIODIC);
+                                          FlushStateMode::PERIODIC);
     return res;
 }
 
@@ -3985,102 +3985,108 @@ static bool ContextualCheckBlock(const CBlock &block,
         }
     }
 
-    // Enforce rule that the coinbase transaction's first output must contain an OP_RETURN
-    // followed by a prefix and the serialized block height.
-    // This rule applies to all blocks except the genesis block (height 0).
-    // Note: This rule was added after some blocks were already mined, so we need
-    // to be flexible with validation for older blocks.
+    // Enforce rule that the coinbase transaction's first output must contain an
+    // OP_RETURN followed by a prefix and the serialized block height. This rule
+    // applies to all blocks except the genesis block (height 0). Note: This
+    // rule was added after some blocks were already mined, so we need to be
+    // flexible with validation for older blocks.
     if (nHeight > 0) {
         // Get the coinbase transaction's first output scriptPubKey
         const CScript &scriptPubKey = block.vtx[0]->vout[0].scriptPubKey;
         std::string scriptHex = HexStr(scriptPubKey);
         LogPrintf("DEBUG: Coinbase scriptPubKey: %s\n", scriptHex);
-        
+
         // Early blocks may not follow the height encoding rule
         // Define a height after which we strictly enforce the rule
         const int HEIGHT_ENCODING_ENFORCED_AFTER = 20000;
         bool strictChecking = (nHeight >= HEIGHT_ENCODING_ENFORCED_AFTER);
         const int SHAME_PREFIX_ENFORCED_BEFORE = 1018000;
-        bool strictCheckingCoinbaseShame = (nHeight < SHAME_PREFIX_ENFORCED_BEFORE);
+        bool strictCheckingCoinbaseShame =
+            (nHeight < SHAME_PREFIX_ENFORCED_BEFORE);
         // Empty script
         if (scriptPubKey.empty()) {
             LogPrintf("DEBUG: Empty scriptPubKey\n");
             return !strictChecking;
         }
-        
+
         // Check for OP_RETURN
         if (scriptPubKey[0] != 0x6a) { // 0x6a is OP_RETURN
-            LogPrintf("DEBUG: Script does not start with OP_RETURN. First byte: 0x%02x\n", 
-                     scriptPubKey[0]);
+            LogPrintf("DEBUG: Script does not start with OP_RETURN. First "
+                      "byte: 0x%02x\n",
+                      scriptPubKey[0]);
             return !strictChecking;
         }
-        
+
         LogPrintf("DEBUG: Found OP_RETURN at position 0\n");
-        
+
         // Position after OP_RETURN
         size_t pos = 1;
         if (pos >= scriptPubKey.size()) {
             LogPrintf("DEBUG: No data after OP_RETURN\n");
             return !strictChecking;
         }
-        
+
         // Parse prefix length and data
         uint8_t prefixLen = scriptPubKey[pos++];
-        LogPrintf("DEBUG: Prefix length byte at position %zu: 0x%02x (%u)\n", 
-                  pos-1, prefixLen, prefixLen);
-        
+        LogPrintf("DEBUG: Prefix length byte at position %zu: 0x%02x (%u)\n",
+                  pos - 1, prefixLen, prefixLen);
+
         if (pos + prefixLen > scriptPubKey.size()) {
             LogPrintf("DEBUG: Not enough bytes for prefix data\n");
             return !strictChecking;
         }
-        
-        std::vector<uint8_t> prefixData(scriptPubKey.begin() + pos, 
-                                       scriptPubKey.begin() + pos + prefixLen);
+
+        std::vector<uint8_t> prefixData(scriptPubKey.begin() + pos,
+                                        scriptPubKey.begin() + pos + prefixLen);
         std::string prefixHex = HexStr(prefixData);
         LogPrintf("DEBUG: Prefix data at position %zu: %s\n", pos, prefixHex);
-        
+
         // Verify that the prefix matches the expected COINBASE_PREFIX
-        if (prefixLen != COINBASE_PREFIX.size() || prefixData != COINBASE_PREFIX) {
-            LogPrintf("DEBUG: Prefix data doesn't match expected COINBASE_PREFIX. Expected: %s, Got: %s\n",
+        if (prefixLen != COINBASE_PREFIX.size() ||
+            prefixData != COINBASE_PREFIX) {
+            LogPrintf("DEBUG: Prefix data doesn't match expected "
+                      "COINBASE_PREFIX. Expected: %s, Got: %s\n",
                       HexStr(COINBASE_PREFIX), prefixHex);
             return !strictCheckingCoinbaseShame;
         }
-        
+
         // Move position past prefix data
         pos += prefixLen;
-        
+
         // Parse height length and data
         if (pos >= scriptPubKey.size()) {
             LogPrintf("DEBUG: No height length byte found\n");
             return !strictChecking;
         }
-        
+
         uint8_t heightLen = scriptPubKey[pos++];
-        LogPrintf("DEBUG: Height length byte at position %zu: 0x%02x (%u)\n", 
-                  pos-1, heightLen, heightLen);
-        
+        LogPrintf("DEBUG: Height length byte at position %zu: 0x%02x (%u)\n",
+                  pos - 1, heightLen, heightLen);
+
         if (pos + heightLen > scriptPubKey.size() || heightLen > 3) {
-            LogPrintf("DEBUG: Not enough bytes for height data or height too large\n");
+            LogPrintf("DEBUG: Not enough bytes for height data or height too "
+                      "large\n");
             return !strictChecking;
         }
-        
-        std::vector<uint8_t> heightData(scriptPubKey.begin() + pos, 
-                                      scriptPubKey.begin() + pos + heightLen);
+
+        std::vector<uint8_t> heightData(scriptPubKey.begin() + pos,
+                                        scriptPubKey.begin() + pos + heightLen);
         std::string heightHex = HexStr(heightData);
         LogPrintf("DEBUG: Height data at position %zu: %s\n", pos, heightHex);
-        
+
         // Convert the little-endian bytes to an integer
         int nHeight_coinbase = 0;
         for (size_t i = 0; i < heightData.size(); i++) {
             nHeight_coinbase |= static_cast<int>(heightData[i]) << (8 * i);
         }
-        
-        LogPrintf("DEBUG: Parsed height from coinbase: %d (expected: %d)\n", 
+
+        LogPrintf("DEBUG: Parsed height from coinbase: %d (expected: %d)\n",
                   nHeight_coinbase, nHeight);
-        
+
         // Verify the height matches
         if (nHeight_coinbase != nHeight) {
-            LogPrintf("WARNING: block height mismatch in coinbase: coinbase=%d (hex: %s) vs. block=%d.\n", 
+            LogPrintf("WARNING: block height mismatch in coinbase: coinbase=%d "
+                      "(hex: %s) vs. block=%d.\n",
                       nHeight_coinbase, heightHex, nHeight);
             return !strictChecking;
         }
@@ -5835,6 +5841,17 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
         return false;
     }
 
+    // Get max mempool size in bytes
+    int64_t maxMempoolSize =
+        gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
+
+    // Check if mempool is already too large
+    if (pool.DynamicMemoryUsage() >= maxMempoolSize) {
+        LogPrintf(
+            "Mempool is already at maximum size. Skipping mempool load.\n");
+        return false;
+    }
+
     int64_t count = 0;
     int64_t expired = 0;
     int64_t failed = 0;
@@ -5863,31 +5880,26 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
             if (amountdelta != Amount::zero()) {
                 pool.PrioritiseTransaction(tx->GetId(), amountdelta);
             }
-            TxValidationState state;
-            if (nTime > nNow - nExpiryTimeout) {
-                LOCK(cs_main);
-                AcceptToMemoryPoolWithTime(config, pool, state, tx, nTime,
-                                           true /* bypass_limits */,
-                                           false /* test_accept */);
-                if (state.IsValid()) {
-                    ++count;
-                } else {
-                    // mempool may contain the transaction already, e.g. from
-                    // wallet(s) having loaded it while we were processing
-                    // mempool transactions; consider these as valid, instead of
-                    // failed, but mark them as 'already there'
-                    if (pool.exists(tx->GetId())) {
-                        ++already_there;
-                    } else {
-                        ++failed;
-                    }
-                }
+            if (amountdelta < Amount::zero()) {
+                pool.ApplyDelta(tx->GetId(), amountdelta);
+            }
+            pool.AddUnbroadcastTx(tx->GetId());
+
+            LOCK(cs_main);
+            AcceptToMemoryPoolWithTime(config, pool, state, tx, nTime,
+                                       false /* bypass_limits */,
+                                       false /* test_accept */);
+            if (state.IsValid()) {
+                ++count;
             } else {
-                ++expired;
+                ++failed;
             }
 
-            if (ShutdownRequested()) {
-                return false;
+            // Check mempool size after each transaction
+            if (pool.DynamicMemoryUsage() >= maxMempoolSize) {
+                LogPrintf("Mempool size limit reached during load. Stopping "
+                          "import.\n");
+                break;
             }
         }
         std::map<TxId, Amount> mapDeltas;
@@ -5896,22 +5908,6 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
         for (const auto &i : mapDeltas) {
             pool.PrioritiseTransaction(i.first, i.second);
         }
-
-        // TODO: remove this try...catch after May 15th 2021,
-        // when no one is running v0.22.11 or lower anymore.
-        // This will be done by backporting PR20854.
-        try {
-            std::set<TxId> unbroadcast_txids;
-            file >> unbroadcast_txids;
-            unbroadcast = unbroadcast_txids.size();
-            for (const auto &txid : unbroadcast_txids) {
-                pool.AddUnbroadcastTx(txid);
-            }
-        } catch (const std::exception &) {
-            // mempool.dat files created prior to v0.22.12 will not have an
-            // unbroadcast set. No need to log a failure if parsing fails here.
-        }
-
     } catch (const std::exception &e) {
         LogPrintf("Failed to deserialize mempool data on disk: %s. Continuing "
                   "anyway.\n",
@@ -5920,9 +5916,8 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
     }
 
     LogPrintf("Imported mempool transactions from disk: %i succeeded, %i "
-              "failed, %i expired, %i already there, %i waiting for initial "
-              "broadcast\n",
-              count, failed, expired, already_there, unbroadcast);
+              "failed, %i expired\n",
+              count, failed, expired);
     return true;
 }
 
