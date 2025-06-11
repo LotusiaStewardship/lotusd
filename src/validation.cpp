@@ -4,8 +4,6 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <validation.h>
-
 #include <arith_uint256.h>
 #include <avalanche/avalanche.h>
 #include <avalanche/processor.h>
@@ -52,6 +50,7 @@
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <util/translation.h>
+#include <validation.h>
 #include <validationinterface.h>
 #include <warnings.h>
 
@@ -452,7 +451,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs &args, Workspace &ws) {
     std::unique_ptr<CTxMemPoolEntry> &entry = ws.m_entry;
     Amount &nModifiedFees = ws.m_modified_fees;
 
-    if (!CheckTransaction(tx, state)) {
+    if (!consensus::CheckTransaction(tx, state)) {
         return false; // state filled in by CheckTransaction
     }
 
@@ -3633,26 +3632,19 @@ bool CheckBlock(const CBlock &block, BlockValidationState &state,
                              "block does not have the size it claims to have");
     }
 
-    // And a valid coinbase.
-    TxValidationState tx_state;
-    if (!CheckCoinbase(*block.vtx[0], tx_state)) {
+    // Check if the first transaction (coinbase) is valid.
+    if (!CheckCoinbase(*block.vtx[0], state)) {
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
-                             tx_state.GetRejectReason(),
-                             strprintf("Coinbase check failed (txid %s) %s",
-                                       block.vtx[0]->GetId().ToString(),
-                                       tx_state.GetDebugMessage()));
+                             "bad-cb-missing", "first tx is not coinbase");
     }
 
     // Check transactions for regularity, skipping the first. Note that this
     // is the first time we check that all after the first are !IsCoinBase.
     for (size_t i = 1; i < block.vtx.size(); i++) {
         auto *tx = block.vtx[i].get();
-        if (!CheckRegularTransaction(*tx, tx_state)) {
-            return state.Invalid(
-                BlockValidationResult::BLOCK_CONSENSUS,
-                tx_state.GetRejectReason(),
-                strprintf("Transaction check failed (txid %s) %s",
-                          tx->GetId().ToString(), tx_state.GetDebugMessage()));
+        if (!CheckRegularTransaction(*tx, state)) {
+            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                 "bad-tx-regular", "regular tx is invalid");
         }
     }
 
