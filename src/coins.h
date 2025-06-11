@@ -314,7 +314,7 @@ public:
      * (not DIRTY). This helps prevent memory DoS attacks by allowing removal of
      * unmodified coins.
      */
-    void Uncache(const COutPoint &outpoint) override;
+    void Uncache(const COutPoint &outpoint);
 
     /**
      * Reallocate the cache if it exceeds MAX_CACHE_SIZE.
