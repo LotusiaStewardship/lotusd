@@ -1,43 +1,44 @@
-[![Bitcoin ABC Logo](share/pixmaps/bitcoinabclogo.png "Bitcoin ABC")](https://www.bitcoinabc.org)
+<p align="center">
+  <a href="https://lotusia.org">
+    <img src="share/pixmaps/lotuslogo.png" alt="Lotus" title="Lotus" width="60%" style="max-width: 500px; height: auto;">
+  </a>
+</p>
 
-The goal of Bitcoin ABC is to create sound money that is usable by everyone in
-the world. We believe this is a civilization-changing technology which will
-dramatically increase human flourishing, freedom, and prosperity. The project
-aims to achieve this goal by implementing a series of optimizations and
-protocol upgrades that will enable peer-to-peer digital cash to scale many
-orders of magnitude beyond current limits.
+# Lotus: Digital Currency for Human Relationships
 
-What is Lotus?
----------------------
+The goal of Lotus is to foster human relationships, build reciprocal culture, and bolster societal value production online and offline. We believe this is a civilization-changing technology which will dramatically increase human flourishing, freedom, and prosperity. The project aims to achieve this goal by implementing optimizations and protocol upgrades that enable peer-to-peer digital cash to scale many orders of magnitude beyond current limits.
 
-[Lotus](https://givelotus.org/) is a digital
-currency that enables instant payments to anyone, anywhere in the world. It
-uses peer-to-peer technology to operate with no central authority: managing
-transactions and issuing money are carried out collectively by the network.
-Lotus is a descendant of Bitcoin.
+## What is Lotus?
 
-What is Bitcoin ABC?
---------------------
+[Lotus](https://lotusia.org/) is a digital currency that enables instant payments to anyone, anywhere in the world. It uses peer-to-peer technology to operate with no central authority: managing transactions and issuing money are carried out collectively by the network. Lotus combines the best qualities of the modern monetary system and the new generation of digital cryptocurrencies, resulting in an ethical currency that is economically viable.
 
-Bitcoin ABC is the name of open-source software which enables the use of
-Lotus. It is a fork of the [Bitcoin Core](https://bitcoincore.org)
-software project.
+Key features:
+- **Debt-free**: Issued through Proof-of-Work mining
+- **Inflationary**: No arbitrary issuance cap, removing incentives to hoard
+- **Abundant**: Issuance of new Lotus is adjusted to demand of the Lotusia economy
+- **Stabilizing**: Lotus can be removed from circulation through voluntary destructive use to stabilize volatility
 
-License
--------
+## Core Principles
 
-Bitcoin ABC is released under the terms of the MIT license. See
-[COPYING](COPYING) for more information or see
-<https://opensource.org/licenses/MIT>.
+Reciprocity is the core of all human relationships. The Lotus currency facilitates and symbolizes the value we see in each other, allowing us to build a more connected and prosperous society.
 
-Development Process
--------------------
+## Technology
 
-This Github repository contains only source code of releases.
+Lotus is a fork of Bitcoin ABC that has been enhanced and modified to support the Lotusia vision. The blockchain is highly scalable, permissionless, and designed to adapt to the growing needs of the ecosystem.
 
-Bitcoin ABC development takes place at [reviews.bitcoinabc.org](https://reviews.bitcoinabc.org/)
+## Community Resources
 
-If you would like to contribute, please read [CONTRIBUTING](CONTRIBUTING.md).
+- Website: [https://lotusia.org/](https://lotusia.org/)
+- Block Explorer: [https://explorer.lotusia.org/](https://explorer.lotusia.org/)
+- Telegram Channel: [https://t.me/givelotus](https://t.me/givelotus)
+
+## License
+
+Lotus is released under the terms of the MIT license. See [COPYING](COPYING) for more information or see <https://opensource.org/licenses/MIT>.
+
+## Development Process
+
+This Github repository contains the source code of Lotus. If you would like to contribute, please read [CONTRIBUTING](CONTRIBUTING.md).
 
 Disclosure Policy
 -----------------

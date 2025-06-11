@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "lotus-miner-cli",
+    "lotus-miner-gui",
+    "lotus-miner-lib",
+]
+
+default-members = ["lotus-miner-cli"]
