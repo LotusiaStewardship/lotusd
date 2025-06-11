@@ -302,9 +302,7 @@ public:
 
     /**
      * Removes the UTXO with the given outpoint from the cache, if it is not
-     * modified. This is used to prevent memory DoS in case we receive a large
-     * number of invalid transactions that attempt to overrun the in-memory
-     * coins cache (CCoinsViewCache::cacheCoins).
+     * modified.
      */
     void Uncache(const COutPoint &outpoint);
 

@@ -22,8 +22,7 @@
 #include <cassert>
 
 static bool UseECashPrefix() {
-    return gArgs.GetBoolArg("-ecash", DEFAULT_ECASH) ||
-           gArgs.GetBoolArg("-useecashprefix", DEFAULT_ECASH);
+    return gArgs.GetBoolArg("-ecash", DEFAULT_ECASH) || gArgs.GetBoolArg("-useecashprefix", DEFAULT_ECASH);
 }
 
 /**
@@ -120,8 +119,6 @@ public:
         consensus.ruthActivationTime = 1734772800;
         // 2025-06-21T02:42:00.000Z protocol upgrade
         consensus.firstSamuelActivationTime = 1750473720;
-        // 2025-12-21T15:03:00.000Z protocol upgrade
-        consensus.secondSamuelActivationTime = 1766329380;
 
         /**
          * The message start string is designed to be unlikely to occur in
@@ -169,7 +166,8 @@ public:
         vFixedSeeds.clear();
         vSeeds.clear();
 
-        vSeeds.emplace_back("seed.lotusia.org");
+        vSeeds.emplace_back("mainnet.seeds.cash");
+        vSeeds.emplace_back("seed.be.cash");
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<uint8_t>(1, 0);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<uint8_t>(1, 5);
@@ -249,16 +247,13 @@ public:
         const int testnetActivationOffset = 21 * 24 * 3600;
         // 2021-12-21T15:59:00.000Z protocol upgrade
         consensus.exodusActivationTime =
-            mainnetConsensus.exodusActivationTime -
-            testnetActivationOffset;
+            mainnetConsensus.exodusActivationTime - testnetActivationOffset;
         // 2022-06-21T09:14:00.000Z protocol upgrade
         consensus.leviticusActivationTime =
-            mainnetConsensus.leviticusActivationTime -
-            testnetActivationOffset;
+            mainnetConsensus.leviticusActivationTime - testnetActivationOffset;
         // 2022-12-12T21:48:00.000Z protocol upgrade
         consensus.numbersActivationTime =
-            mainnetConsensus.numbersActivationTime -
-            testnetActivationOffset;
+            mainnetConsensus.numbersActivationTime - testnetActivationOffset;
         // 2023-06-21T14:58:00.000Z protocol upgrade
         consensus.deuteronomyActivationTime =
             mainnetConsensus.deuteronomyActivationTime -
@@ -278,10 +273,6 @@ public:
         // 2025-06-21T02:42:00.000Z protocol upgrade
         consensus.firstSamuelActivationTime =
             mainnetConsensus.firstSamuelActivationTime -
-            testnetActivationOffset;
-        // 2025-12-21T15:03:00.000Z protocol upgrade
-        consensus.secondSamuelActivationTime =
-            mainnetConsensus.secondSamuelActivationTime -
             testnetActivationOffset;
 
         // "ltdk" with MSB set
@@ -383,8 +374,7 @@ public:
         // Regtest activation times are the same as mainnet
         Consensus::Params mainnetConsensus = CMainParams().GetConsensus();
         // 2021-12-21T15:59:00.000Z protocol upgrade
-        consensus.exodusActivationTime =
-            mainnetConsensus.exodusActivationTime;
+        consensus.exodusActivationTime = mainnetConsensus.exodusActivationTime;
         // 2022-06-21T09:14:00.000Z protocol upgrade
         consensus.leviticusActivationTime =
             mainnetConsensus.leviticusActivationTime;
@@ -395,20 +385,13 @@ public:
         consensus.deuteronomyActivationTime =
             mainnetConsensus.deuteronomyActivationTime;
         // 2023-12-22T03:27:00.000Z protocol upgrade
-        consensus.joshuaActivationTime =
-            mainnetConsensus.joshuaActivationTime;
+        consensus.joshuaActivationTime = mainnetConsensus.joshuaActivationTime;
         // 2024-06-20T20:51:00.000Z protocol upgrade
-        consensus.judgesActivationTime =
-            mainnetConsensus.judgesActivationTime;
+        consensus.judgesActivationTime = mainnetConsensus.judgesActivationTime;
         // 2024-12-21T09:20:00.000Z protocol upgrade
-        consensus.ruthActivationTime =
-            mainnetConsensus.ruthActivationTime;
+        consensus.ruthActivationTime = mainnetConsensus.ruthActivationTime;
         // 2025-06-21T02:42:00.000Z protocol upgrade
-        consensus.firstSamuelActivationTime =
-            mainnetConsensus.firstSamuelActivationTime;
-        // 2025-12-21T15:03:00.000Z protocol upgrade
-        consensus.secondSamuelActivationTime =
-            mainnetConsensus.secondSamuelActivationTime;
+        consensus.firstSamuelActivationTime = mainnetConsensus.firstSamuelActivationTime;
 
         // "lrdk" with MSB set
         diskMagic[0] = 0xec;

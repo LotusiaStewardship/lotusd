@@ -276,10 +276,8 @@ bool CCoinsViewCache::Flush() {
 }
 
 void CCoinsViewCache::Uncache(const COutPoint &outpoint) {
-    auto it = cacheCoins.find(outpoint);
-    if (it != cacheCoins.end() &&
-        !(it->second.flags & CCoinsCacheEntry::DIRTY)) {
-        // Only remove if the entry is not dirty (hasn't been modified)
+    CCoinsMap::iterator it = cacheCoins.find(outpoint);
+    if (it != cacheCoins.end() && it->second.flags == 0) {
         cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();
         cacheCoins.erase(it);
     }

@@ -95,7 +95,7 @@ BACKPORTS=(
   shellcheck
 )
 
-echo "deb http://archive.debian.org/debian buster-backports main" | tee -a /etc/apt/sources.list
+echo "deb http://deb.debian.org/debian buster-backports main" | tee -a /etc/apt/sources.list
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get -t buster-backports install -y $(join_by ' ' "${BACKPORTS[@]}")
 

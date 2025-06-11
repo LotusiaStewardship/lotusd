@@ -7,7 +7,7 @@ set(CMAKE_USER_MAKE_RULES_OVERRIDE
 )
 
 project(lotus
-	VERSION 9.4.1
+	VERSION 8.3.3
 	DESCRIPTION "Lotus is a full node implementation of the Lotus protocol."
 	HOMEPAGE_URL "https://lotusia.org"
 )
@@ -22,7 +22,7 @@ set(PACKAGE_NAME "Lotus")
 set(PACKAGE_BUGREPORT "https://github.com/LotusiaStewardship/lotusd/issues")
 
 # Copyright
-set(COPYRIGHT_YEAR 2025)
+set(COPYRIGHT_YEAR 2024)
 set(COPYRIGHT_HOLDERS "The %s developers")
 set(COPYRIGHT_HOLDERS_SUBSTITUTION Bitcoin)
 string(REPLACE "%s" ${COPYRIGHT_HOLDERS_SUBSTITUTION} COPYRIGHT_HOLDERS_FINAL ${COPYRIGHT_HOLDERS})
