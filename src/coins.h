@@ -225,6 +225,10 @@ public:
     size_t EstimateSize() const override;
 };
 
+// Add after the includes
+static constexpr size_t MAX_CACHE_SIZE =
+    100 * 1024 * 1024; // 100MB default max cache size
+
 /**
  * CCoinsView that adds a memory cache for transactions to another CCoinsView
  */
@@ -239,6 +243,11 @@ protected:
 
     /* Cached dynamic memory usage for the inner Coin objects. */
     mutable size_t cachedCoinsUsage;
+
+    /* Track last access time for LRU eviction */
+    mutable std::unordered_map<COutPoint, int64_t, SaltedOutpointHasher>
+        lastAccessTime;
+    mutable int64_t currentAccessTime{0};
 
 public:
     CCoinsViewCache(CCoinsView *baseIn);
@@ -301,12 +310,22 @@ public:
     bool Flush();
 
     /**
-     * Removes the UTXO with the given outpoint from the cache, if it is not
-     * modified. This is used to prevent memory DoS in case we receive a large
-     * number of invalid transactions that attempt to overrun the in-memory
-     * coins cache (CCoinsViewCache::cacheCoins).
+     * Uncache a coin from memory. Only uncaches if the coin is not modified
+     * (not DIRTY). This helps prevent memory DoS attacks by allowing removal of
+     * unmodified coins.
      */
-    void Uncache(const COutPoint &outpoint);
+    void Uncache(const COutPoint &outpoint) override;
+
+    /**
+     * Reallocate the cache if it exceeds MAX_CACHE_SIZE.
+     * Uses LRU (Least Recently Used) eviction policy.
+     */
+    void ReallocateCache();
+
+    /**
+     * Update last access time for a coin
+     */
+    void UpdateAccessTime(const COutPoint &outpoint) const;
 
     //! Calculate the size of the cache (in number of transaction outputs)
     unsigned int GetCacheSize() const;
@@ -317,14 +336,6 @@ public:
     //! Check whether all prevouts of the transaction are present in the UTXO
     //! set represented by this view
     bool HaveInputs(const CTransaction &tx) const;
-
-    //! Force a reallocation of the cache map. This is required when downsizing
-    //! the cache because the map's allocator may be hanging onto a lot of
-    //! memory despite having called .clear().
-    //!
-    //! See:
-    //! https://stackoverflow.com/questions/42114044/how-to-release-unordered-map-memory
-    void ReallocateCache();
 
 private:
     /**

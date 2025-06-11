@@ -127,3 +127,7 @@ add_subdirectory(contrib)
 add_subdirectory(doc)
 
 include(PackageOptions.cmake)
+
+set(HEADERS
+    src/validation_scope.h
+)
