@@ -196,14 +196,27 @@ The miner implements an intelligent hashrate calculation system:
 
 The official Lotus GPU Miner images are available on GitHub Container Registry:
 
-- **Latest Image**: `ghcr.io/boblepointu/lotus-gpu-miner:latest`
-- **Versioned Images**: `ghcr.io/boblepointu/lotus-gpu-miner:v0.4.0` (replace with specific version)
+- **NVIDIA Latest**: `ghcr.io/boblepointu/lotus-gpu-miner:latest`
+- **AMD Latest**: `ghcr.io/boblepointu/lotus-gpu-miner:amd-latest`
+- **Versioned (NVIDIA)**: `ghcr.io/boblepointu/lotus-gpu-miner:v0.4.0` (replace with specific version)
+- **Versioned (AMD)**: `ghcr.io/boblepointu/lotus-gpu-miner:amd-v0.4.0`
 
 You can view all available tags at [GitHub Container Registry](https://github.com/Boblepointu/lotusd/pkgs/container/lotus-gpu-miner).
 
 ### Docker Usage Examples
 
 The easiest way to use the Lotus GPU miner is through Docker. This ensures you have all the necessary dependencies without having to install them on your host system.
+
+## 🚀 One-Click Setup (Ubuntu 24.04)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LotusiaStewardship/lotusd/master/gpuminer/oneclick-gpu-mining-setup.sh | sudo bash
+
+# After installation (may require reboot on AMD):
+MINER_ADDRESS=lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo $HOME/lotus-gpu-miner/start-mining.sh
+```
+
+The script detects your GPU vendor (NVIDIA or AMD), installs Docker and required runtime components, pulls the appropriate miner image, and generates a `docker-compose.yml` in `$HOME/lotus-gpu-miner`.
 
 ## Building the Docker Image
 
