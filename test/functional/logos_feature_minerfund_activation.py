@@ -36,7 +36,6 @@ FIRST_SAMUEL_ACTIVATION_TIME = 2070000000
 SECOND_SAMUEL_ACTIVATION_TIME = 2080000000
 
 REPLAYPROTECTION_ACTIVATION_TIME = SECOND_SAMUEL_ACTIVATION_TIME
-
 # see consensus/addresses.h, use getaddressinfo to get the scriptPubKey
 GENESIS_SCRIPTS = [
     "a914b6c79031b71d86ab0d617e1e1e706ec4ee34b07f87",
@@ -475,7 +474,6 @@ class MinerFundActivationTest(BitcoinTestFramework):
         #
         #   End Summer 2025 Upgrade Test
         #
-        
         # Check replay protection is not enabled yet
         tx = CTransaction()
         tx.vin = [CTxIn(COutPoint(int(cointxid, 16), 1))]
