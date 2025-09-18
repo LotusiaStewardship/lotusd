@@ -3,7 +3,7 @@
     <img src="share/pixmaps/lotuslogo.png" alt="Lotus" title="Lotus" width="60%" style="max-width: 500px; height: auto;">
   </a>
 </p>
-
+ 
 <p align="center">
   <a href="https://github.com/LotusiaStewardship/lotusd">
     <img src="https://img.shields.io/badge/Main%20Fork-LotusiaStewardship-blue" alt="Main Fork: LotusiaStewardship">
