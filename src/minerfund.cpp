@@ -65,7 +65,6 @@ std::vector<CTxOut> GetMinerFundRequiredOutputs(const Consensus::Params &params,
         return BuildOutputsCycling(params.coinbasePayoutAddresses.ruth,
                                    pindexPrev, blockReward);
     }
-
     if (IsJudgesEnabled(params, pindexPrev)) {
         return BuildOutputsCycling(params.coinbasePayoutAddresses.judges,
                                    pindexPrev, blockReward);

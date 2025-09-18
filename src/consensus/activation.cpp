@@ -66,7 +66,8 @@ bool IsJoshuaEnabled(const Consensus::Params &params,
 }
 
 bool IsJudgesEnabled(const Consensus::Params &params,
-                     const CBlockIndex *pindexPrev) {
+
+const CBlockIndex *pindexPrev) {
     if (pindexPrev == nullptr) {
         return false;
     }

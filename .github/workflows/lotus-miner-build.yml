@@ -42,8 +42,8 @@ jobs:
         mkdir -p ./artifacts
         mkdir -p ./debug-info
       
-    # Build and extract with detailed error handling
-    - name: Build and extract artifacts
+    # Build NVIDIA image and extract artifacts
+    - name: Build NVIDIA image and extract artifacts
       run: |
         echo "Starting the GPU miner build process..."
         
@@ -141,8 +141,17 @@ jobs:
         chmod +x ./artifacts/lotus*
         echo "Set executable permissions on all binaries"
 
+    - name: Build AMD image
+      run: |
+        echo "Building AMD Docker image from Dockerfile.lotus-gpu-miner-amd..."
+        docker buildx build --load -t lotus-gpu-miner-amd:local -f dockerfiles/Dockerfile.lotus-gpu-miner-amd .
+        if [ $? -ne 0 ]; then
+          echo "ERROR: Docker build (AMD) failed!"
+          exit 1
+        fi
+
     # If not a PR, tag and push to registry
-    - name: Tag and push Docker image
+    - name: Tag and push Docker images
       if: github.event_name != 'pull_request'
       run: |
         # Tag for registry
@@ -150,10 +159,18 @@ jobs:
         docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
         docker tag lotus-gpu-miner:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
         
+        docker tag lotus-gpu-miner-amd:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:amd-${{ inputs.version }}
+        docker tag lotus-gpu-miner-amd:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:amd-sha-${{ github.sha }}
+        docker tag lotus-gpu-miner-amd:local ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:amd-latest
+        
         # Push to registry
         docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:${{ inputs.version }}
         docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:sha-${{ github.sha }}
         docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:latest
+        
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:amd-${{ inputs.version }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:amd-sha-${{ github.sha }}
+        docker push ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-gpu-miner:amd-latest
 
     # Upload GPU miner binary artifacts with updated path pattern
     - name: Upload GPU miner artifacts
