@@ -90,6 +90,7 @@ enum class TxoutType {
     SCRIPTHASH,
     MULTISIG,
     TAPROOT,
+    COVENANT_TOKEN,
     // unspendable OP_RETURN script that carries data
     NULL_DATA,
 };

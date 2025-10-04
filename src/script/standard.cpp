@@ -44,6 +44,8 @@ std::string GetTxnOutputType(TxoutType t) {
             return "multisig";
         case TxoutType::TAPROOT:
             return "taproot";
+        case TxoutType::COVENANT_TOKEN:
+            return "covenant_token";
         case TxoutType::NULL_DATA:
             return "nulldata";
     } // no default case, so the compiler can warn about missing cases
@@ -79,6 +81,41 @@ static bool MatchPayToPubkeyHash(const CScript &script, valtype &pubkeyhash) {
 /** Test for "small positive integer" script opcodes - OP_1 through OP_16. */
 static constexpr bool IsSmallInteger(opcodetype opcode) {
     return opcode >= OP_1 && opcode <= OP_16;
+}
+
+/**
+ * Check if a script matches the OP_CAT covenant token pattern:
+ * <32_bytes> OP_DROP <8_bytes> OP_DROP <20_bytes> OP_DROP OP_DUP OP_HASH160 <20_bytes> OP_EQUALVERIFY OP_CHECKSIG
+ */
+static bool MatchCovenantToken(const CScript &script, valtype &pubkeyhash) {
+    // Minimum size: 1 + 32 + 1 + 1 + 8 + 1 + 1 + 20 + 1 + 25 = 91 bytes
+    // Pattern breakdown:
+    // 0x20 (push 32) + 32 bytes + 0x75 (OP_DROP) +
+    // 0x08 (push 8) + 8 bytes + 0x75 (OP_DROP) +
+    // 0x14 (push 20) + 20 bytes + 0x75 (OP_DROP) +
+    // OP_DUP OP_HASH160 0x14 (push 20) + 20 bytes + OP_EQUALVERIFY OP_CHECKSIG
+    if (script.size() != 91) {
+        return false;
+    }
+
+    // Check the pattern byte by byte
+    if (script[0] != 0x20) return false;       // Push 32 bytes
+    if (script[33] != OP_DROP) return false;   // OP_DROP after 32 bytes
+    if (script[34] != 0x08) return false;      // Push 8 bytes
+    if (script[43] != OP_DROP) return false;   // OP_DROP after 8 bytes
+    if (script[44] != 0x14) return false;      // Push 20 bytes (0x14 = 20)
+    if (script[65] != OP_DROP) return false;   // OP_DROP after 20 bytes
+    
+    // Check standard P2PKH pattern at the end
+    if (script[66] != OP_DUP) return false;
+    if (script[67] != OP_HASH160) return false;
+    if (script[68] != 0x14) return false;      // Push 20 bytes
+    if (script[89] != OP_EQUALVERIFY) return false;
+    if (script[90] != OP_CHECKSIG) return false;
+
+    // Extract the pubkey hash from the P2PKH part
+    pubkeyhash = valtype(script.begin() + 69, script.begin() + 89);
+    return true;
 }
 
 static bool MatchMultisig(const CScript &script, unsigned int &required,
@@ -165,6 +202,11 @@ TxoutType Solver(const CScript &scriptPubKey,
         return TxoutType::MULTISIG;
     }
 
+    if (MatchCovenantToken(scriptPubKey, data)) {
+        vSolutionsRet.push_back(std::move(data));
+        return TxoutType::COVENANT_TOKEN;
+    }
+
     vSolutionsRet.clear();
     return TxoutType::NONSTANDARD;
 }
@@ -189,6 +231,11 @@ bool ExtractDestination(const CScript &scriptPubKey,
     }
     if (whichType == TxoutType::SCRIPTHASH) {
         addressRet = ScriptHash(uint160(vSolutions[0]));
+        return true;
+    }
+    if (whichType == TxoutType::COVENANT_TOKEN) {
+        // Covenant tokens contain a pubkey hash like P2PKH
+        addressRet = PKHash(uint160(vSolutions[0]));
         return true;
     }
     if (whichType == TxoutType::TAPROOT) {

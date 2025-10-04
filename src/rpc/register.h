@@ -26,6 +26,8 @@ void RegisterRawTransactionRPCCommands(CRPCTable &tableRPC);
 void RegisterABCRPCCommands(CRPCTable &tableRPC);
 /** Register Avalanche RPC commands */
 void RegisterAvalancheRPCCommands(CRPCTable &tableRPC);
+/** Register Covenant Token RPC commands */
+void RegisterCovenantTokenRPCCommands(CRPCTable &tableRPC);
 
 static inline void RegisterAllCoreRPCCommands(CRPCTable &t) {
     RegisterBlockchainRPCCommands(t);
@@ -35,6 +37,7 @@ static inline void RegisterAllCoreRPCCommands(CRPCTable &t) {
     RegisterRawTransactionRPCCommands(t);
     RegisterABCRPCCommands(t);
     RegisterAvalancheRPCCommands(t);
+    RegisterCovenantTokenRPCCommands(t);
 }
 
 /**
