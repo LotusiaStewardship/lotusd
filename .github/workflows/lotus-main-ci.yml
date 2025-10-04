@@ -8,10 +8,10 @@ concurrency:
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, master, develop, covenantOpCat ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, covenantOpCat ]
 
 # Global defaults for all jobs
 defaults:

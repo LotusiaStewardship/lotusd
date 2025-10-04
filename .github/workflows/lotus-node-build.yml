@@ -25,7 +25,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        ref: master
+        ref: ${{ github.ref }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
@@ -53,10 +53,16 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-buildx-lotus-node-
 
-    - name: Set lowercase repository owner
+    - name: Set lowercase repository owner and branch name
       id: lowercase_repo_owner
       run: |
         echo "REPO_OWNER_LC=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        # Extract branch name from ref (refs/heads/branch-name -> branch-name)
+        BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+        # Sanitize branch name for docker tag (replace / with -)
+        BRANCH_TAG=$(echo "$BRANCH_NAME" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+        echo "BRANCH_TAG=$BRANCH_TAG" >> $GITHUB_ENV
+        echo "Branch tag: $BRANCH_TAG"
 
     - name: Login to GitHub Container Registry
       if: github.event_name != 'pull_request'
@@ -72,12 +78,13 @@ jobs:
       if: github.event_name != 'pull_request'
       with:
         context: .
-        file: dockerfiles/Dockerfile.lotus-node
+        file: dockerfiles/Dockerfile.lotusd
         push: false # Don't push to registry yet
         load: true # Load into local Docker daemon
         tags: |
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${{ github.sha }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:${{ inputs.version }}
+          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:${{ env.BRANCH_TAG }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:latest
         cache-from: type=local,src=/tmp/.buildx-cache
         cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
@@ -110,11 +117,12 @@ jobs:
       uses: docker/build-push-action@v4
       with:
         context: .
-        file: dockerfiles/Dockerfile.lotus-node
+        file: dockerfiles/Dockerfile.lotusd
         push: true # Now we push to registry
         tags: |
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:sha-${{ github.sha }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:${{ inputs.version }}
+          ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:${{ env.BRANCH_TAG }}
           ghcr.io/${{ env.REPO_OWNER_LC }}/lotus-node:latest
         cache-from: type=local,src=/tmp/.buildx-cache
 
