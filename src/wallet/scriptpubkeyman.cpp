@@ -110,6 +110,16 @@ IsMineResult IsMineInner(const LegacyScriptPubKeyMan &keystore,
                 ret = std::max(ret, IsMineResult::SPENDABLE);
             }
             break;
+        case TxoutType::COVENANT_TOKEN:
+            // Covenant tokens are spendable if we have the key (for simple 91-byte covenants)
+            // For introspection-based covenants, vSolutions may be empty
+            if (!vSolutions.empty() && vSolutions[0].size() == 20) {
+                keyID = CKeyID(uint160(vSolutions[0]));
+                if (keystore.HaveKey(keyID)) {
+                    ret = std::max(ret, IsMineResult::SPENDABLE);
+                }
+            }
+            break;
         case TxoutType::SCRIPTHASH: {
             if (sigversion != IsMineSigVersion::TOP) {
                 // P2SH inside P2SH is invalid.
