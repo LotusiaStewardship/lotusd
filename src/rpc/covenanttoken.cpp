@@ -105,15 +105,17 @@ static RPCHelpMan gettokeninfo() {
             
             LOCK(cs_main);
 
+            NodeContext &node = EnsureNodeContext(request.context);
             TxId txid(ParseHashV(request.params[0], "txid"));
             int n = request.params[1].get_int();
             if (n < 0) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid vout index");
             }
 
-            CTransactionRef tx;
             BlockHash hashBlock;
-            if (!GetTransaction(txid, tx, config.GetChainParams().GetConsensus(), hashBlock)) {
+            const CTransactionRef tx = GetTransaction(nullptr, node.mempool.get(), txid,
+                                                     config.GetChainParams().GetConsensus(), hashBlock);
+            if (!tx) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Transaction not found");
             }
 
@@ -185,14 +187,11 @@ static RPCHelpMan listtokensbyaddress() {
             if (!pkhash) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Address must be P2PKH");
             }
-            uint160 targetPkh = static_cast<uint160>(*pkhash);
 
             UniValue results(UniValue::VARR);
-            CCoinsViewCache &coins = ::ChainstateActive().CoinsTip();
             
             // Note: This is a simplified implementation that would need optimization
             // for production. A proper implementation would use an index.
-            std::vector<COutPoint> vOutpoints;
             
             // In a real implementation, you'd iterate through the UTXO set
             // For now, return a message explaining this needs the full node UTXO scan
@@ -283,11 +282,13 @@ static RPCHelpMan scantokens() {
             
             LOCK(cs_main);
 
+            NodeContext &node = EnsureNodeContext(request.context);
             TxId txid(ParseHashV(request.params[0], "txid"));
 
-            CTransactionRef tx;
             BlockHash hashBlock;
-            if (!GetTransaction(txid, tx, config.GetChainParams().GetConsensus(), hashBlock)) {
+            const CTransactionRef tx = GetTransaction(nullptr, node.mempool.get(), txid,
+                                                     config.GetChainParams().GetConsensus(), hashBlock);
+            if (!tx) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Transaction not found");
             }
 
