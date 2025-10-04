@@ -84,38 +84,79 @@ static constexpr bool IsSmallInteger(opcodetype opcode) {
 }
 
 /**
+ * Check if a script contains covenant introspection opcodes (0xc0 - 0xc8)
+ */
+static bool HasIntrospectionOpcodes(const CScript &script) {
+    for (auto it = script.begin(); it != script.end(); ++it) {
+        uint8_t opcode = *it;
+        // Check for introspection opcodes: OP_INPUTINDEX through OP_OUTPUTBYTECODE
+        if (opcode >= 0xc0 && opcode <= 0xc8) {
+            return true;
+        }
+        // Skip over push data opcodes to avoid false positives
+        if (opcode > 0 && opcode <= OP_PUSHDATA4) {
+            size_t nSize = 0;
+            if (opcode < OP_PUSHDATA1) {
+                nSize = opcode;
+            } else if (opcode == OP_PUSHDATA1) {
+                if (++it == script.end()) break;
+                nSize = *it;
+            } else if (opcode == OP_PUSHDATA2) {
+                if (script.end() - it < 2) break;
+                nSize = ReadLE16(&(*++it));
+                ++it;
+            } else if (opcode == OP_PUSHDATA4) {
+                if (script.end() - it < 4) break;
+                nSize = ReadLE32(&(*++it));
+                it += 3;
+            }
+            // Skip the pushed data
+            if (script.end() - it < static_cast<long>(nSize)) break;
+            it += nSize;
+        }
+    }
+    return false;
+}
+
+/**
  * Check if a script matches the OP_CAT covenant token pattern:
  * <32_bytes> OP_DROP <8_bytes> OP_DROP <20_bytes> OP_DROP OP_DUP OP_HASH160 <20_bytes> OP_EQUALVERIFY OP_CHECKSIG
  */
 static bool MatchCovenantToken(const CScript &script, valtype &pubkeyhash) {
-    // Minimum size: 1 + 32 + 1 + 1 + 8 + 1 + 1 + 20 + 1 + 25 = 91 bytes
-    // Pattern breakdown:
-    // 0x20 (push 32) + 32 bytes + 0x75 (OP_DROP) +
-    // 0x08 (push 8) + 8 bytes + 0x75 (OP_DROP) +
-    // 0x14 (push 20) + 20 bytes + 0x75 (OP_DROP) +
-    // OP_DUP OP_HASH160 0x14 (push 20) + 20 bytes + OP_EQUALVERIFY OP_CHECKSIG
-    if (script.size() != 91) {
-        return false;
+    // Type A: Simple 91-byte covenant with fixed pattern
+    if (script.size() == 91) {
+        // Check the pattern byte by byte
+        if (script[0] != 0x20) return false;       // Push 32 bytes
+        if (script[33] != OP_DROP) return false;   // OP_DROP after 32 bytes
+        if (script[34] != 0x08) return false;      // Push 8 bytes
+        if (script[43] != OP_DROP) return false;   // OP_DROP after 8 bytes
+        if (script[44] != 0x14) return false;      // Push 20 bytes (0x14 = 20)
+        if (script[65] != OP_DROP) return false;   // OP_DROP after 20 bytes
+        
+        // Check standard P2PKH pattern at the end
+        if (script[66] != OP_DUP) return false;
+        if (script[67] != OP_HASH160) return false;
+        if (script[68] != 0x14) return false;      // Push 20 bytes
+        if (script[89] != OP_EQUALVERIFY) return false;
+        if (script[90] != OP_CHECKSIG) return false;
+
+        // Extract the pubkey hash from the P2PKH part
+        pubkeyhash = valtype(script.begin() + 69, script.begin() + 89);
+        return true;
     }
-
-    // Check the pattern byte by byte
-    if (script[0] != 0x20) return false;       // Push 32 bytes
-    if (script[33] != OP_DROP) return false;   // OP_DROP after 32 bytes
-    if (script[34] != 0x08) return false;      // Push 8 bytes
-    if (script[43] != OP_DROP) return false;   // OP_DROP after 8 bytes
-    if (script[44] != 0x14) return false;      // Push 20 bytes (0x14 = 20)
-    if (script[65] != OP_DROP) return false;   // OP_DROP after 20 bytes
     
-    // Check standard P2PKH pattern at the end
-    if (script[66] != OP_DUP) return false;
-    if (script[67] != OP_HASH160) return false;
-    if (script[68] != 0x14) return false;      // Push 20 bytes
-    if (script[89] != OP_EQUALVERIFY) return false;
-    if (script[90] != OP_CHECKSIG) return false;
-
-    // Extract the pubkey hash from the P2PKH part
-    pubkeyhash = valtype(script.begin() + 69, script.begin() + 89);
-    return true;
+    // Type B: Introspection-based covenant
+    // Must start with 32-byte genesis push and contain introspection opcodes
+    if (script.size() >= 33 && script[0] == 0x20) {
+        if (HasIntrospectionOpcodes(script)) {
+            // For introspection covenants, we don't extract a specific pubkeyhash
+            // The script self-validates, so return empty solution
+            pubkeyhash.clear();
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 static bool MatchMultisig(const CScript &script, unsigned int &required,
