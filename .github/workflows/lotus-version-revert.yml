@@ -24,7 +24,7 @@ jobs:
     - name: Checkout code with version bump
       uses: actions/checkout@v3
       with:
-        ref: master
+        ref: ${{ github.ref }}
         fetch-depth: 0
 
     - name: Revert version bump

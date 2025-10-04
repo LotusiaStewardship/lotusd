@@ -211,7 +211,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        ref: master
+        ref: ${{ github.ref }}
         fetch-depth: 0
 
     - name: Check if tag exists
@@ -260,7 +260,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        ref: master
+        ref: ${{ github.ref }}
         fetch-depth: 0
 
     # Streamline artifact download - download directly to release-packages

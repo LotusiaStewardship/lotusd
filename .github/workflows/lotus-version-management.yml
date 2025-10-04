@@ -73,7 +73,7 @@ jobs:
     name: 📈 Bump Version
     needs: [ version-check ]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
+    if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/covenantOpCat') && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
     outputs:
       new_version: ${{ steps.bump-version.outputs.new_version }}
       version_bumped: ${{ steps.commit.outputs.version_bumped }}
@@ -109,18 +109,22 @@ jobs:
         git config --global user.name "Mrs Turtle"
         git config --global user.email "mrs.turtle@lotusia.org"
 
+        # Get current branch name
+        BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+        echo "Current branch: $BRANCH_NAME"
+
         # Add the version bump changes
         git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
         git commit -m "Bump version to ${{ steps.bump-version.outputs.new_version }}"
         
         # Pull latest changes with rebase strategy to avoid merge commits
-        git fetch origin master
+        git fetch origin "$BRANCH_NAME"
         
-        # Rebase our changes on top of the latest master
-        git rebase origin/master
+        # Rebase our changes on top of the latest branch
+        git rebase "origin/$BRANCH_NAME"
         
         # Push with force-with-lease for safety
-        git push --force-with-lease origin HEAD:master
+        git push --force-with-lease origin "HEAD:$BRANCH_NAME"
 
         echo "version_bumped=true" >> $GITHUB_OUTPUT
         echo "Version bumped and committed successfully"
@@ -130,7 +134,7 @@ jobs:
     name: 🔄 Prepare Revert
     needs: [ version-check ]
     runs-on: ubuntu-latest
-    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
+    if: always() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/covenantOpCat') && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
     outputs:
       prev_version: ${{ steps.calculate-prev-version.outputs.prev_version }}
 

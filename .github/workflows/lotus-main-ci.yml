@@ -78,7 +78,7 @@ jobs:
   release:
     name: 🚀 Release
     needs: [ version-management, build-core, build-tools, build-gui, build-miner, revert-version ]
-    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.build-core.result == 'success' && needs.build-tools.result == 'success' && needs.build-gui.result == 'success' && needs.build-miner.result == 'success' && (needs.revert-version.result == 'skipped' || needs.revert-version.result == 'success')
+    if: always() && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/covenantOpCat') && github.event_name == 'push' && needs.build-core.result == 'success' && needs.build-tools.result == 'success' && needs.build-gui.result == 'success' && needs.build-miner.result == 'success' && (needs.revert-version.result == 'skipped' || needs.revert-version.result == 'success')
     uses: ./.github/workflows/lotus-release.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
