@@ -564,6 +564,7 @@ add_library(server
 	checkpoints.cpp
 	config.cpp
 	consensus/activation.cpp
+	consensus/covenant.cpp
 	consensus/tx_verify.cpp
 	dbwrapper.cpp
 	dnsseeds.cpp

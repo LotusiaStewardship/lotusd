@@ -16,6 +16,7 @@
 #include <checkqueue.h>
 #include <config.h>
 #include <consensus/activation.h>
+#include <consensus/covenant.h>
 #include <consensus/merkle.h>
 #include <consensus/tx_check.h>
 #include <consensus/tx_verify.h>
@@ -1304,6 +1305,15 @@ bool CheckInputScripts(const CTransaction &tx, TxValidationState &state,
         // We executed all of the provided scripts, and were told to cache the
         // result. Do so now.
         AddKeyInScriptCache(hashCacheEntry, nSigChecksTotal);
+    }
+
+    // Validate covenant token balance conservation rules
+    int nHeight = GetSpendHeight(inputs);
+    if (!CheckCovenantRules(tx, inputs, nHeight)) {
+        return state.Invalid(
+            TxValidationResult::TX_CONSENSUS,
+            "covenant-balance-not-conserved",
+            "Covenant token balance conservation violated");
     }
 
     return true;

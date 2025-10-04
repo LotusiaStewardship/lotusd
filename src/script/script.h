@@ -188,6 +188,17 @@ enum opcodetype {
     // additional byte string operations
     OP_REVERSEBYTES = 0xbc,
 
+    // Covenant introspection opcodes
+    OP_INPUTINDEX = 0xc0,        // Push current input index being validated
+    OP_ACTIVEBYTECODE = 0xc1,    // Push scriptPubKey of current input
+    OP_TXVERSION = 0xc2,         // Push transaction version
+    OP_TXINPUTCOUNT = 0xc3,      // Push number of inputs
+    OP_TXOUTPUTCOUNT = 0xc4,     // Push number of outputs
+    OP_TXLOCKTIME = 0xc5,        // Push transaction locktime
+    OP_UTXOVALUE = 0xc6,         // Push value of current input
+    OP_OUTPUTVALUE = 0xc7,       // <index> OP_OUTPUTVALUE → <value>
+    OP_OUTPUTBYTECODE = 0xc8,    // <index> OP_OUTPUTBYTECODE → <scriptPubKey>
+
     // The first op_code value after all defined opcodes
     FIRST_UNDEFINED_OP_VALUE,
 

@@ -52,6 +52,17 @@ public:
         return false;
     }
 
+    // Covenant introspection support
+    virtual bool HasTransaction() const { return false; }
+    virtual int GetTxVersion() const { return 0; }
+    virtual size_t GetTxInputCount() const { return 0; }
+    virtual size_t GetTxOutputCount() const { return 0; }
+    virtual uint32_t GetTxLockTime() const { return 0; }
+    virtual bool GetTxOutput(size_t index, CTxOut &out) const { return false; }
+    virtual unsigned int GetInputIndex() const { return 0; }
+    virtual Amount GetAmount() const { return Amount::zero(); }
+    virtual const CScript *GetScriptPubKey() const { return nullptr; }
+
     virtual ~BaseSignatureChecker() {}
 };
 
@@ -77,6 +88,42 @@ public:
                   uint32_t flags) const final override;
     bool CheckLockTime(const CScriptNum &nLockTime) const final override;
     bool CheckSequence(const CScriptNum &nSequence) const final override;
+    
+    // Covenant introspection support
+    bool HasTransaction() const final override { 
+        return txTo != nullptr; 
+    }
+    int GetTxVersion() const final override { 
+        return txTo ? txTo->nVersion : 0; 
+    }
+    size_t GetTxInputCount() const final override { 
+        return txTo ? txTo->vin.size() : 0; 
+    }
+    size_t GetTxOutputCount() const final override { 
+        return txTo ? txTo->vout.size() : 0; 
+    }
+    uint32_t GetTxLockTime() const final override { 
+        return txTo ? txTo->nLockTime : 0; 
+    }
+    bool GetTxOutput(size_t index, CTxOut &out) const final override {
+        if (txTo && index < txTo->vout.size()) {
+            out = CTxOut(txTo->vout[index]);
+            return true;
+        }
+        return false;
+    }
+    unsigned int GetInputIndex() const final override {
+        return nIn;
+    }
+    Amount GetAmount() const final override {
+        return amount;
+    }
+    const CScript *GetScriptPubKey() const final override {
+        if (txdata && txdata->m_spent_outputs.size() > nIn) {
+            return &txdata->m_spent_outputs[nIn].scriptPubKey;
+        }
+        return nullptr;
+    }
 };
 
 using TransactionSignatureChecker =

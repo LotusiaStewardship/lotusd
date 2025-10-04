@@ -235,6 +235,26 @@ std::string GetOpName(opcodetype opcode) {
         case OP_REVERSEBYTES:
             return "OP_REVERSEBYTES";
 
+        // Covenant introspection opcodes
+        case OP_INPUTINDEX:
+            return "OP_INPUTINDEX";
+        case OP_ACTIVEBYTECODE:
+            return "OP_ACTIVEBYTECODE";
+        case OP_TXVERSION:
+            return "OP_TXVERSION";
+        case OP_TXINPUTCOUNT:
+            return "OP_TXINPUTCOUNT";
+        case OP_TXOUTPUTCOUNT:
+            return "OP_TXOUTPUTCOUNT";
+        case OP_TXLOCKTIME:
+            return "OP_TXLOCKTIME";
+        case OP_UTXOVALUE:
+            return "OP_UTXOVALUE";
+        case OP_OUTPUTVALUE:
+            return "OP_OUTPUTVALUE";
+        case OP_OUTPUTBYTECODE:
+            return "OP_OUTPUTBYTECODE";
+
         // expansion
         case OP_NOP1:
             return "OP_NOP1";

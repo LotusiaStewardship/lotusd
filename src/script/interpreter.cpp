@@ -1309,6 +1309,129 @@ bool EvalScript(std::vector<valtype> &stack, const CScript &script,
                         std::reverse(data.begin(), data.end());
                     } break;
 
+                    //
+                    // Covenant introspection opcodes
+                    //
+                    case OP_INPUTINDEX: {
+                        // Push the current input index being validated
+                        CScriptNum inputIndex(checker.GetInputIndex());
+                        stack.push_back(inputIndex.getvch());
+                    } break;
+
+                    case OP_ACTIVEBYTECODE: {
+                        // Push the scriptPubKey being spent by current input
+                        const CScript *pScript = checker.GetScriptPubKey();
+                        if (!pScript) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        stack.push_back(ToByteVector(*pScript));
+                    } break;
+
+                    case OP_TXVERSION: {
+                        // Push transaction version
+                        if (!checker.HasTransaction()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        CScriptNum version(checker.GetTxVersion());
+                        stack.push_back(version.getvch());
+                    } break;
+
+                    case OP_TXINPUTCOUNT: {
+                        // Push number of transaction inputs
+                        if (!checker.HasTransaction()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        CScriptNum inputCount(checker.GetTxInputCount());
+                        stack.push_back(inputCount.getvch());
+                    } break;
+
+                    case OP_TXOUTPUTCOUNT: {
+                        // Push number of transaction outputs
+                        if (!checker.HasTransaction()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        CScriptNum outputCount(checker.GetTxOutputCount());
+                        stack.push_back(outputCount.getvch());
+                    } break;
+
+                    case OP_TXLOCKTIME: {
+                        // Push transaction locktime
+                        if (!checker.HasTransaction()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        CScriptNum locktime(checker.GetTxLockTime());
+                        stack.push_back(locktime.getvch());
+                    } break;
+
+                    case OP_UTXOVALUE: {
+                        // Push value of UTXO being spent by current input
+                        Amount amt = checker.GetAmount();
+                        CScriptNum value(amt / SATOSHI);
+                        stack.push_back(value.getvch());
+                    } break;
+
+                    case OP_OUTPUTVALUE: {
+                        // (output_index -- value)
+                        if (stack.size() < 1) {
+                            return set_error(
+                                serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
+
+                        if (!checker.HasTransaction()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+
+                        CScriptNum outputIndex(stacktop(-1), fRequireMinimal);
+                        if (outputIndex.getint() < 0 ||
+                            outputIndex.getint() >= (int64_t)checker.GetTxOutputCount()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+
+                        popstack(stack);
+                        CTxOut output;
+                        if (!checker.GetTxOutput(outputIndex.getint(), output)) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        CScriptNum value(output.nValue / SATOSHI);
+                        stack.push_back(value.getvch());
+                    } break;
+
+                    case OP_OUTPUTBYTECODE: {
+                        // (output_index -- scriptPubKey)
+                        if (stack.size() < 1) {
+                            return set_error(
+                                serror, ScriptError::INVALID_STACK_OPERATION);
+                        }
+
+                        if (!checker.HasTransaction()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+
+                        CScriptNum outputIndex(stacktop(-1), fRequireMinimal);
+                        if (outputIndex.getint() < 0 ||
+                            outputIndex.getint() >= (int64_t)checker.GetTxOutputCount()) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+
+                        popstack(stack);
+                        CTxOut output;
+                        if (!checker.GetTxOutput(outputIndex.getint(), output)) {
+                            return set_error(serror,
+                                           ScriptError::INVALID_STACK_OPERATION);
+                        }
+                        stack.push_back(ToByteVector(output.scriptPubKey));
+                    } break;
+
                     case OP_RAWLEFTBITSHIFT: {
                         // (in bits -- out)
                         if (stack.size() < 2) {

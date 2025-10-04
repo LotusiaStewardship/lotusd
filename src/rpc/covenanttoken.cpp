@@ -58,12 +58,12 @@ struct CovenantTokenData {
         std::vector<uint8_t> genesisBytes(script.begin() + 1, script.begin() + 33);
         data.genesisId = uint256(genesisBytes);
 
-        // Extract balance (8 bytes starting at position 35)
+        // Extract balance (8 bytes starting at position 35, stored as big-endian)
         std::vector<uint8_t> balanceBytes(script.begin() + 35, script.begin() + 43);
-        // Convert little-endian bytes to int64_t
+        // Convert big-endian bytes to int64_t
         data.balance = 0;
         for (size_t i = 0; i < 8; i++) {
-            data.balance |= (int64_t)balanceBytes[i] << (i * 8);
+            data.balance = (data.balance << 8) | balanceBytes[i];
         }
 
         // Extract owner PKH (20 bytes starting at position 45)
