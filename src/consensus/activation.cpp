@@ -94,3 +94,23 @@ bool IsFirstSamuelEnabled(const Consensus::Params &params,
            gArgs.GetArg("-firstsamuelactivationtime",
                         params.firstSamuelActivationTime);
 }
+
+bool IsSecondSamuelEnabled(const Consensus::Params &params,
+                           const CBlockIndex *pindexPrev) {
+    if (pindexPrev == nullptr) {
+        return false;
+    }
+    return pindexPrev->GetMedianTimePast() >=
+           gArgs.GetArg("-secondsamuelactivationtime",
+                        params.secondSamuelActivationTime);
+}
+
+bool IsFirstKingsEnabled(const Consensus::Params &params,
+                         const CBlockIndex *pindexPrev) {
+    if (pindexPrev == nullptr) {
+        return false;
+    }
+    return pindexPrev->GetMedianTimePast() >=
+           gArgs.GetArg("-firstkingsactivationtime",
+                        params.firstKingsActivationTime);
+}

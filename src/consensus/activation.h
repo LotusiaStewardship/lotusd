@@ -47,8 +47,12 @@ bool IsRuthEnabled(const Consensus::Params &params,
 bool IsFirstSamuelEnabled(const Consensus::Params &params,
                           const CBlockIndex *pindexPrev);
 
-/** Check if June 20th, 2024 protocol upgrade has activated. */
-bool IsJudgesEnabled(const Consensus::Params &params,
-                          const CBlockIndex *pindexPrev);
+/** Check if December 21st, 2025 protocol upgrade has activated. */
+bool IsSecondSamuelEnabled(const Consensus::Params &params,
+                           const CBlockIndex *pindexPrev);
+
+/** Check if June 21st, 2026 protocol upgrade has activated. */
+bool IsFirstKingsEnabled(const Consensus::Params &params,
+                         const CBlockIndex *pindexPrev);
 
 #endif // BITCOIN_CONSENSUS_ACTIVATION_H
