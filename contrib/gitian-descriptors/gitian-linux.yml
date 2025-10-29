@@ -32,10 +32,6 @@ repositories:
     'source': 'deb http://archive.debian.org/debian/ buster-backports main'
     packages:
       - 'cmake'
-  - 'distribution': 'buster'
-    'source': 'deb http://archive.debian.org/debian/ buster main'
-  - 'distribution': 'buster-updates'
-    'source': 'deb http://archive.debian.org/debian/ buster-updates main'
 remotes:
   - 'url': 'https://github.com/LotusiaStewardship/lotusd.git'
     'dir': 'bitcoin'
