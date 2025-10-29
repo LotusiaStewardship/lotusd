@@ -193,7 +193,12 @@ if [ $DOCKER = "1" ]; then
     base_image="$DISTRO@sha256:$DOCKER_IMAGE_HASH"
     OUT=base-$DOCKER_IMAGE_HASH-$ARCH
   else
-    base_image="$DISTRO:$SUITE"
+    # Use specific dated tag for archived Debian releases to ensure consistency
+    if [ $DISTRO = "debian" ] && [ $SUITE = "buster" ]; then
+      base_image="$DISTRO:$SUITE-20210816"
+    else
+      base_image="$DISTRO:$SUITE"
+    fi
   fi
 
   # Generate the dockerfile
