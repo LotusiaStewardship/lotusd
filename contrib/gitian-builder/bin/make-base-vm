@@ -228,7 +228,7 @@ EOF
 
   cat << EOF >> $OUT.Dockerfile
 RUN echo 'Acquire::http { Proxy "$MIRROR_BASE"; };' > /etc/apt/apt.conf.d/50cacher
-RUN apt-get update && apt-get --no-install-recommends -y install $addpkg
+RUN apt-get update && apt-get --no-install-recommends -y install --allow-downgrades $addpkg
 
 RUN useradd -ms /bin/bash -U $DISTRO
 USER $DISTRO:$DISTRO
