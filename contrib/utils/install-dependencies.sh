@@ -2,8 +2,6 @@
 
 export LC_ALL=C.UTF-8
 
-set -euxo pipefail
-
 dpkg --add-architecture i386
 
 PACKAGES=(
@@ -99,6 +97,8 @@ echo "deb http://archive.debian.org/debian buster-backports main" | tee -a /etc/
 # use archive.debian.org instead
 sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
 apt-get update
+
+set -euxo pipefail
 DEBIAN_FRONTEND=noninteractive apt-get -t buster-backports install -y $(join_by ' ' "${BACKPORTS[@]}")
 
 
