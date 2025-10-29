@@ -2,16 +2,16 @@
 name: 'bitcoin-dmg-signer'
 distro: 'debian'
 suites:
-  - 'bullseye'
+- 'buster'
 architectures:
-  - 'amd64'
+- 'amd64'
 packages:
-  - 'faketime'
+- 'faketime'
 remotes:
-  - 'url': 'https://github.com/bitcoin-core/bitcoin-detached-sigs.git'
-    'dir': 'signature'
+- 'url': 'https://github.com/bitcoin-core/bitcoin-detached-sigs.git'
+  'dir': 'signature'
 files:
-  - 'bitcoin-osx-unsigned.tar.gz'
+- 'bitcoin-osx-unsigned.tar.gz'
 script: |
   WRAP_DIR=$HOME/wrapped
   mkdir -p ${WRAP_DIR}

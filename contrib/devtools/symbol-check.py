@@ -16,25 +16,25 @@ import re
 import sys
 import os
 
-# Debian 11 (Bullseye) has:
+# Debian 10 (Buster) has:
 #
-# - g++ version 10.2.1 (https://packages.debian.org/bullseye/g++)
-# - libc version 2.31 (https://packages.debian.org/bullseye/libc6)
-# - libstdc++ version 10.2.1 (https://packages.debian.org/bullseye/libstdc++6)
+# - g++ version 8.3.0 (https://packages.debian.org/buster/g++)
+# - libc version 2.28 (https://packages.debian.org/buster/libc6)
+# - libstdc++ version 8.3.0 (https://packages.debian.org/buster/libstdc++6)
 #
-# Build environment uses Debian Bullseye for Gitian deterministic builds.
-# This allows binaries to run on systems with GLIBC 2.31 or older.
+# Build environment uses Debian Buster for Gitian deterministic builds.
+# This allows binaries to run on systems with GLIBC 2.28 or older.
 #
 # According to GNU ABI document (http://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html):
 #   GCC 4.8.0: GCC_4.8.0
 #   GCC 4.8.0: GLIBCXX_3.4.18, CXXABI_1.3.7
-#   (glibc)    GLIBC_2_31 (Debian Bullseye)
+#   (glibc)    GLIBC_2_28 (Debian Buster)
 #
 MAX_VERSIONS = {
     'GCC': (4, 8, 0),
     'CXXABI': (1, 3, 7),
     'GLIBCXX': (3, 4, 18),
-    'GLIBC': (2, 31),
+    'GLIBC': (2, 28),
     'LIBATOMIC': (1, 0)
 }
 # See here for a description of _IO_stdin_used:

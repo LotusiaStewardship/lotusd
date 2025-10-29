@@ -3,7 +3,7 @@ name: 'lotus-win'
 enable_cache: true
 distro: 'debian'
 suites:
-  - 'bullseye'
+  - 'buster'
 architectures:
   - 'amd64'
 packages:
@@ -24,8 +24,8 @@ packages:
   - 'python3'
   - 'zip'
 repositories:
-  - 'distribution': 'bullseye-backports'
-    'source': 'deb http://archive.debian.org/debian/ bullseye-backports main'
+  - 'distribution': 'buster-backports'
+    'source': 'deb http://archive.debian.org/debian/ buster-backports main'
     packages:
       - 'cmake'
 remotes:
