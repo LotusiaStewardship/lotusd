@@ -180,6 +180,9 @@ if [ $LXC = "1" ]; then
   if [ $DISTRO = "debian" ]; then
     addpkg=$addpkg,sudo
   fi
+elif [ $DOCKER = "1" ]; then
+  # Docker containers don't need kernel or bootloader packages
+  addpkg=$addpkg,openssh-server
 else
   # Lack of comma after KERNEL_PKG is not a typo
   addpkg=$addpkg,${KERNEL_PKG}${GRUB_PKG},openssh-server
