@@ -31,7 +31,7 @@ packages:
 - "python3-setuptools"
 repositories:
 - "distribution": "bullseye-backports"
-  "source": "deb http://deb.debian.org/debian/ bullseye-backports main"
+  "source": "deb http://archive.debian.org/debian/ bullseye-backports main"
   packages:
   - "cmake"
 remotes:

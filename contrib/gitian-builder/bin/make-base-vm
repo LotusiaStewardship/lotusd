@@ -115,8 +115,8 @@ if [ $DISTRO = "ubuntu" ]; then
   SECURITY_MIRROR=$MIRROR_BASE/security.ubuntu.com/ubuntu
   components=main,universe
 elif [ $DISTRO = "debian" ]; then
-  # Debian Buster (10) and older are EOL and moved to archive.debian.org
-  if [ $SUITE = "buster" -o $SUITE = "stretch" -o $SUITE = "jessie" -o $SUITE = "wheezy" -o $SUITE = "squeeze" ]; then
+  # Debian Bullseye (11) and older are EOL and moved to archive.debian.org
+  if [ $SUITE = "bullseye" -o $SUITE = "buster" -o $SUITE = "stretch" -o $SUITE = "jessie" -o $SUITE = "wheezy" -o $SUITE = "squeeze" ]; then
     MIRROR=$MIRROR_BASE/archive.debian.org/debian
     SECURITY_MIRROR=$MIRROR_BASE/archive.debian.org/debian-security
   else
@@ -218,7 +218,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 EOF
 
   # For EOL Debian releases, update sources.list to use archive.debian.org
-  if [ $DISTRO = "debian" ] && [ $SUITE = "buster" -o $SUITE = "stretch" -o $SUITE = "jessie" -o $SUITE = "wheezy" -o $SUITE = "squeeze" ]; then
+  if [ $DISTRO = "debian" ] && [ $SUITE = "bullseye" -o $SUITE = "buster" -o $SUITE = "stretch" -o $SUITE = "jessie" -o $SUITE = "wheezy" -o $SUITE = "squeeze" ]; then
     cat << EOF >> $OUT.Dockerfile
 RUN sed -i 's|http://deb.debian.org|http://archive.debian.org|g' /etc/apt/sources.list && \\
     sed -i 's|http://security.debian.org|http://archive.debian.org|g' /etc/apt/sources.list && \\
