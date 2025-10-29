@@ -3,7 +3,7 @@ name: 'lotus-linux'
 enable_cache: true
 distro: 'debian'
 suites:
-  - 'buster'
+  - 'bullseye'
 architectures:
   - 'amd64'
 packages:
@@ -28,8 +28,8 @@ packages:
   - 'pkg-config'
   - 'python3'
 repositories:
-  - 'distribution': 'buster-backports'
-    'source': 'deb http://archive.debian.org/debian/ buster-backports main'
+  - 'distribution': 'bullseye-backports'
+    'source': 'deb http://deb.debian.org/debian/ bullseye-backports main'
     packages:
       - 'cmake'
 remotes:
