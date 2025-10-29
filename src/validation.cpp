@@ -278,7 +278,7 @@ bool CheckSequenceLocks(const CTxMemPool &pool, const CTransaction &tx,
 static bool IsReplayProtectionEnabled(const Consensus::Params &params,
                                       int64_t nMedianTimePast) {
     return nMedianTimePast >= gArgs.GetArg("-replayprotectionactivationtime",
-                                           params.secondSamuelActivationTime);
+                                           params.firstKingsActivationTime);
 }
 
 static bool IsReplayProtectionEnabled(const Consensus::Params &params,
@@ -464,10 +464,8 @@ bool MemPoolAccept::PreChecks(ATMPArgs &args, Workspace &ws) {
         return state.Invalid(TxValidationResult::TX_NOT_STANDARD, reason);
     }
 
-    if (fRequireStandardPolicy && TxHasPayToTaproot(tx)) {
-        return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
-                             "bad-taproot-phased-out");
-    }
+    // Taproot transactions re-enabled in mempool
+    // Removed: Taproot rejection check (was phased out in Numbers, now re-enabled)
 
     // Only accept nLockTime-using transactions that can be mined in the next
     // block; we don't want our mempool filled up with transactions that can't
@@ -1595,9 +1593,9 @@ static uint32_t GetNextBlockScriptFlags(const Consensus::Params &params,
         flags |= SCRIPT_ENABLE_REPLAY_PROTECTION;
     }
 
-    if (IsNumbersEnabled(params, pindex)) {
-        flags |= SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS;
-    }
+    // Taproot and SIGHASH_LOTUS re-enabled for consensus
+    // Removed: SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS flag
+    // (was disabled in Numbers upgrade, now re-enabled)
 
     return flags;
 }
@@ -1731,10 +1729,9 @@ bool CChainState::ConnectBlock(const CBlock &block, BlockValidationState &state,
         assert(fRequireStandardPolicy);
         extraFlags = STANDARD_SCRIPT_VERIFY_FLAGS;
 
-        // Before the Numbers upgrade, we don't deny Taproot or SIGHASH_LOTUS
-        if (!IsNumbersEnabled(consensusParams, pindex->pprev)) {
-            extraFlags &= ~SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS;
-        }
+        // Taproot and SIGHASH_LOTUS re-enabled for all blocks
+        // Removed: Conditional flag clearing (no longer needed as flag not set)
+        // Previously this cleared the disable flag for pre-Numbers blocks
     }
 
     const uint32_t flags =
@@ -1821,13 +1818,8 @@ bool CChainState::ConnectBlock(const CBlock &block, BlockValidationState &state,
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
                                      reason);
             }
-            // Taproot is phased out after the Numbers update
-            if (IsNumbersEnabled(consensusParams, pindex->pprev)) {
-                if (TxHasPayToTaproot(tx)) {
-                    return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
-                                         "bad-taproot-phased-out");
-                }
-            }
+            // Taproot transactions re-enabled in block validation
+            // Removed: Taproot phase-out check (was disabled in Numbers, now re-enabled)
         }
 
         if (!MoneyRange(nFees)) {

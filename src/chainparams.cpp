@@ -122,6 +122,8 @@ public:
         consensus.firstSamuelActivationTime = 1750473720;
         // 2025-12-21T15:03:00.000Z protocol upgrade
         consensus.secondSamuelActivationTime = 1766329380;
+        // 2026-06-21T08:24:00.000Z protocol upgrade
+        consensus.firstKingsActivationTime = 1782030240;
 
         /**
          * The message start string is designed to be unlikely to occur in
@@ -283,6 +285,10 @@ public:
         consensus.secondSamuelActivationTime =
             mainnetConsensus.secondSamuelActivationTime -
             testnetActivationOffset;
+        // 2026-06-21T08:24:00.000Z protocol upgrade
+        consensus.firstKingsActivationTime =
+            mainnetConsensus.firstKingsActivationTime -
+            testnetActivationOffset;
 
         // "ltdk" with MSB set
         diskMagic[0] = 0xec;
@@ -409,6 +415,9 @@ public:
         // 2025-12-21T15:03:00.000Z protocol upgrade
         consensus.secondSamuelActivationTime =
             mainnetConsensus.secondSamuelActivationTime;
+        // 2026-06-21T08:24:00.000Z protocol upgrade
+        consensus.firstKingsActivationTime =
+            mainnetConsensus.firstKingsActivationTime;
 
         // "lrdk" with MSB set
         diskMagic[0] = 0xec;

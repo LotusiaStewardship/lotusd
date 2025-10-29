@@ -1,40 +1,44 @@
 ---
-name: "lotus-linux"
+name: 'lotus-linux'
 enable_cache: true
-distro: "debian"
+distro: 'debian'
 suites:
-- "buster"
+  - 'buster'
 architectures:
-- "amd64"
+  - 'amd64'
 packages:
-- "autoconf"
-- "automake"
-- "binutils-aarch64-linux-gnu"
-- "binutils-arm-linux-gnueabihf"
-- "binutils-gold"
-- "bsdmainutils"
-- "build-essential"
-- "ca-certificates"
-- "curl"
-- "faketime"
-- "g++-aarch64-linux-gnu"
-- "g++-arm-linux-gnueabihf"
-- "gcc-aarch64-linux-gnu"
-- "gcc-arm-linux-gnueabihf"
-- "git"
-- "gperf"
-- "libtool"
-- "ninja-build"
-- "pkg-config"
-- "python3"
+  - 'autoconf'
+  - 'automake'
+  - 'binutils-aarch64-linux-gnu'
+  - 'binutils-arm-linux-gnueabihf'
+  - 'binutils-gold'
+  - 'bsdmainutils'
+  - 'build-essential'
+  - 'ca-certificates'
+  - 'curl'
+  - 'faketime'
+  - 'g++-aarch64-linux-gnu'
+  - 'g++-arm-linux-gnueabihf'
+  - 'gcc-aarch64-linux-gnu'
+  - 'gcc-arm-linux-gnueabihf'
+  - 'git'
+  - 'gperf'
+  - 'libtool'
+  - 'ninja-build'
+  - 'pkg-config'
+  - 'python3'
 repositories:
-- "distribution": "buster-backports"
-  "source": "deb http://archive.debian.org/debian/ buster-backports main"
-  packages:
-  - "cmake"
+  - 'distribution': 'buster-backports'
+    'source': 'deb http://archive.debian.org/debian/ buster-backports main'
+    packages:
+      - 'cmake'
+  - 'distribution': 'buster'
+    'source': 'deb http://archive.debian.org/debian/ buster main'
+  - 'distribution': 'buster-updates'
+    'source': 'deb http://archive.debian.org/debian/ buster-updates main'
 remotes:
-- "url": "https://github.com/LotusiaStewardship/lotusd.git"
-  "dir": "bitcoin"
+  - 'url': 'https://github.com/LotusiaStewardship/lotusd.git'
+    'dir': 'bitcoin'
 files: []
 script: |
 
