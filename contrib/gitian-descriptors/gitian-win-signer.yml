@@ -1,20 +1,20 @@
 ---
-name: "bitcoin-win-signer"
-distro: "debian"
+name: 'bitcoin-win-signer'
+distro: 'debian'
 suites:
-- "bullseye"
+  - 'bullseye'
 architectures:
-- "amd64"
+  - 'amd64'
 packages:
-- "autoconf"
-- "libssl-dev"
+  - 'autoconf'
+  - 'libssl-dev'
 remotes:
-- "url": "https://github.com/bitcoin-core/bitcoin-detached-sigs.git"
-  "dir": "signature"
+  - 'url': 'https://github.com/bitcoin-core/bitcoin-detached-sigs.git'
+    'dir': 'signature'
 files:
-- "osslsigncode-1.7.1.tar.gz"
-- "osslsigncode-Backports-to-1.7.1.patch"
-- "bitcoin-win-unsigned.tar.gz"
+  - 'osslsigncode-1.7.1.tar.gz'
+  - 'osslsigncode-Backports-to-1.7.1.patch'
+  - 'bitcoin-win-unsigned.tar.gz'
 script: |
   BUILD_DIR=`pwd`
   SIGDIR=${BUILD_DIR}/signature/win

@@ -1,36 +1,36 @@
 ---
-name: "lotus-win"
+name: 'lotus-win'
 enable_cache: true
-distro: "debian"
+distro: 'debian'
 suites:
-  - "bullseye"
+  - 'bullseye'
 architectures:
-  - "amd64"
+  - 'amd64'
 packages:
-  - "autoconf"
-  - "automake"
-  - "bsdmainutils"
-  - "ca-certificates"
-  - "curl"
-  - "faketime"
-  - "g++"
-  - "g++-mingw-w64"
-  - "git"
-  - "libtool"
-  - "ninja-build"
-  - "mingw-w64"
-  - "nsis"
-  - "pkg-config"
-  - "python3"
-  - "zip"
+  - 'autoconf'
+  - 'automake'
+  - 'bsdmainutils'
+  - 'ca-certificates'
+  - 'curl'
+  - 'faketime'
+  - 'g++'
+  - 'g++-mingw-w64'
+  - 'git'
+  - 'libtool'
+  - 'ninja-build'
+  - 'mingw-w64'
+  - 'nsis'
+  - 'pkg-config'
+  - 'python3'
+  - 'zip'
 repositories:
-  - "distribution": "bullseye-backports"
-    "source": "deb http://archive.debian.org/debian/ bullseye-backports main"
+  - 'distribution': 'bullseye-backports'
+    'source': 'deb http://archive.debian.org/debian/ bullseye-backports main'
     packages:
-      - "cmake"
+      - 'cmake'
 remotes:
-  - "url": "https://github.com/LotusiaStewardship/lotusd.git"
-    "dir": "bitcoin"
+  - 'url': 'https://github.com/LotusiaStewardship/lotusd.git'
+    'dir': 'bitcoin'
 files: []
 script: |
   WRAP_DIR=$HOME/wrapped
