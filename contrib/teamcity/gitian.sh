@@ -36,7 +36,7 @@ move_log() {
 }
 trap "move_log" ERR
 
-./bin/gbuild -j${THREADS} -m3500 --commit bitcoin=${COMMIT} --url bitcoin="${TOPLEVEL}" "${TOPLEVEL}/contrib/gitian-descriptors/gitian-${OS_NAME}.yml"
+./bin/gbuild --upgrade -j${THREADS} -m3500 --commit bitcoin=${COMMIT} --url bitcoin="${TOPLEVEL}" "${TOPLEVEL}/contrib/gitian-descriptors/gitian-${OS_NAME}.yml"
 
 move_log
 mv result/*.yml "${OS_DIR}/"
