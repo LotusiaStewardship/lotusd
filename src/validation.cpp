@@ -464,8 +464,13 @@ bool MemPoolAccept::PreChecks(ATMPArgs &args, Workspace &ws) {
         return state.Invalid(TxValidationResult::TX_NOT_STANDARD, reason);
     }
 
-    // Taproot transactions re-enabled in mempool
-    // Removed: Taproot rejection check (was phased out in Numbers, now re-enabled)
+    // Taproot is only enabled after Second Samuel activation
+    if (fRequireStandardPolicy && !IsSecondSamuelEnabled(args.m_config.GetChainParams().GetConsensus(), ::ChainActive().Tip())) {
+        if (TxHasPayToTaproot(tx)) {
+            return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
+                                 "taproot-not-active-yet");
+        }
+    }
 
     // Only accept nLockTime-using transactions that can be mined in the next
     // block; we don't want our mempool filled up with transactions that can't
@@ -1593,9 +1598,10 @@ static uint32_t GetNextBlockScriptFlags(const Consensus::Params &params,
         flags |= SCRIPT_ENABLE_REPLAY_PROTECTION;
     }
 
-    // Taproot and SIGHASH_LOTUS re-enabled for consensus
-    // Removed: SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS flag
-    // (was disabled in Numbers upgrade, now re-enabled)
+    // Taproot and SIGHASH_LOTUS are disabled until Second Samuel activation
+    if (!IsSecondSamuelEnabled(params, pindex)) {
+        flags |= SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS;
+    }
 
     return flags;
 }
@@ -1729,9 +1735,10 @@ bool CChainState::ConnectBlock(const CBlock &block, BlockValidationState &state,
         assert(fRequireStandardPolicy);
         extraFlags = STANDARD_SCRIPT_VERIFY_FLAGS;
 
-        // Taproot and SIGHASH_LOTUS re-enabled for all blocks
-        // Removed: Conditional flag clearing (no longer needed as flag not set)
-        // Previously this cleared the disable flag for pre-Numbers blocks
+        // After Second Samuel, we enable Taproot and SIGHASH_LOTUS
+        if (IsSecondSamuelEnabled(consensusParams, pindex->pprev)) {
+            extraFlags &= ~SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS;
+        }
     }
 
     const uint32_t flags =
@@ -1818,8 +1825,13 @@ bool CChainState::ConnectBlock(const CBlock &block, BlockValidationState &state,
                 return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
                                      reason);
             }
-            // Taproot transactions re-enabled in block validation
-            // Removed: Taproot phase-out check (was disabled in Numbers, now re-enabled)
+            // Taproot is only enabled after Second Samuel activation
+            if (!IsSecondSamuelEnabled(consensusParams, pindex->pprev)) {
+                if (TxHasPayToTaproot(tx)) {
+                    return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                         "taproot-not-active-yet");
+                }
+            }
         }
 
         if (!MoneyRange(nFees)) {
