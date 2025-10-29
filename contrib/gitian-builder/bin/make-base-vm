@@ -157,7 +157,7 @@ addpkg=pciutils,build-essential,git,subversion,$LOCALE_PKG,wget,lsb-release
 
 # For Debian Buster, add explicit dependencies with specific versions to work around broken packages in archive
 if [ $DISTRO = "debian" ] && [ $SUITE = "buster" ]; then
-  addpkg=$addpkg,gcc,g++,dpkg-dev,make,perl,xz-utils,libbz2-1.0=1.0.6-9.2~deb10u1,bzip2=1.0.6-9.2~deb10u1,libc6=2.28-10+deb10u1,libc6-dev=2.28-10+deb10u1,procps
+  addpkg=$addpkg,gcc,g++,dpkg-dev,make,perl,xz-utils,libbz2-1.0=1.0.6-9.2~deb10u1,bzip2=1.0.6-9.2~deb10u1,libc6=2.28-10+deb10u1,libc6-dev=2.28-10+deb10u1,libncurses6,libtinfo6,procps
 fi
 
 if [ $DISTRO = "ubuntu" ]; then
