@@ -181,8 +181,8 @@ if [ $LXC = "1" ]; then
     addpkg=$addpkg,sudo
   fi
 elif [ $DOCKER = "1" ]; then
-  # Docker containers don't need kernel or bootloader packages
-  addpkg=$addpkg,openssh-server
+  # Docker containers don't need kernel, bootloader, or openssh-server packages
+  :
 else
   # Lack of comma after KERNEL_PKG is not a typo
   addpkg=$addpkg,${KERNEL_PKG}${GRUB_PKG},openssh-server
@@ -223,7 +223,21 @@ EOF
 
   cat << EOF >> $OUT.Dockerfile
 RUN echo 'Acquire::http { Proxy "$MIRROR_BASE"; };' > /etc/apt/apt.conf.d/50cacher
+EOF
+
+  # For Debian Buster, install dependencies explicitly to avoid broken package issues
+  if [ $DISTRO = "debian" ] && [ $SUITE = "buster" ]; then
+    cat << EOF >> $OUT.Dockerfile
+RUN apt-get update && apt-get --no-install-recommends -y install \\
+    gcc g++ libc6-dev dpkg-dev make perl $addpkg
+EOF
+  else
+    cat << EOF >> $OUT.Dockerfile
 RUN apt-get update && apt-get --no-install-recommends -y install $addpkg
+EOF
+  fi
+
+  cat << EOF >> $OUT.Dockerfile
 
 RUN useradd -ms /bin/bash -U $DISTRO
 USER $DISTRO:$DISTRO
