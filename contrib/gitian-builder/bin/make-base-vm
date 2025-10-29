@@ -155,6 +155,11 @@ fi
 
 addpkg=pciutils,build-essential,git,subversion,$LOCALE_PKG,wget,lsb-release
 
+# For Debian Buster, add explicit dependencies to work around broken packages in archive
+if [ $DISTRO = "debian" ] && [ $SUITE = "buster" ]; then
+  addpkg=$addpkg,gcc,g++,libc6-dev,dpkg-dev,make,perl,bzip2,xz-utils
+fi
+
 if [ $DISTRO = "ubuntu" ]; then
   # Need comma at end to work around an issue with apt for Debian <= Wheezy regarding empty strings
   #
@@ -223,21 +228,7 @@ EOF
 
   cat << EOF >> $OUT.Dockerfile
 RUN echo 'Acquire::http { Proxy "$MIRROR_BASE"; };' > /etc/apt/apt.conf.d/50cacher
-EOF
-
-  # For Debian Buster, install dependencies explicitly to avoid broken package issues
-  if [ $DISTRO = "debian" ] && [ $SUITE = "buster" ]; then
-    cat << EOF >> $OUT.Dockerfile
-RUN apt-get update && apt-get --no-install-recommends -y install \\
-    gcc g++ libc6-dev dpkg-dev make perl $addpkg
-EOF
-  else
-    cat << EOF >> $OUT.Dockerfile
 RUN apt-get update && apt-get --no-install-recommends -y install $addpkg
-EOF
-  fi
-
-  cat << EOF >> $OUT.Dockerfile
 
 RUN useradd -ms /bin/bash -U $DISTRO
 USER $DISTRO:$DISTRO
