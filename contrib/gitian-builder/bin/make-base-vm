@@ -115,8 +115,14 @@ if [ $DISTRO = "ubuntu" ]; then
   SECURITY_MIRROR=$MIRROR_BASE/security.ubuntu.com/ubuntu
   components=main,universe
 elif [ $DISTRO = "debian" ]; then
-  MIRROR=$MIRROR_BASE/ftp.debian.org/debian
-  SECURITY_MIRROR=$MIRROR_BASE/security.debian.org/
+  # Debian Buster (10) and older are EOL and moved to archive.debian.org
+  if [ $SUITE = "buster" -o $SUITE = "stretch" -o $SUITE = "jessie" -o $SUITE = "wheezy" -o $SUITE = "squeeze" ]; then
+    MIRROR=$MIRROR_BASE/archive.debian.org/debian
+    SECURITY_MIRROR=$MIRROR_BASE/archive.debian.org/debian-security
+  else
+    MIRROR=$MIRROR_BASE/ftp.debian.org/debian
+    SECURITY_MIRROR=$MIRROR_BASE/security.debian.org/
+  fi
   components=main,contrib
 fi
 
@@ -206,6 +212,18 @@ if [ $DOCKER = "1" ]; then
 FROM $base_image
 
 ENV DEBIAN_FRONTEND=noninteractive
+EOF
+
+  # For EOL Debian releases, update sources.list to use archive.debian.org
+  if [ $DISTRO = "debian" ] && [ $SUITE = "buster" -o $SUITE = "stretch" -o $SUITE = "jessie" -o $SUITE = "wheezy" -o $SUITE = "squeeze" ]; then
+    cat << EOF >> $OUT.Dockerfile
+RUN sed -i 's|http://deb.debian.org|http://archive.debian.org|g' /etc/apt/sources.list && \\
+    sed -i 's|http://security.debian.org|http://archive.debian.org|g' /etc/apt/sources.list && \\
+    sed -i '/security/d' /etc/apt/sources.list
+EOF
+  fi
+
+  cat << EOF >> $OUT.Dockerfile
 RUN echo 'Acquire::http { Proxy "$MIRROR_BASE"; };' > /etc/apt/apt.conf.d/50cacher
 RUN apt-get update && apt-get --no-install-recommends -y install $addpkg
 
