@@ -15,7 +15,28 @@ find_package(nng CONFIG REQUIRED)
 find_package(Flatbuffers CONFIG REQUIRED)
 
 # Find flatc executable
-find_program(_FLATC flatc)
+# During cross-compilation, we need to ensure we find the native flatc,
+# not the cross-compiled one. The key is using NO_CMAKE_FIND_ROOT_PATH
+# to avoid finding binaries from the target architecture.
+if(CMAKE_CROSSCOMPILING)
+	# First try system PATH with NO_CMAKE_FIND_ROOT_PATH to skip target paths
+	find_program(_FLATC flatc NO_CMAKE_FIND_ROOT_PATH)
+	if(NOT _FLATC AND CMAKE_PREFIX_PATH)
+		# If not in system PATH, try CMAKE_PREFIX_PATH (native deps location)
+		list(GET CMAKE_PREFIX_PATH 0 NATIVE_PREFIX)
+		find_program(_FLATC flatc PATHS "${NATIVE_PREFIX}/bin" NO_CMAKE_FIND_ROOT_PATH)
+	endif()
+	# Final fallback: normal search (should respect CMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER)
+	if(NOT _FLATC)
+		find_program(_FLATC flatc)
+	endif()
+else()
+	# For native builds, just search normally
+	find_program(_FLATC flatc)
+endif()
+if(NOT _FLATC)
+	message(FATAL_ERROR "flatc executable not found. Required for building nng_interface.")
+endif()
 message(STATUS "Using flatc executable: ${_FLATC}")
 
 # Location of the .fbs file for the NNG interface
