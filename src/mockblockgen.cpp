@@ -35,6 +35,7 @@ static ChainstateManager *g_mock_chainman = nullptr;
 
 /**
  * Generate a single block with minimal PoW for testing
+ * If scriptPubKey is empty, uses a random mock key
  */
 static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey) {
     if (!g_mock_mempool || !g_mock_chainman) {
@@ -42,8 +43,11 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
         return false;
     }
     
+    // Use provided script or pick random from pool
+    CScript coinbaseScript = scriptPubKey.empty() ? GetRandomMockScript() : scriptPubKey;
+    
     std::unique_ptr<CBlockTemplate> pblocktemplate(
-        BlockAssembler(config, *g_mock_mempool).CreateNewBlock(scriptPubKey));
+        BlockAssembler(config, *g_mock_mempool).CreateNewBlock(coinbaseScript));
 
     if (!pblocktemplate) {
         LogPrintf("MockBlockGen: Failed to create block template\n");
@@ -112,7 +116,7 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
 /**
  * Mock block generator thread
  */
-static void MockBlockGeneratorThread(int interval_seconds, CScript scriptPubKey) {
+static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedScript) {
     LogPrintf("MockBlockGen: Thread started (interval: %d ±1 seconds for consensus)\n", 
               interval_seconds);
     
@@ -173,33 +177,47 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript scriptPubKey)
             const int currentHeight = g_mock_chainman ? 
                 g_mock_chainman->ActiveChain().Height() : 0;
             
-            // Generate 0-10 random transactions
+            // Generate 0-5 random transactions (reduced to avoid mempool issues)
             if (currentHeight > 100) {
-                int numTxs = GetRand(11); // 0-10 txs
+                int numTxs = GetRand(6); // 0-5 txs
                 if (numTxs > 0) {
+                    LogPrint(BCLog::NET, 
+                             "MockTxGen: Attempting to generate %d transactions at height %d\n",
+                             numTxs, currentHeight);
+                    
                     auto txs = GenerateRandomTransactions(numTxs, currentHeight);
                     
-                    // Add to mempool
+                    if (txs.empty()) {
+                        LogPrint(BCLog::NET, "MockTxGen: No transactions generated (no spendable coins?)\n");
+                    }
+                    
+                    // Add to mempool (without holding lock too long)
                     if (g_mock_mempool && !txs.empty()) {
-                        LOCK(g_mock_mempool->cs);
+                        int added = 0;
                         for (const auto& tx : txs) {
                             TxValidationState state;
                             bool missing_inputs = false;
+                            
+                            // Don't hold mempool lock during AcceptToMemoryPool
                             if (AcceptToMemoryPool(GetConfig(), *g_mock_mempool, state, tx,
                                                   &missing_inputs,
                                                   false /* bypass_limits */,
                                                   nullptr /* nAbsurdFee */)) {
-                                LogPrint(BCLog::NET, "MockTxGen: Added tx to mempool\n");
+                                added++;
                             } else {
-                                LogPrint(BCLog::NET, "MockTxGen: Failed to add tx: %s\n",
-                                        state.ToString());
+                                LogPrint(BCLog::NET, "MockTxGen: Rejected: %s (missing_inputs=%d)\n",
+                                        state.ToString(), missing_inputs);
                             }
+                        }
+                        
+                        if (added > 0) {
+                            LogPrintf("💰 Generated %d random transaction(s)\n", added);
                         }
                     }
                 }
             }
         } catch (const std::exception &e) {
-            LogPrint(BCLog::NET, "MockTxGen: Failed to generate txs: %s\n", e.what());
+            LogPrint(BCLog::NET, "MockTxGen: Exception: %s\n", e.what());
         }
         
         // Generate a block - normal PoW consensus applies
@@ -208,7 +226,10 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript scriptPubKey)
             const int height_before = g_mock_chainman ? 
                 g_mock_chainman->ActiveChain().Height() : -1;
             
-            if (GenerateMockBlock(config, scriptPubKey)) {
+            // Use user-provided script if specified, otherwise pick random from pool
+            CScript blockScript = userProvidedScript.empty() ? CScript() : userProvidedScript;
+            
+            if (GenerateMockBlock(config, blockScript)) {
                 const int height_after = g_mock_chainman ?
                     g_mock_chainman->ActiveChain().Height() : -1;
                 
@@ -240,15 +261,14 @@ bool StartMockBlockGenerator(NodeContext &node, int block_interval_seconds) {
     g_mock_mempool = node.mempool.get();
     g_mock_chainman = node.chainman;
     
-    // Get a payout address from args or use a burn address
+    // Get a payout address from args or generate one for mock transactions
     std::string payoutAddr = gArgs.GetArg("-mockblockaddress", "");
     CScript scriptPubKey;
     
     if (payoutAddr.empty()) {
-        // Use a standard burn address (OP_RETURN with data)
-        // This makes coins unspendable but is standard
-        scriptPubKey = CScript() << OP_RETURN << std::vector<uint8_t>{0x4d, 0x6f, 0x63, 0x6b}; // "Mock"
-        LogPrintf("MockBlockGen: Using OP_RETURN burn script (rewards destroyed)\n");
+        // Leave empty - will pick random from pool for each block
+        scriptPubKey = CScript();
+        LogPrintf("MockBlockGen: Using random mock keys for coinbase (rotates through 20 addresses)\n");
     } else {
         CTxDestination dest = DecodeDestination(payoutAddr, Params());
         if (!IsValidDestination(dest)) {
@@ -277,8 +297,24 @@ void StopMockBlockGenerator() {
     LogPrintf("MockBlockGen: Stopping...\n");
     g_mock_block_running = false;
     
+    // Give thread 5 seconds to stop gracefully
     if (g_mock_block_thread && g_mock_block_thread->joinable()) {
-        g_mock_block_thread->join();
+        // Use detach if join hangs - thread will clean up on its own
+        auto start = std::chrono::steady_clock::now();
+        while (g_mock_block_thread->joinable()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            auto elapsed = std::chrono::steady_clock::now() - start;
+            if (elapsed > std::chrono::seconds(3)) {
+                LogPrintf("MockBlockGen: Thread not responding, detaching...\n");
+                g_mock_block_thread->detach();
+                break;
+            }
+            // Try to join
+            if (g_mock_block_running == false) {
+                g_mock_block_thread->join();
+                break;
+            }
+        }
     }
     
     g_mock_block_thread.reset();

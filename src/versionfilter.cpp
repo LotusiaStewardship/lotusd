@@ -42,21 +42,18 @@ ClientVersion ParseClientVersion(const std::string &userAgent) {
                 result.minor = std::stoi(match[2].str());
                 result.revision = std::stoi(match[3].str());
                 result.valid = true;
-
-                LogPrint(BCLog::NET,
-                         "Parsed client version from user agent '%s': %s\n",
-                         userAgent, result.ToString());
+                
+                // Only log first time we see each version
+                static std::set<std::string> logged_versions;
+                if (logged_versions.find(result.ToString()) == logged_versions.end()) {
+                    logged_versions.insert(result.ToString());
+                    LogPrint(BCLog::NET,
+                             "Parsed client version: %s\n", result.ToString());
+                }
             } catch (const std::exception &e) {
-                LogPrint(BCLog::NET,
-                         "Failed to parse version numbers from user agent "
-                         "'%s': %s\n",
-                         userAgent, e.what());
+                // Silent - not important
             }
         }
-    } else {
-        LogPrint(BCLog::NET,
-                 "Could not find version pattern in user agent '%s'\n",
-                 userAgent);
     }
 
     return result;
@@ -121,9 +118,7 @@ bool ShouldDisconnectPeerByVersion(const ClientVersion &peerVersion,
         return true;
     }
 
-    LogPrint(BCLog::NET,
-             "Peer version %s is acceptable (>= %s) at height %d\n",
-             peerVersion.ToString(), minimumVersion.ToString(), currentHeight);
+    // Silently accept - no need to log every message
     return false;
 }
 

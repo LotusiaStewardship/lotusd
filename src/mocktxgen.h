@@ -16,5 +16,11 @@
  */
 std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHeight);
 
+/**
+ * Get a random mock script for coinbase payout
+ */
+class CScript;
+CScript GetRandomMockScript();
+
 #endif // BITCOIN_MOCKTXGEN_H
 

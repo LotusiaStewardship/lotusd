@@ -2717,9 +2717,9 @@ CBlockIndex *CChainState::FindMostWorkChain() {
 
                 if (pindexNew->nChainWork > requiredWork) {
                     // We have enough, clear the parked state.
-                    LogPrintf("Unpark chain up to block %s as it has "
-                              "accumulated enough PoW.\n",
-                              pindexNew->GetBlockHash().ToString());
+                    LogPrint(BCLog::VALIDATION,
+                             "✅ Unparking chain to block %s (sufficient PoW)\n",
+                             pindexNew->GetBlockHash().ToString().substr(0, 16) + "...");
                     fParkedChain = false;
                     UnparkBlock(pindexTest);
                 }
@@ -4493,11 +4493,16 @@ bool CChainState::AcceptBlock(const Config &config,
     // later, during FindMostWorkChain. We mark the block as parked at the very
     // last minute so we can make sure everything is ready to be reorged if
     // needed.
-    if (gArgs.GetBoolArg("-parkdeepreorg", true)) {
+    // 
+    // DISABLED in mock mode - reorgs are expected and normal when nodes sync
+    const bool skipParkProtection = IsMockBlockMode();
+    
+    if (!skipParkProtection && gArgs.GetBoolArg("-parkdeepreorg", true)) {
         const CBlockIndex *pindexFork = m_chain.FindFork(pindex);
         if (pindexFork && pindexFork->nHeight + 1 < m_chain.Height()) {
-            LogPrintf("Park block %s as it would cause a deep reorg.\n",
-                      pindex->GetBlockHash().ToString());
+            LogPrint(BCLog::VALIDATION,
+                     "🅿️ Parking block %s (deep reorg protection)\n",
+                     pindex->GetBlockHash().ToString().substr(0, 16) + "...");
             pindex->nStatus = pindex->nStatus.withParked();
             setDirtyBlockIndex.insert(pindex);
         }

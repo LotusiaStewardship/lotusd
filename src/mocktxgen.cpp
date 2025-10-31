@@ -27,6 +27,7 @@
 // Store keys for mock addresses
 static std::vector<CKey> g_mock_keys;
 static std::vector<CScript> g_mock_scripts;
+static std::map<CScript, CKey> g_script_to_key;
 
 /**
  * Initialize mock addresses (call once)
@@ -45,9 +46,21 @@ static void InitMockAddresses() {
         CPubKey pubkey = key.GetPubKey();
         CScript script = GetScriptForDestination(PKHash(pubkey));
         g_mock_scripts.push_back(script);
+        g_script_to_key[script] = key;
     }
     
-    LogPrint(BCLog::NET, "MockTxGen: Generated 20 mock addresses\n");
+    LogPrint(BCLog::NET, "MockTxGen: Generated 20 mock key pairs\n");
+}
+
+/**
+ * Get a random mock script for coinbase payout
+ */
+CScript GetRandomMockScript() {
+    InitMockAddresses();
+    if (g_mock_scripts.empty()) {
+        return CScript();
+    }
+    return g_mock_scripts[GetRand(g_mock_scripts.size())];
 }
 
 std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHeight) {
@@ -55,13 +68,17 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
     
     std::vector<CTransactionRef> txs;
     
-    // Need at least 100 blocks for coinbase maturity
-    if (currentHeight < 100) {
+    // Need at least 101 blocks for coinbase maturity (100 block maturity + 1)
+    if (currentHeight <= 1100) {
+        LogPrint(BCLog::NET, "MockTxGen: Too early, height %d (need > 1100)\n", currentHeight);
         return txs;
     }
     
     // Find spendable coinbase outputs from mature blocks (100+ blocks old)
     std::vector<COutPoint> spendableCoins;
+    
+    LogPrint(BCLog::NET, "MockTxGen: Searching for spendable coins from blocks %d to %d\n",
+             currentHeight - 200, currentHeight - 101);
     
     {
         LOCK(cs_main);
@@ -150,9 +167,50 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
         mtx.vout[numOutputs - 1].nValue = remaining;
         mtx.vout[numOutputs - 1].scriptPubKey = g_mock_scripts[addrIdx];
         
-        // For mock transactions, use simple script sig (not real signing)
-        // This is a hack - in real mode you'd sign properly
-        mtx.vin[0].scriptSig = CScript() << std::vector<uint8_t>(71, 0) << std::vector<uint8_t>(33, 0);
+        // Get the actual previous transaction and coin info
+        CTransactionRef prevTxRef;
+        Coin prevCoin;
+        CScript scriptPubKey;
+        
+        {
+            LOCK(cs_main);
+            
+            // Get the coin
+            if (!::ChainstateActive().CoinsTip().GetCoin(input, prevCoin)) {
+                LogPrint(BCLog::NET, "MockTxGen: Failed to get prev coin\n");
+                continue;
+            }
+            scriptPubKey = prevCoin.GetTxOut().scriptPubKey;
+            
+            // Get the actual previous transaction from blockchain
+            BlockHash hashBlock;
+            prevTxRef = GetTransaction(nullptr, nullptr, input.GetTxId(), 
+                                      Params().GetConsensus(), hashBlock);
+            if (!prevTxRef) {
+                LogPrint(BCLog::NET, "MockTxGen: Failed to get prev transaction\n");
+                continue;
+            }
+        }
+        
+        // Find the key for this script
+        auto keyIt = g_script_to_key.find(scriptPubKey);
+        if (keyIt == g_script_to_key.end()) {
+            // Not our key - skip
+            LogPrint(BCLog::NET, "MockTxGen: Coin not from our keys, skipping\n");
+            continue;
+        }
+        
+        const CKey& key = keyIt->second;
+        
+        // Create signing provider
+        FillableSigningProvider provider;
+        provider.AddKey(key);
+        
+        // Sign the transaction with the REAL previous transaction
+        if (!SignSignature(provider, *prevTxRef, mtx, 0, SigHashType())) {
+            LogPrint(BCLog::NET, "MockTxGen: Failed to sign transaction\n");
+            continue;
+        }
         
         CTransactionRef tx = MakeTransactionRef(mtx);
         txs.push_back(tx);
