@@ -332,8 +332,72 @@ async function updateHome() {
 setInterval(() => {
     if (currentView === 'home') {
         updateHome();
+    } else if (currentView === 'mempool') {
+        updateMempool();
     }
 }, 3000);
+
+// Mempool functions
+async function showMempool() {
+    currentView = 'mempool';
+    document.getElementById('homeView').style.display = 'none';
+    document.getElementById('mempoolView').style.display = 'block';
+    
+    // Update tab buttons
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-button')[1].classList.add('active');
+    
+    updateMempool();
+}
+
+async function updateMempool() {
+    if (currentView !== 'mempool') return;
+    
+    try {
+        const r = await fetch('/explorer/mempool');
+        const d = await r.json();
+        
+        if (d.error) {
+            document.getElementById('mempoolTxs').innerHTML = 
+                '<tr><td colspan="4" class="error">❌ Error: ' + d.error + '</td></tr>';
+            return;
+        }
+        
+        document.getElementById('mempoolCount').textContent = d.count.toLocaleString();
+        
+        let html = '';
+        if (d.transactions.length === 0) {
+            html = '<tr><td colspan="4" style="text-align: center; padding: 20px;">📭 Mempool is empty</td></tr>';
+        } else {
+            for (const tx of d.transactions) {
+                html += '<tr onclick="showTransaction(\'' + tx.txid + '\')" style="cursor: pointer;">' +
+                    '<td class="block-hash">' + tx.txid + '</td>' +
+                    '<td>' + tx.size + ' bytes</td>' +
+                    '<td>' + tx.fee.toFixed(6) + ' XPI</td>' +
+                    '<td>🕐 ' + formatTime(tx.time) + '</td>' +
+                    '</tr>';
+            }
+        }
+        document.getElementById('mempoolTxs').innerHTML = html;
+    } catch(e) {
+        document.getElementById('mempoolTxs').innerHTML = 
+            '<tr><td colspan="4" class="error">❌ Connection error: ' + e.message + '</td></tr>';
+    }
+}
+
+// Override showHome to update tabs
+const originalShowHome = showHome;
+showHome = function() {
+    currentView = 'home';
+    document.getElementById('homeView').style.display = 'block';
+    document.getElementById('mempoolView').style.display = 'none';
+    
+    // Update tab buttons
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-button')[0].classList.add('active');
+    
+    updateHome();
+};
 
 // Initial load
 showHome();

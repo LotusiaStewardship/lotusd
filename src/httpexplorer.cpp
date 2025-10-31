@@ -23,6 +23,9 @@
 // Include generated explorer resources
 #include <explorer_resources.h>
 
+// Global mempool reference for explorer (set during initialization)
+static CTxMemPool* g_explorer_mempool = nullptr;
+
 // Explorer cache to avoid repeated disk reads
 struct ExplorerCache {
     RecursiveMutex cs_cache;
@@ -241,6 +244,50 @@ static bool explorer_handler(Config &config, HTTPRequest* req, const std::string
         }
     }
     
+    // API: Mempool
+    if (endpoint == "mempool") {
+        try {
+            UniValue result(UniValue::VOBJ);
+            UniValue txs(UniValue::VARR);
+            int count = 0;
+            
+            if (g_explorer_mempool) {
+                LOCK(g_explorer_mempool->cs);
+                count = g_explorer_mempool->size();
+                
+                // Get list of mempool transactions (limit to 100 for performance)
+                int shown = 0;
+                for (const auto& entry : g_explorer_mempool->mapTx) {
+                    if (shown >= 100) break;
+                    
+                    const CTransactionRef& tx = entry.GetSharedTx();
+                    UniValue txObj(UniValue::VOBJ);
+                    txObj.pushKV("txid", tx->GetId().GetHex());
+                    txObj.pushKV("size", (int)tx->GetTotalSize());
+                    txObj.pushKV("fee", (double)(entry.GetFee() / SATOSHI) / (COIN / SATOSHI));
+                    txObj.pushKV("time", (int64_t)entry.GetTime().count());
+                    
+                    txs.push_back(txObj);
+                    shown++;
+                }
+            }
+            
+            result.pushKV("count", count);
+            result.pushKV("transactions", txs);
+            
+            req->WriteHeader("Content-Type", "application/json; charset=utf-8");
+            req->WriteReply(HTTP_OK, result.write());
+            return true;
+        } catch (const std::exception& e) {
+            LogPrintf("Explorer: Exception in mempool handler: %s\n", e.what());
+            UniValue error(UniValue::VOBJ);
+            error.pushKV("error", std::string("Exception: ") + e.what());
+            req->WriteHeader("Content-Type", "application/json; charset=utf-8");
+            req->WriteReply(HTTP_INTERNAL, error.write());
+            return true;
+        }
+    }
+    
     // API: Block details by hash
     if (endpoint.substr(0, 6) == "block/") {
         std::string hashStr = endpoint.substr(6);
@@ -447,10 +494,15 @@ bool InitHTTPExplorer() {
     return true;
 }
 
+void SetExplorerMempool(CTxMemPool* mempool) {
+    g_explorer_mempool = mempool;
+}
+
 void InterruptHTTPExplorer() {
     // Nothing to do
 }
 
 void StopHTTPExplorer() {
+    g_explorer_mempool = nullptr;
     UnregisterHTTPHandler("/explorer/", false);
 }

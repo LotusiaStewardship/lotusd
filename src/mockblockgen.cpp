@@ -43,6 +43,11 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
         return false;
     }
     
+    // Check shutdown before heavy operations
+    if (ShutdownRequested() || !g_mock_block_running) {
+        return false;
+    }
+    
     // Use provided script or pick random from pool
     CScript coinbaseScript = scriptPubKey.empty() ? GetRandomMockScript() : scriptPubKey;
     
@@ -56,9 +61,12 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
 
     CBlock *pblock = &pblocktemplate->block;
     
-    // Update block time
+    // Update block time - minimal lock scope
     {
         LOCK(cs_main);
+        if (!g_mock_chainman || ShutdownRequested()) {
+            return false;
+        }
         UpdateTime(pblock, config.GetChainParams(), g_mock_chainman->ActiveChain().Tip());
     }
     
@@ -94,8 +102,14 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
     pblock->SetSize(GetSerializeSize(*pblock));
     
     // Submit the block (PoW already validated as false above, so it passes)
+    // ProcessNewBlock takes cs_main internally, so don't hold any locks here
     std::shared_ptr<const CBlock> shared_pblock =
         std::make_shared<const CBlock>(*pblock);
+    
+    // One last shutdown check before ProcessNewBlock (which can take time)
+    if (ShutdownRequested() || !g_mock_block_running || !g_mock_chainman) {
+        return false;
+    }
     
     bool fNewBlock = false;
     if (!g_mock_chainman->ProcessNewBlock(config, shared_pblock, 
@@ -186,15 +200,26 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
                 break;
             }
             
-            // Generate 1-13 random transactions for maximum network activity!
+            // Generate random transactions to make blocks interesting
+            // Keep generating until we have at least 10 in mempool!
             if (currentHeight > 100) {
-                int numTxs = 1 + GetRand(13); // 1-13 transactions
-                if (numTxs > 0) {
+                // Check current mempool size
+                int currentMempoolSize = 0;
+                if (g_mock_mempool) {
+                    LOCK(g_mock_mempool->cs);
+                    currentMempoolSize = g_mock_mempool->size();
+                }
+                
+                // Keep generating if mempool is below target
+                if (currentMempoolSize < 10) {
+                    // Generate many more transactions to reach target
+                    // Attempt 30-50 transactions since many will be skipped
+                    int numAttempts = 30 + GetRand(21); // 30-50 attempts
                     LogPrint(BCLog::NET, 
-                             "MockTxGen: Attempting to generate %d transactions at height %d\n",
-                             numTxs, currentHeight);
+                             "MockTxGen: Mempool has %d tx, attempting %d new ones at height %d\n",
+                             currentMempoolSize, numAttempts, currentHeight);
                     
-                    auto txs = GenerateRandomTransactions(numTxs, currentHeight);
+                    auto txs = GenerateRandomTransactions(numAttempts, currentHeight);
                     
                     if (txs.empty()) {
                         LogPrint(BCLog::NET, "MockTxGen: No transactions generated (no spendable coins?)\n");
@@ -219,10 +244,21 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
                             }
                         }
                         
+                        // Get ACTUAL mempool size after adding
+                        int newMempoolSize = 0;
+                        if (g_mock_mempool) {
+                            LOCK(g_mock_mempool->cs);
+                            newMempoolSize = g_mock_mempool->size();
+                        }
+                        
                         if (added > 0) {
-                            LogPrintf("💰 Generated %d random transaction(s)\n", added);
+                            LogPrintf("💰 Generated %d transaction(s) (mempool: %d → %d)\n", 
+                                     added, currentMempoolSize, newMempoolSize);
                         }
                     }
+                } else {
+                    LogPrint(BCLog::NET, "MockTxGen: Mempool has %d tx (target: 10+), skipping generation\n",
+                             currentMempoolSize);
                 }
             }
         } catch (const std::exception &e) {
@@ -312,38 +348,47 @@ void StopMockBlockGenerator() {
     LogPrintf("MockBlockGen: Stopping...\n");
     g_mock_block_running = false;
     
-    // Wait for thread to finish
-    if (g_mock_block_thread) {
-        if (g_mock_block_thread->joinable()) {
-            try {
-                // Set a timeout using a separate thread
-                std::atomic<bool> joined{false};
-                std::thread timeout_thread([&]() {
-                    if (g_mock_block_thread->joinable()) {
-                        g_mock_block_thread->join();
-                        joined = true;
+    // Wait for thread to finish with a simple timeout
+    if (g_mock_block_thread && g_mock_block_thread->joinable()) {
+        try {
+            // Wait up to 3 seconds
+            auto start = std::chrono::steady_clock::now();
+            bool should_detach = false;
+            
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(3)) {
+                // Check if thread is still running
+                if (g_mock_block_running.load() == false) {
+                    // Thread should exit soon, give it a moment
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    
+                    // Try to join with a very short wait
+                    auto join_start = std::chrono::steady_clock::now();
+                    while (g_mock_block_thread->joinable() &&
+                           std::chrono::steady_clock::now() - join_start < std::chrono::milliseconds(500)) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     }
-                });
-                
-                // Wait up to 5 seconds
-                auto start = std::chrono::steady_clock::now();
-                while (!joined && 
-                       std::chrono::steady_clock::now() - start < std::chrono::seconds(5)) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    
+                    if (g_mock_block_thread->joinable()) {
+                        // Still running, try join one more time
+                        continue;
+                    } else {
+                        break;
+                    }
                 }
-                
-                if (joined) {
-                    timeout_thread.join();
-                } else {
-                    LogPrintf("MockBlockGen: Thread timeout, detaching...\n");
-                    timeout_thread.detach();
-                }
-            } catch (const std::exception& e) {
-                LogPrintf("MockBlockGen: Exception during shutdown: %s\n", e.what());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
+            
+            // If thread still joinable after timeout, detach it
+            if (g_mock_block_thread->joinable()) {
+                LogPrintf("MockBlockGen: Thread timeout after 3s, detaching (thread will clean up on exit)\n");
+                g_mock_block_thread->detach();
+            }
+        } catch (const std::exception& e) {
+            LogPrintf("MockBlockGen: Exception during shutdown: %s\n", e.what());
         }
-        g_mock_block_thread.reset();
     }
+    
+    g_mock_block_thread.reset();
     
     // Clear global pointers to avoid dangling references
     g_mock_mempool = nullptr;

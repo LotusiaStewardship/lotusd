@@ -1643,6 +1643,8 @@ static bool AppInitServers(Config &config,
         if (!InitHTTPExplorer()) {
             return false;
         }
+        // Set explorer mempool reference
+        SetExplorerMempool(node.mempool.get());
     }
 
     StartHTTPServer();
