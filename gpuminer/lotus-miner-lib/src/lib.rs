@@ -1,7 +1,7 @@
 mod block;
 pub mod miner;
 pub mod settings;
-mod sha256;
+pub mod sha256;
 pub mod logger;
 pub mod genesis_miner;
 

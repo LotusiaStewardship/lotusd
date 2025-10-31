@@ -229,8 +229,9 @@ async fn run_genesis_mining(settings: ConfigSettings, debug: bool) -> Result<(),
     
     // Get initial timestamp
     let initial_time = get_current_timestamp();
+    use chrono::{TimeZone, Utc};
     info!("🕐 Initial timestamp: {} ({})", initial_time, 
-          chrono::DateTime::from_timestamp(initial_time as i64, 0).unwrap().format("%Y-%m-%d %H:%M:%S UTC"));
+          Utc.timestamp_opt(initial_time as i64, 0).unwrap().format("%Y-%m-%d %H:%M:%S UTC"));
     
     // Create initial genesis block
     let mut genesis_block = create_genesis_block(genesis_bits, initial_time, target);
@@ -266,8 +267,9 @@ async fn run_genesis_mining(settings: ConfigSettings, debug: bool) -> Result<(),
             let new_time = get_current_timestamp();
             update_genesis_timestamp(&mut genesis_block.header, new_time);
             last_timestamp_update = std::time::Instant::now();
+            use chrono::{TimeZone, Utc};
             info!("🕐 Updated timestamp to: {} ({})", new_time,
-                  chrono::DateTime::from_timestamp(new_time as i64, 0).unwrap().format("%Y-%m-%d %H:%M:%S UTC"));
+                  Utc.timestamp_opt(new_time as i64, 0).unwrap().format("%Y-%m-%d %H:%M:%S UTC"));
         }
         
         // Create work from genesis block header
