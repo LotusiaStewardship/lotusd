@@ -262,10 +262,16 @@ fn compute_merkle_root(txs: &[Transaction]) -> [u8; 32] {
     }
     
     // Create leaves: Hash(tx.GetHash() || tx.GetId())
+    // Note: In lotusd, uint256 hashes are serialized in little-endian (reversed from hash output)
     let mut hashes: Vec<[u8; 32]> = txs.iter().map(|tx| {
         let mut leaf_data = Vec::new();
-        leaf_data.extend_from_slice(&tx.get_hash());
-        leaf_data.extend_from_slice(&tx.get_id());
+        // Reverse transaction hashes to match lotusd's uint256 serialization format
+        let mut tx_hash = tx.get_hash();
+        tx_hash.reverse();
+        let mut tx_id = tx.get_id();
+        tx_id.reverse();
+        leaf_data.extend_from_slice(&tx_hash);
+        leaf_data.extend_from_slice(&tx_id);
         
         let hash = Sha256::digest(&Sha256::digest(&leaf_data));
         let mut result = [0u8; 32];
@@ -413,12 +419,16 @@ fn build_genesis_block_header(
     // hashEpochBlock (32 bytes) - all zeros for genesis
     offset += 32;
     
-    // hashMerkleRoot (32 bytes)
-    header[offset..offset + 32].copy_from_slice(&merkle_root);
+    // hashMerkleRoot (32 bytes) - stored as internal bytes (little-endian)
+    let mut merkle_root_bytes = merkle_root;
+    merkle_root_bytes.reverse();  // Convert from hash output (big-endian) to internal format
+    header[offset..offset + 32].copy_from_slice(&merkle_root_bytes);
     offset += 32;
     
-    // hashExtendedMetadata (32 bytes)
-    header[offset..offset + 32].copy_from_slice(&extended_metadata_hash);
+    // hashExtendedMetadata (32 bytes) - stored as internal bytes (little-endian)
+    let mut extended_metadata_bytes = extended_metadata_hash;
+    extended_metadata_bytes.reverse();  // Convert from hash output (big-endian) to internal format
+    header[offset..offset + 32].copy_from_slice(&extended_metadata_bytes);
     
     header
 }
