@@ -3,11 +3,13 @@ pub mod miner;
 pub mod settings;
 mod sha256;
 pub mod logger;
+pub mod genesis_miner;
 
 use eyre::Result;
 pub use miner::Miner;
 pub use settings::ConfigSettings;
 pub use logger::{Log, LogSeverity, HashrateEntry, LoggerConfig, init_global_logger, LogEntry};
+pub use genesis_miner::{create_genesis_block, update_genesis_timestamp, update_genesis_nonce, get_current_timestamp, GenesisBlock};
 
 use std::{
     convert::TryInto,

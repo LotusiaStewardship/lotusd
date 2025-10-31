@@ -50,6 +50,7 @@ pub const FOLDER_DIR: &str = ".lotus-miner";
 pub const DEFAULT_KERNEL_SIZE: i64 = 21;
 pub const DEFAULT_GPU_INDEX: i64 = 0;
 pub const DEFAULT_KERNEL_TYPE: KernelType = KernelType::LotusOG;
+pub const DEFAULT_GENESIS_MINING: bool = false;
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigSettings {
@@ -62,6 +63,8 @@ pub struct ConfigSettings {
     pub gpu_index: i64,
     pub pool_mining: bool,
     pub kernel_type: KernelType,
+    pub genesis_mining: bool,
+    pub genesis_bits: Option<String>,
 }
 
 const DEFAULT_CONFIG_FILE_CONTENT: &str = r#"mine_to_address = "lotus_16PSJMStv9sve3DfhDpiwUCa7RtqkyNBoS8RjFZSt"
@@ -73,6 +76,7 @@ gpu_index = 0
 kernel_size = 23
 pool_mining = false
 kernel_type = "lotus_og"
+genesis_mining = false
 "#;
 
 impl ConfigSettings {
@@ -96,6 +100,7 @@ impl ConfigSettings {
             KernelType::LotusOG => "lotus_og",
             KernelType::POCLBM => "poclbm",
         })?;
+        s.set_default("genesis_mining", DEFAULT_GENESIS_MINING)?;
 
         // Load config from file
         let default_config = home_dir;

@@ -5,7 +5,8 @@ use log::{info, error, debug, LevelFilter};
 use lotus_miner_lib::{
     logger::{LoggerConfig, init_global_logger},
     ConfigSettings, Server,
-    miner::KernelType,
+    miner::{KernelType, Miner, MiningSettings, Work},
+    create_genesis_block, update_genesis_timestamp, update_genesis_nonce, get_current_timestamp,
 };
 use clap::Parser;
 
@@ -85,6 +86,14 @@ struct Cli {
     /// Enable verbose debugging output (shows detailed RPC logs)
     #[clap(long = "debug", help = "Enable verbose debugging output")]
     debug: bool,
+    
+    /// Enable genesis block mining mode (mines a new genesis block with current timestamp)
+    #[clap(long = "genesis", help = "Enable genesis block mining mode")]
+    genesis_mining: bool,
+    
+    /// Difficulty bits for genesis mining (hex format, e.g., 0x1c100000 for testnet)
+    #[clap(long = "genesis-bits", value_name = "bits", help = "Difficulty bits for genesis mining (default: 0x1c100000)")]
+    genesis_bits: Option<String>,
 }
 
 #[tokio::main]
@@ -126,11 +135,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(ref v) = cli.rpc_url { settings.rpc_url = v.clone(); }
     if let Some(ref v) = cli.rpc_user { settings.rpc_user = v.clone(); }
     if cli.pool_mining { settings.pool_mining = true; }
+    if cli.genesis_mining { settings.genesis_mining = true; }
+    if let Some(ref v) = cli.genesis_bits { settings.genesis_bits = Some(v.clone()); }
     if let Some(ref _v) = cli.config {
         // Optionally, reload config from the specified file (not implemented here for brevity)
         // You can add logic to load from a custom config file if needed.
     }
     info!("✅ Configuration loaded successfully");
+    
+    // Check if genesis mining mode is enabled
+    if settings.genesis_mining {
+        info!("🌱 Genesis mining mode enabled!");
+        return run_genesis_mining(settings, cli.debug).await;
+    }
     
     // Add debug logs for configuration settings
     if cli.debug {
@@ -182,4 +199,239 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!("🔄 Shutting down Lotus GPU Miner...");
     Ok(())
+}
+
+/// Genesis mining mode - mines a new genesis block with current timestamp
+async fn run_genesis_mining(settings: ConfigSettings, debug: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    info!("🌱 Starting Genesis Block Mining Mode");
+    info!("═══════════════════════════════════════════════════════════════");
+    info!("📋 Genesis mining will create a new genesis block with:");
+    info!("   - Current timestamp (updated every 30 seconds)");
+    info!("   - Testnet-like difficulty target");
+    info!("   - Identical transaction structure to lotusd");
+    info!("═══════════════════════════════════════════════════════════════");
+    
+    // Parse genesis bits (default to testnet: 0x1c100000)
+    let genesis_bits_str = settings.genesis_bits.as_deref().unwrap_or("0x1c100000");
+    let genesis_bits = if genesis_bits_str.starts_with("0x") || genesis_bits_str.starts_with("0X") {
+        u32::from_str_radix(&genesis_bits_str[2..], 16)
+            .map_err(|e| format!("Invalid genesis bits hex: {}", e))?
+    } else {
+        genesis_bits_str.parse::<u32>()
+            .map_err(|e| format!("Invalid genesis bits: {}", e))?
+    };
+    
+    info!("🎯 Genesis difficulty bits: 0x{:08x}", genesis_bits);
+    
+    // Calculate target from bits (compact format)
+    let target = bits_to_target(genesis_bits);
+    info!("🎯 Target hash: {}", hex::encode(&target));
+    
+    // Get initial timestamp
+    let initial_time = get_current_timestamp();
+    info!("🕐 Initial timestamp: {} ({})", initial_time, 
+          chrono::DateTime::from_timestamp(initial_time as i64, 0).unwrap().format("%Y-%m-%d %H:%M:%S UTC"));
+    
+    // Create initial genesis block
+    let mut genesis_block = create_genesis_block(genesis_bits, initial_time, target);
+    info!("✅ Genesis block structure created (header: {} bytes, body: {} bytes)", 
+          genesis_block.header.len(), genesis_block.body.len());
+    
+    // Setup GPU miner
+    info!("🔧 Initializing GPU miner...");
+    let mining_settings = MiningSettings {
+        local_work_size: 256,
+        inner_iter_size: 16,
+        kernel_size: 1 << settings.kernel_size,
+        sleep: 0,
+        gpu_indices: vec![settings.gpu_index as usize],
+        kernel_type: settings.kernel_type,
+    };
+    
+    let mut miner = Miner::setup(mining_settings.clone())
+        .map_err(|e| format!("Failed to setup miner: {:?}", e))?;
+    
+    info!("✅ GPU miner initialized successfully");
+    info!("🚀 Starting genesis mining...");
+    info!("═══════════════════════════════════════════════════════════════");
+    
+    let start_time = std::time::Instant::now();
+    let mut total_hashes: u64 = 0;
+    let mut last_timestamp_update = std::time::Instant::now();
+    let mut mining_rounds: u64 = 0;
+    
+    loop {
+        // Check if we should update the timestamp (every 30 seconds)
+        if last_timestamp_update.elapsed() > Duration::from_secs(30) {
+            let new_time = get_current_timestamp();
+            update_genesis_timestamp(&mut genesis_block.header, new_time);
+            last_timestamp_update = std::time::Instant::now();
+            info!("🕐 Updated timestamp to: {} ({})", new_time,
+                  chrono::DateTime::from_timestamp(new_time as i64, 0).unwrap().format("%Y-%m-%d %H:%M:%S UTC"));
+        }
+        
+        // Create work from genesis block header
+        let mut work = Work::from_header(genesis_block.header, target);
+        
+        // Generate random nonce base
+        let nonce_base: u64 = rand::random();
+        work.set_big_nonce(nonce_base);
+        
+        mining_rounds += 1;
+        
+        // Log periodic status (every 100 rounds or in debug mode)
+        if debug || mining_rounds % 100 == 0 {
+            let elapsed = start_time.elapsed();
+            let hashrate = if elapsed.as_secs() > 0 {
+                total_hashes as f64 / elapsed.as_secs() as f64
+            } else {
+                0.0
+            };
+            
+            info!("⛏️  Round {}: nonce_base={:#018x}, hashes={}, hashrate={:.2} MH/s, runtime={}s",
+                  mining_rounds, nonce_base, format_number(total_hashes), 
+                  hashrate / 1_000_000.0, elapsed.as_secs());
+        }
+        
+        // Mine on this work
+        match miner.find_nonce(&work, &lotus_miner_lib::Log::new()) {
+            Ok(Some(found_nonce)) => {
+                // Found a solution!
+                info!("═══════════════════════════════════════════════════════════════");
+                info!("🎉 GENESIS BLOCK FOUND!");
+                info!("═══════════════════════════════════════════════════════════════");
+                
+                // Update the header with the winning nonce
+                update_genesis_nonce(&mut genesis_block.header, found_nonce);
+                
+                // Compute the final block hash
+                use lotus_miner_lib::sha256::lotus_hash;
+                let block_hash = lotus_hash(&genesis_block.header);
+                let mut display_hash = block_hash.clone();
+                display_hash.reverse();
+                
+                info!("✨ Winning nonce: {}", found_nonce);
+                info!("🔗 Block hash: {}", hex::encode(&display_hash));
+                info!("🕐 Timestamp: {}", get_timestamp_from_header(&genesis_block.header));
+                info!("⏱️  Mining time: {:.2} seconds", start_time.elapsed().as_secs_f64());
+                info!("💯 Total hashes: {}", format_number(total_hashes + miner.num_nonces_per_search()));
+                info!("═══════════════════════════════════════════════════════════════");
+                info!("📝 Genesis block parameters for chainparams.cpp:");
+                info!("═══════════════════════════════════════════════════════════════");
+                info!("genesis = CreateGenesisBlock(0x{:08x}, {}, {}ull);", 
+                      genesis_bits, get_timestamp_from_header(&genesis_block.header), found_nonce);
+                info!("consensus.hashGenesisBlock = genesis.GetHash();");
+                info!("assert(genesis.GetSize() == {});", 160 + genesis_block.body.len());
+                info!("assert(consensus.hashGenesisBlock ==");
+                info!("       uint256S(\"{}\"));", hex::encode(&display_hash));
+                info!("═══════════════════════════════════════════════════════════════");
+                
+                // Save to file
+                let filename = format!("genesis_block_{}.txt", get_timestamp_from_header(&genesis_block.header));
+                match std::fs::write(&filename, format!(
+                    "Genesis Block Found!\n\
+                     ===================\n\
+                     \n\
+                     Nonce: {}\n\
+                     Timestamp: {}\n\
+                     Bits: 0x{:08x}\n\
+                     Block Hash: {}\n\
+                     Block Size: {}\n\
+                     \n\
+                     C++ Code for chainparams.cpp:\n\
+                     ==============================\n\
+                     genesis = CreateGenesisBlock(0x{:08x}, {}, {}ull);\n\
+                     consensus.hashGenesisBlock = genesis.GetHash();\n\
+                     assert(genesis.GetSize() == {});\n\
+                     assert(consensus.hashGenesisBlock ==\n\
+                            uint256S(\"{}\"));\n\
+                     \n\
+                     Header (hex): {}\n\
+                     Body (hex): {}\n",
+                    found_nonce,
+                    get_timestamp_from_header(&genesis_block.header),
+                    genesis_bits,
+                    hex::encode(&display_hash),
+                    160 + genesis_block.body.len(),
+                    genesis_bits,
+                    get_timestamp_from_header(&genesis_block.header),
+                    found_nonce,
+                    160 + genesis_block.body.len(),
+                    hex::encode(&display_hash),
+                    hex::encode(&genesis_block.header),
+                    hex::encode(&genesis_block.body),
+                )) {
+                    Ok(_) => info!("💾 Genesis block saved to: {}", filename),
+                    Err(e) => error!("❌ Failed to save genesis block: {}", e),
+                }
+                
+                return Ok(());
+            }
+            Ok(None) => {
+                // No solution found in this batch, continue mining
+                total_hashes += miner.num_nonces_per_search();
+            }
+            Err(e) => {
+                error!("❌ Mining error: {:?}", e);
+                return Err(format!("Mining error: {:?}", e).into());
+            }
+        }
+    }
+}
+
+/// Convert compact bits format to full 256-bit target
+fn bits_to_target(bits: u32) -> [u8; 32] {
+    let exponent = (bits >> 24) as usize;
+    let mantissa = bits & 0x00ffffff;
+    
+    let mut target = [0xffu8; 32];
+    
+    if exponent <= 3 {
+        let value = mantissa >> (8 * (3 - exponent));
+        target[29] = (value & 0xff) as u8;
+        target[30] = ((value >> 8) & 0xff) as u8;
+        target[31] = ((value >> 16) & 0xff) as u8;
+    } else {
+        let size = exponent - 3;
+        if size < 32 {
+            // Clear the lower bytes
+            for i in 0..(32 - size) {
+                target[i] = 0;
+            }
+            // Set the mantissa bytes
+            let offset = 32 - size;
+            if offset >= 3 {
+                target[offset - 3] = ((mantissa >> 16) & 0xff) as u8;
+                target[offset - 2] = ((mantissa >> 8) & 0xff) as u8;
+                target[offset - 1] = (mantissa & 0xff) as u8;
+            }
+        }
+    }
+    
+    target
+}
+
+/// Extract timestamp from genesis block header
+fn get_timestamp_from_header(header: &[u8; 160]) -> u64 {
+    let offset = 32 + 4; // After hashPrevBlock and nBits
+    u64::from_le_bytes([
+        header[offset],
+        header[offset + 1],
+        header[offset + 2],
+        header[offset + 3],
+        header[offset + 4],
+        header[offset + 5],
+        0,
+        0,
+    ])
+}
+
+/// Format a number with thousand separators
+fn format_number(value: u64) -> String {
+    let s = value.to_string();
+    let mut chars = s.chars().rev().collect::<Vec<_>>();
+    for i in (3..chars.len()).step_by(4) {
+        chars.insert(i, ',');
+    }
+    chars.into_iter().rev().collect()
 }
