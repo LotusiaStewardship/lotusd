@@ -56,6 +56,7 @@
 #include <script/sigcache.h>
 #include <script/standard.h>
 #include <shutdown.h>
+#include <mockblockgen.h>
 #include <sync.h>
 #include <timedata.h>
 #include <torcontrol.h>
@@ -169,6 +170,7 @@ void Interrupt(NodeContext &node) {
     InterruptREST();
     InterruptTorControl();
     InterruptMapPort();
+    StopMockBlockGenerator();
     if (g_avalanche) {
         // Avalanche needs to be stopped before we interrupt the thread group as
         // the scheduler will stop working then.
@@ -844,6 +846,23 @@ void SetupServerArgs(NodeContext &node) {
                    "Uses the same permissions as -whitebind. Can be specified "
                    "multiple times.",
                    ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg(
+        "-testnetforkheight=<n>",
+        "After reaching this block height, disconnect from peers running "
+        "version 9.x.x or earlier. This allows initial sync from mainnet "
+        "nodes, then isolates to upgraded (10.x.x+) peers for upgrade testing. "
+        "Set to 0 to disable version filtering. Works on both mainnet and "
+        "testnet. (default: 0)",
+        ArgsManager::ALLOW_INT | ArgsManager::NETWORK_ONLY,
+        OptionsCategory::CONNECTION);
+    argsman.AddArg(
+        "-mockblocktime=<n>",
+        "Automatically generate a new block every <n> seconds for testing. "
+        "Requires -testnetforkheight to be set. Use 0 to disable. "
+        "This allows rapid testing of consensus changes without real mining. "
+        "(default: 0)",
+        ArgsManager::ALLOW_INT,
+        OptionsCategory::DEBUG_TEST);
     argsman.AddArg(
         "-maxuploadtarget=<n>",
         strprintf("Tries to keep outbound traffic under the given target (in "
@@ -2000,9 +2019,21 @@ bool AppInitParameterInteraction(Config &config, const ArgsManager &args) {
         nMinimumChainWork =
             UintToArith256(chainparams.GetConsensus().nMinimumChainWork);
     }
-    LogPrintf("Setting nMinimumChainWork=%s\n", nMinimumChainWork.GetHex());
+    
+    // If testnetforkheight is set, disable minimum chain work requirement
+    // to allow syncing to any height for testing purposes
+    const int forkHeight = args.GetArg("-testnetforkheight", 0);
+    if (forkHeight > 0) {
+        nMinimumChainWork = 0;
+        LogPrintf("Fork height testing: Disabled nMinimumChainWork requirement "
+                  "(syncing to height %d)\n", forkHeight);
+    } else {
+        LogPrintf("Setting nMinimumChainWork=%s\n", nMinimumChainWork.GetHex());
+    }
+    
     if (nMinimumChainWork <
-        UintToArith256(chainparams.GetConsensus().nMinimumChainWork)) {
+        UintToArith256(chainparams.GetConsensus().nMinimumChainWork) &&
+        forkHeight == 0) {
         LogPrintf("Warning: nMinimumChainWork set below default value of %s\n",
                   chainparams.GetConsensus().nMinimumChainWork.GetHex());
     }
@@ -2894,6 +2925,64 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
         return false;
     }
 
+    // If testnetforkheight is set and we have blocks above it, warn the user
+    // For large rewinds, it's faster to delete the blockchain and resync
+    int forkHeight = args.GetArg("-testnetforkheight", 0);
+    if (forkHeight > 0) {
+        LOCK(cs_main);
+        CChainState &active_chainstate = ::ChainstateActive();
+        const int currentHeight = active_chainstate.m_chain.Height();
+        
+        if (currentHeight > forkHeight) {
+            const int blocksToRemove = currentHeight - forkHeight;
+            
+            // For small rewinds, we can handle it. For large ones, suggest reindex
+            if (blocksToRemove > 10000) {
+                return InitError(strprintf(
+                    _("Fork height %d is %d blocks below current height %d.\n"
+                      "For such large rewinds, delete your blocks and chainstate directories:\n"
+                      "  rm -rf ~/.lotus/blocks ~/.lotus/chainstate\n"
+                      "Then restart with -testnetforkheight=%d to sync only to that height."),
+                    forkHeight, blocksToRemove, currentHeight, forkHeight));
+            }
+            
+            LogPrintf("Fork height testing: Invalidating %d blocks above height %d...\n",
+                      blocksToRemove, forkHeight);
+            
+            uiInterface.InitMessage(
+                strprintf(_("Invalidating %d blocks above fork height %d..."),
+                          blocksToRemove, forkHeight)
+                    .translated);
+            
+            // Find the block at fork height + 1 (first block to invalidate)
+            CBlockIndex *pindexInvalidate = active_chainstate.m_chain[forkHeight + 1];
+            
+            if (pindexInvalidate) {
+                BlockValidationState state;
+                
+                if (!active_chainstate.InvalidateBlock(config, state, pindexInvalidate)) {
+                    return InitError(strprintf(
+                        _("Failed to invalidate blocks above fork height: %s"),
+                        state.ToString()));
+                }
+                
+                // Activate the best chain at the fork height
+                if (!active_chainstate.ActivateBestChain(config, state, nullptr)) {
+                    return InitError(strprintf(
+                        _("Failed to activate best chain after fork: %s"),
+                        state.ToString()));
+                }
+                
+                LogPrintf("✅ Rewound to height %d (removed %d blocks)\n",
+                          active_chainstate.m_chain.Height(), blocksToRemove);
+            }
+        } else {
+            LogPrintf("Fork height testing: Current chain height %d is at or "
+                      "below fork height %d. No blocks to rewind.\n",
+                      currentHeight, forkHeight);
+        }
+    }
+
     // By default, we use XAddress; this option will make it use the CashAddr
     // format.
     config.SetCashAddrEncoding(args.GetBoolArg("-usecashaddr", false));
@@ -3143,7 +3232,23 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
         return false;
     }
 
-    // Step 13: finished
+    // Step 13: start mock block generator (if enabled)
+    const int mockBlockTime = args.GetArg("-mockblocktime", 0);
+    
+    if (mockBlockTime > 0) {
+        const int mockForkHeight = args.GetArg("-testnetforkheight", 0);
+        if (mockForkHeight <= 0) {
+            return InitError(
+                _("-mockblocktime requires -testnetforkheight to be set"));
+        }
+        
+        // Start mock block generation
+        if (!StartMockBlockGenerator(node, mockBlockTime)) {
+            return InitError(_("Failed to start mock block generator"));
+        }
+    }
+
+    // Step 14: finished
 
     SetRPCWarmupFinished();
     uiInterface.InitMessage(_("Done loading").translated);

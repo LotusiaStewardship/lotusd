@@ -40,6 +40,7 @@
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <validation.h>
+#include <versionfilter.h>
 
 #include <algorithm>
 #include <memory>
@@ -49,6 +50,43 @@
 static constexpr int64_t ORPHAN_TX_EXPIRE_TIME = 20 * 60;
 /** Minimum time between orphan transactions expire time checks in seconds */
 static constexpr int64_t ORPHAN_TX_EXPIRE_INTERVAL = 5 * 60;
+
+/**
+ * Format peer information for human-readable logging
+ * Returns: "lotusd:9.4.4@10.129.0.21 (#0)" or "lotusd:9.4.4 (#0)" if no IP logging
+ */
+static std::string FormatPeerInfo(CNode &node) {
+    std::string version;
+    {
+        LOCK(node.cs_SubVer);
+        // Extract just the version part from user agent like "/lotusd:9.4.4(EB32.0)/"
+        version = node.cleanSubVer;
+        if (version.empty()) {
+            version = "unknown";
+        } else {
+            // Clean up the formatting: remove slashes and extract core version
+            size_t start = version.find("lotusd:");
+            if (start != std::string::npos) {
+                version = version.substr(start);
+                size_t end = version.find('(');
+                if (end != std::string::npos) {
+                    version = version.substr(0, end);
+                }
+                // Remove any remaining slashes
+                version.erase(std::remove(version.begin(), version.end(), '/'), version.end());
+            }
+        }
+    }
+    
+    // Always show IP:port for peer identification
+    std::string result = version;
+    if (node.addr.IsValid()) {
+        result += "@" + node.addr.ToStringIPPort();
+    }
+    result += strprintf(" (#%d)", node.GetId());
+    
+    return result;
+}
 /** How long to cache transactions in mapRelay for normal relay */
 static constexpr auto RELAY_TX_CACHE_TIME = 15min;
 /**
@@ -1258,7 +1296,15 @@ static void FindNextBlocksToDownload(NodeId nodeid, unsigned int count,
         state->pindexBestKnownBlock->nChainWork <
             ::ChainActive().Tip()->nChainWork ||
         state->pindexBestKnownBlock->nChainWork < nMinimumChainWork) {
-        // This peer has nothing interesting.
+        // This peer has nothing interesting - only log once per peer
+        static std::set<NodeId> logged_peers;
+        if (logged_peers.find(nodeid) == logged_peers.end()) {
+            logged_peers.insert(nodeid);
+            LogPrint(BCLog::NET,
+                     "  ℹ Peer has insufficient chain work (height=%d)\n",
+                     state->pindexBestKnownBlock ? 
+                        state->pindexBestKnownBlock->nHeight : -1);
+        }
         return;
     }
 
@@ -1287,6 +1333,15 @@ static void FindNextBlocksToDownload(NodeId nodeid, unsigned int count,
         state->pindexLastCommonBlock->nHeight + BLOCK_DOWNLOAD_WINDOW;
     int nMaxHeight =
         std::min<int>(state->pindexBestKnownBlock->nHeight, nWindowEnd + 1);
+    
+    // If testnetforkheight is set, never download blocks beyond it
+    const int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+    if (forkHeight > 0 && nMaxHeight > forkHeight) {
+        nMaxHeight = forkHeight;
+        LogPrint(BCLog::NET, 
+                 "Fork height limit: Capping block download at height %d\n",
+                 forkHeight);
+    }
     NodeId waitingfor = -1;
     while (pindexWalk->nHeight < nMaxHeight) {
         // Read up to 128 (or more, if more blocks than that are needed)
@@ -2763,6 +2818,39 @@ void PeerManagerImpl::ProcessHeadersMessage(
         // Nothing interesting. Stop asking this peers for more headers.
         return;
     }
+    
+    // If testnetforkheight is set, filter out headers beyond that height
+    const int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+    std::vector<CBlockHeader> filteredHeaders;
+    bool reached_fork_limit = false;
+    
+    if (forkHeight > 0) {
+        for (const auto &header : headers) {
+            // Only process headers at or below fork height
+            if (header.nHeight <= forkHeight) {
+                filteredHeaders.push_back(header);
+            } else {
+                // We've hit headers beyond fork height
+                reached_fork_limit = true;
+                LogPrint(BCLog::NET,
+                         "  ⛔ Filtering header at height %d (beyond fork height %d)\n",
+                         header.nHeight, forkHeight);
+                break;
+            }
+        }
+        
+        // If we filtered everything out, we're completely beyond fork height
+        if (filteredHeaders.empty()) {
+            LogPrintf("✋ All headers beyond fork height %d - header sync complete\n", 
+                      forkHeight);
+            return;
+        }
+        
+        nCount = filteredHeaders.size();
+    }
+    
+    const std::vector<CBlockHeader> &headersToProcess = 
+        forkHeight > 0 ? filteredHeaders : headers;
 
     bool received_new_header = false;
     const CBlockIndex *pindexLast = nullptr;
@@ -2778,7 +2866,7 @@ void PeerManagerImpl::ProcessHeadersMessage(
         // don't connect before giving DoS points
         // - Once a headers message is received that is valid and does connect,
         // nUnconnectingHeaders gets reset back to 0.
-        if (!LookupBlockIndex(headers[0].hashPrevBlock) &&
+        if (!LookupBlockIndex(headersToProcess[0].hashPrevBlock) &&
             nCount < MAX_BLOCKS_TO_ANNOUNCE) {
             nodestate->nUnconnectingHeaders++;
             m_connman.PushMessage(
@@ -2788,15 +2876,13 @@ void PeerManagerImpl::ProcessHeadersMessage(
                               uint256()));
             LogPrint(
                 BCLog::NET,
-                "received header %s: missing prev block %s, sending getheaders "
-                "(%d) to end (peer=%d, nUnconnectingHeaders=%d)\n",
-                headers[0].GetHash().ToString(),
-                headers[0].hashPrevBlock.ToString(), pindexBestHeader->nHeight,
-                pfrom.GetId(), nodestate->nUnconnectingHeaders);
+                "  ⚠ Missing prev block %s, requesting from %s\n",
+                headersToProcess[0].hashPrevBlock.ToString().substr(0, 16) + "...",
+                FormatPeerInfo(pfrom));
             // Set hashLastUnknownBlock for this peer, so that if we eventually
             // get the headers - even from a different peer - we can use this
             // peer to download.
-            UpdateBlockAvailability(pfrom.GetId(), headers.back().GetHash());
+            UpdateBlockAvailability(pfrom.GetId(), headersToProcess.back().GetHash());
 
             if (nodestate->nUnconnectingHeaders % MAX_UNCONNECTING_HEADERS ==
                 0) {
@@ -2809,7 +2895,7 @@ void PeerManagerImpl::ProcessHeadersMessage(
         }
 
         BlockHash hashLastBlock;
-        for (const CBlockHeader &header : headers) {
+        for (const CBlockHeader &header : headersToProcess) {
             if (!hashLastBlock.IsNull() &&
                 header.hashPrevBlock != hashLastBlock) {
                 Misbehaving(pfrom, 20, "non-continuous headers sequence");
@@ -2826,7 +2912,7 @@ void PeerManagerImpl::ProcessHeadersMessage(
     }
 
     BlockValidationState state;
-    if (!m_chainman.ProcessNewBlockHeaders(config, headers, state,
+    if (!m_chainman.ProcessNewBlockHeaders(config, headersToProcess, state,
                                            &pindexLast)) {
         if (state.IsInvalid()) {
             MaybePunishNodeForBlock(pfrom.GetId(), state, via_compact_block,
@@ -2857,20 +2943,37 @@ void PeerManagerImpl::ProcessHeadersMessage(
             nodestate->m_last_block_announcement = GetTime();
         }
 
-        if (nCount == MAX_HEADERS_RESULTS) {
+        // Check if we should request more headers
+        // Don't request if we reached fork limit or if we got a partial batch
+        const bool should_request_more = (nCount == MAX_HEADERS_RESULTS && 
+                                         !reached_fork_limit);
+        
+        if (should_request_more) {
             // Headers message had its maximum size; the peer may have more
             // headers.
             // TODO: optimize: if pindexLast is an ancestor of
             // ::ChainActive().Tip or pindexBestHeader, continue from there
             // instead.
-            LogPrint(
-                BCLog::NET,
-                "more getheaders (%d) to end to peer=%d (startheight:%d)\n",
-                pindexLast->nHeight, pfrom.GetId(), peer.m_starting_height);
+            
+            // Condensed debug logging for header requests
+            static int nLastRequestHeight = 0;
+            const int currentRequestHeight = pindexLast->nHeight;
+            
+            // Only log every 20k headers to reduce spam while keeping info
+            if (currentRequestHeight - nLastRequestHeight >= 20000) {
+                nLastRequestHeight = currentRequestHeight;
+                LogPrint(BCLog::NET,
+                         "  ↓ Requesting headers batch at %d from %s\n",
+                         currentRequestHeight, FormatPeerInfo(pfrom));
+            }
+            
             m_connman.PushMessage(
                 &pfrom, msgMaker.Make(NetMsgType::GETHEADERS,
                                       ::ChainActive().GetLocator(pindexLast),
                                       uint256()));
+        } else if (reached_fork_limit) {
+            LogPrintf("✋ Reached fork height %d at block %d - header sync complete\n", 
+                      forkHeight, pindexLast->nHeight);
         }
 
         bool fCanDirectFetch = CanDirectFetch(m_chainparams.GetConsensus());
@@ -3352,8 +3455,16 @@ void PeerManagerImpl::ProcessMessage(
     const Config &config, CNode &pfrom, const std::string &msg_type,
     CDataStream &vRecv, const std::chrono::microseconds time_received,
     const std::atomic<bool> &interruptMsgProc) {
-    LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d\n",
-             SanitizeString(msg_type), vRecv.size(), pfrom.GetId());
+    // Only log interesting messages, skip spam (headers, ping, pong during sync)
+    const bool is_noisy = (msg_type == NetMsgType::HEADERS || 
+                           msg_type == NetMsgType::PING || 
+                           msg_type == NetMsgType::PONG ||
+                           msg_type == NetMsgType::INV);
+    
+    if (!is_noisy) {
+        LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d\n",
+                 SanitizeString(msg_type), vRecv.size(), pfrom.GetId());
+    }
 
     PeerRef peer = GetPeerRef(pfrom.GetId());
     if (peer == nullptr) {
@@ -3473,6 +3584,23 @@ void PeerManagerImpl::ProcessMessage(
             pfrom.cleanSubVer = cleanSubVer;
         }
         peer->m_starting_height = starting_height;
+
+        // Check if we should disconnect based on client version
+        // This allows initial sync from existing network, then at fork height,
+        // aggressively disconnect from old version peers
+        const bool isTestnet =
+            Params().NetworkIDString() == CBaseChainParams::TESTNET;
+        ClientVersion peerVersion = ParseClientVersion(cleanSubVer);
+        const int currentHeight = m_best_height;
+
+        if (ShouldDisconnectPeerByVersion(peerVersion, currentHeight,
+                                          isTestnet)) {
+            LogPrint(BCLog::NET,
+                     "Disconnecting %s - incompatible version\n",
+                     FormatPeerInfo(pfrom));
+            pfrom.fDisconnect = true;
+            return;
+        }
 
         // set nodes not relaying blocks and tx and not serving (parts) of the
         // historical blockchain as "clients"
@@ -3611,12 +3739,9 @@ void PeerManagerImpl::ProcessMessage(
 
         if (!pfrom.IsInboundConn()) {
             LogPrintf(
-                "New outbound peer connected: version: %d, blocks=%d, "
-                "peer=%d%s (%s)\n",
-                pfrom.nVersion.load(), peer->m_starting_height, pfrom.GetId(),
-                (fLogIPs ? strprintf(", peeraddr=%s", pfrom.addr.ToString())
-                         : ""),
-                pfrom.ConnectionTypeAsString());
+                "🔗 Connected to %s | Height: %d\n",
+                FormatPeerInfo(pfrom),
+                peer->m_starting_height);
         }
 
         if (pfrom.GetCommonVersion() >= SENDHEADERS_VERSION) {
@@ -3768,10 +3893,13 @@ void PeerManagerImpl::ProcessMessage(
         }
         peer->m_addr_processed += num_proc;
         peer->m_addr_rate_limited += num_rate_limit;
-        LogPrint(BCLog::NET,
-                 "Received addr: %u addresses (%u processed, %u rate-limited) "
-                 "from peer=%d\n",
-                 vAddr.size(), num_proc, num_rate_limit, pfrom.GetId());
+        
+        // Only log if significant number of addresses received
+        if (num_proc > 10) {
+            LogPrint(BCLog::NET,
+                     "  📇 Received %u peer addresses from %s\n",
+                     num_proc, FormatPeerInfo(pfrom));
+        }
 
         m_connman.AddNewAddresses(vAddrOk, pfrom.addr, 2 * 60 * 60);
         if (vAddr.size() < 1000) {
@@ -6022,9 +6150,8 @@ bool PeerManagerImpl::SendMessages(const Config &config, CNode *pto) {
 
                 LogPrint(
                     BCLog::NET,
-                    "initial getheaders (%d) to peer=%d (startheight:%d)\n",
-                    pindexStart->nHeight, pto->GetId(),
-                    peer->m_starting_height);
+                    "  → Starting header sync from block %d with %s\n",
+                    pindexStart->nHeight, FormatPeerInfo(*pto));
                 m_connman.PushMessage(
                     pto, msgMaker.Make(NetMsgType::GETHEADERS,
                                        ::ChainActive().GetLocator(pindexStart),
@@ -6502,6 +6629,39 @@ bool PeerManagerImpl::SendMessages(const Config &config, CNode *pto) {
         LOCK(cs_main);
 
         CNodeState &state = *State(pto->GetId());
+        
+        // Check if we've reached fork height and should disconnect this peer
+        const int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+        const int current_height = ::ChainActive().Height();
+        
+        if (forkHeight > 0 && current_height >= forkHeight) {
+            // We're at or past fork height - check peer version
+            const bool isTestnet =
+                Params().NetworkIDString() == CBaseChainParams::TESTNET;
+            
+            std::string peerSubVer;
+            {
+                LOCK(pto->cs_SubVer);
+                peerSubVer = pto->cleanSubVer;
+            }
+            
+            ClientVersion peerVersion = ParseClientVersion(peerSubVer);
+            
+            if (ShouldDisconnectPeerByVersion(peerVersion, current_height, isTestnet)) {
+                // Only log unique disconnections, throttled
+                static std::map<NodeId, int64_t> last_disconnect_log;
+                const int64_t now = GetTimeMillis();
+                
+                if (last_disconnect_log[pto->GetId()] == 0 ||
+                    now - last_disconnect_log[pto->GetId()] > 60000) {  // Once per minute per peer
+                    last_disconnect_log[pto->GetId()] = now;
+                    LogPrintf("🚫 FORK ISOLATION: Disconnecting %s (requires 10.0.0+)\n",
+                              FormatPeerInfo(*pto));
+                }
+                pto->fDisconnect = true;
+                return true;  // Stop processing this peer
+            }
+        }
 
         if (!pto->fClient &&
             ((fFetch && !pto->m_limited_node) ||
@@ -6513,21 +6673,41 @@ bool PeerManagerImpl::SendMessages(const Config &config, CNode *pto) {
                                      MAX_BLOCKS_IN_TRANSIT_PER_PEER -
                                          state.nBlocksInFlight,
                                      vToDownload, staller, consensusParams);
+            
+            // Don't spam logs - block download progress shown in UpdateTip
+            
+            if (!vToDownload.empty()) {
+                // Log first block download batch
+                static bool logged_first_blocks = false;
+                if (!logged_first_blocks) {
+                    LogPrintf("📦 Starting block download from %s\n", 
+                              FormatPeerInfo(*pto));
+                    logged_first_blocks = true;
+                }
+            }
+            
             for (const CBlockIndex *pindex : vToDownload) {
                 vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
                 MarkBlockAsInFlight(config, m_mempool, pto->GetId(),
                                     pindex->GetBlockHash(), consensusParams,
                                     pindex);
-                LogPrint(BCLog::NET, "Requesting block %s (%d) peer=%d\n",
-                         pindex->GetBlockHash().ToString(), pindex->nHeight,
-                         pto->GetId());
+                LogPrint(BCLog::NET, "  ⬇ Requesting block %d from %s\n",
+                         pindex->nHeight, FormatPeerInfo(*pto));
             }
+            
             if (state.nBlocksInFlight == 0 && staller != -1) {
                 if (State(staller)->m_stalling_since == 0us) {
                     State(staller)->m_stalling_since = current_time;
                     LogPrint(BCLog::NET, "Stall started peer=%d\n", staller);
                 }
             }
+        } else {
+            // Debug why blocks aren't being requested
+            LogPrint(BCLog::NET,
+                     "  ⏸ Not requesting blocks: fClient=%d fFetch=%d limited=%d IBD=%d inFlight=%d\n",
+                     pto->fClient, fFetch, pto->m_limited_node,
+                     ::ChainstateActive().IsInitialBlockDownload(),
+                     state.nBlocksInFlight);
         }
     } // release cs_main
 

@@ -578,8 +578,10 @@ add_library(server
 	invrequest.cpp
 	miner.cpp
 	minerfund.cpp
+	mockblockgen.cpp
 	net.cpp
 	net_processing.cpp
+	versionfilter.cpp
 	node/coin.cpp
 	node/coinstats.cpp
 	node/context.cpp
