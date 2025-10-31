@@ -307,12 +307,12 @@ public:
         m_assumed_chain_state_size =
             ChainParamsConstants::TESTNET_ASSUMED_CHAINSTATE_SIZE;
 
-        genesis = CreateGenesisBlock(0x1c100000, 1622919600, 532395334422ull);
+        genesis = CreateGenesisBlock(0x1c100000, 1761895672, 16704268795535989018ull);
         consensus.hashGenesisBlock = genesis.GetHash();
         assert(genesis.GetSize() == 379);
         assert(consensus.hashGenesisBlock ==
-               uint256S("00000000080a6c9633aae9d24b9acda10d7e6b028e7aa714069798"
-                        "d18ca7bad1"));
+               uint256S("00000000fbf23fc4b30ac7688cdeed5e1bebcb4206a9756aa72c5b"
+                        "5148f86733"));
         assert(genesis.hashMerkleRoot ==
                uint256S("37f392d88f70cdada6d366a25a7ef90b6711bf2d6b5ffea4f39727"
                         "dcb90af34c"));
