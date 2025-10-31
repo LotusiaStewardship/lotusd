@@ -65,19 +65,37 @@ static const char* EXPLORER_HTML = R"HTML(
 </html>
 )HTML";
 
-// Handle explorer requests
+// Handle explorer requests  
 static bool explorer_handler(Config &config, HTTPRequest* req, const std::string& path) {
-    std::string endpoint = path.substr(10); // Remove "/explorer/"
+    LogPrint(BCLog::HTTP, "Explorer: Handling request for path='%s'\n", path);
     
-    if (endpoint == "" || endpoint == "index.html") {
+    // The path parameter has "/explorer/" already stripped by http_request_cb
+    // So path is empty for /explorer/, or "api" for /explorer/api
+    std::string endpoint = path;
+    
+    LogPrint(BCLog::HTTP, "Explorer: Endpoint='%s'\n", endpoint);
+    
+    if (endpoint.empty() || endpoint == "index.html") {
+        LogPrint(BCLog::HTTP, "Explorer: Serving HTML page\n");
         req->WriteHeader("Content-Type", "text/html");
         req->WriteReply(HTTP_OK, EXPLORER_HTML);
         return true;
     }
     
     if (endpoint == "api") {
+        LogPrint(BCLog::HTTP, "Explorer: Serving API\n");
         try {
             LOCK(cs_main);
+            
+            // Check if chain is active
+            if (!::ChainActive().Tip()) {
+                UniValue error(UniValue::VOBJ);
+                error.pushKV("error", "Chain not active");
+                req->WriteHeader("Content-Type", "application/json");
+                req->WriteReply(HTTP_OK, error.write());
+                return true;
+            }
+            
             UniValue result(UniValue::VOBJ);
             result.pushKV("height", ::ChainActive().Height());
             result.pushKV("hash", ::ChainActive().Tip()->GetBlockHash().GetHex());
@@ -105,11 +123,16 @@ static bool explorer_handler(Config &config, HTTPRequest* req, const std::string
             req->WriteReply(HTTP_OK, result.write());
             return true;
         } catch (const std::exception& e) {
-            req->WriteReply(HTTP_INTERNAL, e.what());
+            LogPrintf("Explorer: Exception in API handler: %s\n", e.what());
+            UniValue error(UniValue::VOBJ);
+            error.pushKV("error", std::string("Exception: ") + e.what());
+            req->WriteHeader("Content-Type", "application/json");
+            req->WriteReply(HTTP_INTERNAL, error.write());
             return true;
         }
     }
     
+    LogPrint(BCLog::HTTP, "Explorer: Unknown endpoint\n");
     req->WriteReply(HTTP_NOTFOUND, "Not found");
     return true;
 }
