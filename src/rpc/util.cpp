@@ -278,7 +278,7 @@ public:
         return obj;
     }
 
-    UniValue operator()(const TaprootDestination &dest) const {
+    UniValue operator()(const Taproot &dest) const {
         UniValue obj(UniValue::VOBJ);
         obj.pushKV("isscript", false);
         obj.pushKV("istaproot", true);

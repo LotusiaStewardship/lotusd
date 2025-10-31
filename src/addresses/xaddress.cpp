@@ -149,7 +149,7 @@ bool Parse(const CChainParams &params, const std::string &address,
         if (!commitment.IsFullyValid()) {
             return false;
         }
-        retDestination = TaprootDestination(commitment);
+        retDestination = Taproot(commitment);
         return true;
     }
     return false;
@@ -172,7 +172,7 @@ public:
                               SCRIPT_PUB_KEY, ToByteVector(scriptPubKey)));
     }
 
-    std::string operator()(const TaprootDestination &dest) const {
+    std::string operator()(const Taproot &dest) const {
         // For Taproot, we encode just the 33-byte commitment
         std::vector<uint8_t> payload(dest.GetCommitment().begin(),
                                       dest.GetCommitment().end());

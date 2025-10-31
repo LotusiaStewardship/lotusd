@@ -80,7 +80,7 @@ public:
         return cashaddr::Encode(params.CashAddrPrefix(), data);
     }
 
-    std::string operator()(const TaprootDestination &) const {
+    std::string operator()(const Taproot &) const {
         // CashAddr does not support Taproot addresses
         return "";
     }

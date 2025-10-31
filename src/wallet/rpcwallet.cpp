@@ -4399,7 +4399,7 @@ public:
         return obj;
     }
 
-    UniValue operator()(const TaprootDestination &dest) const {
+    UniValue operator()(const Taproot &dest) const {
         UniValue obj(UniValue::VOBJ);
         obj.pushKV("commitment", HexStr(dest.GetCommitment()));
         return obj;

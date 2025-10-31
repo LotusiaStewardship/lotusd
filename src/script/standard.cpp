@@ -196,7 +196,7 @@ bool ExtractDestination(const CScript &scriptPubKey,
         if (!commitment.IsFullyValid()) {
             return false;
         }
-        addressRet = TaprootDestination(commitment);
+        addressRet = Taproot(commitment);
         return true;
     }
     // Multisig txns have more than one address...
@@ -257,7 +257,7 @@ public:
         return CScript() << OP_HASH160 << ToByteVector(scriptID) << OP_EQUAL;
     }
 
-    CScript operator()(const TaprootDestination &taprootDest) const {
+    CScript operator()(const Taproot &taprootDest) const {
         return CScript() << OP_SCRIPTTYPE << OP_1
                          << ToByteVector(taprootDest.GetCommitment());
     }
