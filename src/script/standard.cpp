@@ -130,6 +130,11 @@ TxoutType Solver(const CScript &scriptPubKey,
     // or
     // OP_SCRIPTTYPE OP_1 33 <33-byte commitment> 32 <32-byte state>
     if (IsPayToTaproot(scriptPubKey)) {
+        // Extract the 33-byte commitment
+        std::vector<uint8_t> commitment(
+            scriptPubKey.begin() + 3,  // Skip OP_SCRIPTTYPE, OP_1, and size byte
+            scriptPubKey.begin() + 3 + CPubKey::COMPRESSED_SIZE);
+        vSolutionsRet.push_back(std::move(commitment));
         return TxoutType::TAPROOT;
     }
 
