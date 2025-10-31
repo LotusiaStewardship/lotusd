@@ -29,6 +29,10 @@ static std::vector<CKey> g_mock_keys;
 static std::vector<CScript> g_mock_scripts;
 static std::map<CScript, CKey> g_script_to_key;
 
+// Cache of generated coinbase transactions for signing later
+static std::map<TxId, CTransactionRef> g_coinbase_cache;
+static RecursiveMutex cs_coinbase_cache;
+
 /**
  * Initialize mock addresses (call once)
  */
@@ -61,6 +65,18 @@ CScript GetRandomMockScript() {
         return CScript();
     }
     return g_mock_scripts[GetRand(g_mock_scripts.size())];
+}
+
+void RegisterMockCoinbase(const CTransactionRef& tx) {
+    LOCK(cs_coinbase_cache);
+    g_coinbase_cache[tx->GetId()] = tx;
+    
+    // Keep cache size reasonable - only keep last 200 blocks worth
+    if (g_coinbase_cache.size() > 200) {
+        // Remove oldest entry
+        auto it = g_coinbase_cache.begin();
+        g_coinbase_cache.erase(it);
+    }
 }
 
 std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHeight) {
@@ -98,6 +114,9 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
             if (block.vtx.empty()) continue;
             
             const CTransactionRef& coinbase = block.vtx[0];
+            
+            // Register this coinbase in our cache for future signing
+            RegisterMockCoinbase(coinbase);
             
             // Check if outputs are unspent
             for (size_t i = 0; i < coinbase->vout.size(); i++) {
@@ -167,10 +186,10 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
         mtx.vout[numOutputs - 1].nValue = remaining;
         mtx.vout[numOutputs - 1].scriptPubKey = g_mock_scripts[addrIdx];
         
-        // Get the actual previous transaction and coin info
-        CTransactionRef prevTxRef;
+        // Get the coin and construct a minimal previous transaction for signing
         Coin prevCoin;
         CScript scriptPubKey;
+        CTransactionRef prevTxRef;
         
         {
             LOCK(cs_main);
@@ -181,15 +200,34 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
                 continue;
             }
             scriptPubKey = prevCoin.GetTxOut().scriptPubKey;
-            
-            // Get the actual previous transaction from blockchain
-            BlockHash hashBlock;
-            prevTxRef = GetTransaction(nullptr, nullptr, input.GetTxId(), 
-                                      Params().GetConsensus(), hashBlock);
-            if (!prevTxRef) {
-                LogPrint(BCLog::NET, "MockTxGen: Failed to get prev transaction\n");
-                continue;
+        }
+        
+        // Try to get the previous transaction from our cache
+        {
+            LOCK(cs_coinbase_cache);
+            auto it = g_coinbase_cache.find(input.GetTxId());
+            if (it != g_coinbase_cache.end()) {
+                prevTxRef = it->second;
             }
+        }
+        
+        if (!prevTxRef) {
+            LogPrint(BCLog::NET, "MockTxGen: Prev transaction not in cache (txid=%s)\n",
+                     input.GetTxId().ToString());
+            continue;
+        }
+        
+        // Verify the output exists in the prev tx
+        if (input.GetN() >= prevTxRef->vout.size()) {
+            LogPrint(BCLog::NET, "MockTxGen: Output %d doesn't exist in prev tx (has %d outputs)\n",
+                     input.GetN(), prevTxRef->vout.size());
+            continue;
+        }
+        
+        // Verify the scriptPubKey matches
+        if (prevTxRef->vout[input.GetN()].scriptPubKey != scriptPubKey) {
+            LogPrint(BCLog::NET, "MockTxGen: ScriptPubKey mismatch!\n");
+            continue;
         }
         
         // Find the key for this script
@@ -202,13 +240,33 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
         
         const CKey& key = keyIt->second;
         
+        // Verify key is valid
+        if (!key.IsValid()) {
+            LogPrint(BCLog::NET, "MockTxGen: Invalid key!\n");
+            continue;
+        }
+        
         // Create signing provider
         FillableSigningProvider provider;
         provider.AddKey(key);
         
-        // Sign the transaction with the REAL previous transaction
-        if (!SignSignature(provider, *prevTxRef, mtx, 0, SigHashType())) {
-            LogPrint(BCLog::NET, "MockTxGen: Failed to sign transaction\n");
+        // Prepare spent outputs for Lotus sighash
+        // For Lotus, we need to provide the actual spent output (not the whole prev tx)
+        std::vector<CTxOut> spent_outputs;
+        spent_outputs.push_back(prevTxRef->vout[input.GetN()]);
+        
+        // Create precomputed transaction data with spent outputs
+        const PrecomputedTransactionData txdata(mtx, std::move(spent_outputs));
+        
+        LogPrint(BCLog::NET, "MockTxGen: Attempting to sign input spending %s:%d\n",
+                 input.GetTxId().ToString(), input.GetN());
+        
+        // Sign with SIGHASH_LOTUS | SIGHASH_FORKID | SIGHASH_ALL
+        SigHashType sigHashType = SigHashType().withLotus().withForkId();
+        
+        // Use the PrecomputedTransactionData overload for Lotus signing
+        if (!SignSignature(provider, txdata, mtx, 0, sigHashType)) {
+            LogPrint(BCLog::NET, "MockTxGen: Failed to sign transaction (key issue?)\n");
             continue;
         }
         

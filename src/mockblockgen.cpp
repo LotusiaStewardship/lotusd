@@ -84,6 +84,9 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
     // For simplicity in mock mode, just set the single output
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbase));
     
+    // Register this coinbase in the cache for future transaction signing
+    RegisterMockCoinbase(pblock->vtx[0]);
+    
     // CRITICAL: Recalculate merkle root after modifying coinbase
     pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
     

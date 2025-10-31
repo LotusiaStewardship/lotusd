@@ -22,5 +22,10 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
 class CScript;
 CScript GetRandomMockScript();
 
+/**
+ * Register a coinbase transaction in the cache for later signing
+ */
+void RegisterMockCoinbase(const CTransactionRef& tx);
+
 #endif // BITCOIN_MOCKTXGEN_H
 
