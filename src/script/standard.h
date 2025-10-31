@@ -123,14 +123,40 @@ struct ScriptHash : public BaseHash<uint160> {
     explicit ScriptHash(const CScriptID &script);
 };
 
+struct TaprootDestination {
+private:
+    CPubKey m_commitment;
+
+public:
+    TaprootDestination() : m_commitment() {}
+    explicit TaprootDestination(const CPubKey &commitment)
+        : m_commitment(commitment) {}
+
+    const CPubKey &GetCommitment() const { return m_commitment; }
+
+    bool operator==(const TaprootDestination &other) const noexcept {
+        return m_commitment == other.m_commitment;
+    }
+
+    bool operator!=(const TaprootDestination &other) const noexcept {
+        return !(*this == other);
+    }
+
+    bool operator<(const TaprootDestination &other) const noexcept {
+        return m_commitment < other.m_commitment;
+    }
+};
+
 /**
  * A txout script template with a specific destination. It is either:
  *  * CNoDestination: no destination set
  *  * PKHash: TxoutType::PUBKEYHASH destination (P2PKH)
  *  * ScriptHash: TxoutType::SCRIPTHASH destination (P2SH)
+ *  * TaprootDestination: TxoutType::TAPROOT destination (Taproot)
  *  A CTxDestination is the internal data type encoded in a bitcoin address
  */
-typedef boost::variant<CNoDestination, PKHash, ScriptHash> CTxDestination;
+typedef boost::variant<CNoDestination, PKHash, ScriptHash, TaprootDestination>
+    CTxDestination;
 
 /** Check whether a CTxDestination is a CNoDestination. */
 bool IsValidDestination(const CTxDestination &dest);

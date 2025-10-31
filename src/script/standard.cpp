@@ -192,8 +192,12 @@ bool ExtractDestination(const CScript &scriptPubKey,
         return true;
     }
     if (whichType == TxoutType::TAPROOT) {
-        // Taproot doesn't has destinations for now
-        return false;
+        CPubKey commitment(vSolutions[0]);
+        if (!commitment.IsFullyValid()) {
+            return false;
+        }
+        addressRet = TaprootDestination(commitment);
+        return true;
     }
     // Multisig txns have more than one address...
     return false;
@@ -251,6 +255,11 @@ public:
 
     CScript operator()(const ScriptHash &scriptID) const {
         return CScript() << OP_HASH160 << ToByteVector(scriptID) << OP_EQUAL;
+    }
+
+    CScript operator()(const TaprootDestination &taprootDest) const {
+        return CScript() << OP_SCRIPTTYPE << OP_1
+                         << ToByteVector(taprootDest.GetCommitment());
     }
 };
 } // namespace
