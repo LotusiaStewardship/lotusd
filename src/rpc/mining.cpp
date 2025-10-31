@@ -836,6 +836,8 @@ static RPCHelpMan getblocktemplate() {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid mode");
             }
 
+            const bool isTestnet = chainparams.IsTestChain();
+
             NodeContext &node = EnsureNodeContext(request.context);
             if (!node.connman) {
                 throw JSONRPCError(
@@ -843,12 +845,14 @@ static RPCHelpMan getblocktemplate() {
                     "Error: Peer-to-peer functionality missing or disabled");
             }
 
-            if (node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0) {
+            // Allow mining on testnet even without connections (for private testnets)
+            if (!isTestnet && node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0) {
                 throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED,
                                    "Bitcoin is not connected!");
             }
 
-            if (::ChainstateActive().IsInitialBlockDownload()) {
+            // Allow mining on testnet even during initial block download
+            if (!isTestnet && ::ChainstateActive().IsInitialBlockDownload()) {
                 throw JSONRPCError(
                     RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME
                     " is in initial sync and waiting for blocks...");
@@ -1081,6 +1085,7 @@ static RPCHelpMan getrawunsolvedblock() {
             }
 
             const CChainParams &chainparams = config.GetChainParams();
+            const bool isTestnet = chainparams.IsTestChain();
 
             NodeContext &node = EnsureNodeContext(request.context);
             if (!node.connman) {
@@ -1089,11 +1094,13 @@ static RPCHelpMan getrawunsolvedblock() {
                     "Error: Peer-to-peer functionality missing or disabled");
             }
 
-            if (node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0) {
+            // Allow mining on testnet even without connections (for private testnets)
+            if (!isTestnet && node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0) {
                 throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, "Node is not connected!");
             }
 
-            if (::ChainstateActive().IsInitialBlockDownload()) {
+            // Allow mining on testnet even during initial block download
+            if (!isTestnet && ::ChainstateActive().IsInitialBlockDownload()) {
                 throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, PACKAGE_NAME
                                 " is in initial sync and waiting for blocks...");
             }
