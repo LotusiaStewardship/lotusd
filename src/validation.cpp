@@ -604,9 +604,16 @@ bool MemPoolAccept::PreChecks(ATMPArgs &args, Workspace &ws) {
             strprintf("%d < %d", nModifiedFees, ::minRelayTxFee.GetFee(nSize)));
     }
 
-    const uint32_t extraFlags = fRequireStandardPolicy
-                                    ? STANDARD_SCRIPT_VERIFY_FLAGS
-                                    : MANDATORY_SCRIPT_VERIFY_FLAGS;
+    uint32_t extraFlags = fRequireStandardPolicy
+                              ? STANDARD_SCRIPT_VERIFY_FLAGS
+                              : MANDATORY_SCRIPT_VERIFY_FLAGS;
+
+    // After Second Samuel, we enable Taproot and SIGHASH_LOTUS
+    if (fRequireStandardPolicy &&
+        IsSecondSamuelEnabled(args.m_config.GetChainParams().GetConsensus(),
+                              ::ChainActive().Tip())) {
+        extraFlags &= ~SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS;
+    }
 
     // Validate input scripts against standard script flags.
     const uint32_t scriptVerifyFlags =
