@@ -22,8 +22,9 @@ int CAddrInfo::GetTriedBucket(const uint256 &nKey,
                          .GetCheapHash();
     int tried_bucket = hash2 % ADDRMAN_TRIED_BUCKET_COUNT;
     uint32_t mapped_as = GetMappedAS(asmap);
-    LogPrint(BCLog::NET, "IP %s mapped to AS%i belongs to tried bucket %i\n",
-             ToStringIP(), mapped_as, tried_bucket);
+    // Only log in addrman debug category to reduce spam
+    LogPrint(BCLog::ADDRMAN, "  ✓ %s → tried bucket %i\n",
+             ToStringIP(), tried_bucket);
     return tried_bucket;
 }
 
@@ -39,8 +40,9 @@ int CAddrInfo::GetNewBucket(const uint256 &nKey, const CNetAddr &src,
                          .GetCheapHash();
     int new_bucket = hash2 % ADDRMAN_NEW_BUCKET_COUNT;
     uint32_t mapped_as = GetMappedAS(asmap);
-    LogPrint(BCLog::NET, "IP %s mapped to AS%i belongs to new bucket %i\n",
-             ToStringIP(), mapped_as, new_bucket);
+    // Only log in addrman debug category to reduce spam
+    LogPrint(BCLog::ADDRMAN, "  + %s → new bucket %i\n",
+             ToStringIP(), new_bucket);
     return new_bucket;
 }
 

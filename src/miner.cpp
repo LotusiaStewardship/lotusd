@@ -368,6 +368,9 @@ bool BlockAssembler::TestPackageTransactions(
         if (!ContextualCheckTransaction(chainParams.GetConsensus(), it->GetTx(),
                                         state, nHeight, nLockTimeCutoff,
                                         nMedianTimePast)) {
+            LogPrint(BCLog::NET, "TestPackageTransactions: Tx %s failed: %s\n",
+                    it->GetTx().GetId().ToString().substr(0, 16),
+                    state.ToString());
             return false;
         }
 
@@ -491,6 +494,8 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected,
     CTxMemPool::indexed_transaction_set::index<ancestor_score>::type::iterator
         mi = m_mempool.mapTx.get<ancestor_score>().begin();
     CTxMemPool::txiter iter;
+    
+    LogPrint(BCLog::NET, "addPackageTxs: Starting with %d txs in mempool\n", m_mempool.size());
 
     // Limit the number of attempts to add transactions to the block when it is
     // close to full; this is just a simple heuristic to finish quickly if the
@@ -551,6 +556,8 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected,
             // Don't include this package, but don't stop yet because something
             // else we might consider may have a sufficient fee rate (since txes
             // are ordered by virtualsize feerate, not actual feerate).
+            LogPrint(BCLog::NET, "addPackageTxs: Tx %s rejected - fee too low\n", 
+                    iter->GetTx().GetId().ToString().substr(0, 16));
             if (fUsingModified) {
                 // Since we always look at the best entry in mapModifiedTx, we
                 // must erase failed entries so that we can consider the next
@@ -565,6 +572,8 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected,
         // having an accurate call to
         // GetMaxBlockSigOpsCount(blockSizeWithPackage).
         if (!TestPackage(packageSize, packageSigOps)) {
+            LogPrint(BCLog::NET, "addPackageTxs: Tx %s rejected - failed TestPackage (size=%d, sigops=%d)\n",
+                    iter->GetTx().GetId().ToString().substr(0, 16), packageSize, packageSigOps);
             if (fUsingModified) {
                 // Since we always look at the best entry in mapModifiedTx, we
                 // must erase failed entries so that we can consider the next
@@ -597,6 +606,7 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected,
 
         // Test if all tx's are Final.
         if (!TestPackageTransactions(ancestors)) {
+            LogPrint(BCLog::NET, "addPackageTxs: Package with %d ancestors failed TestPackageTransactions\n", ancestors.size());
             if (fUsingModified) {
                 mapModifiedTx.get<ancestor_score>().erase(modit);
                 failedTx.insert(iter);

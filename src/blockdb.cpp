@@ -2,6 +2,7 @@
 
 #include <blockindex.h>
 #include <clientversion.h>
+#include <mockblockgen.h>
 #include <pow/pow.h>
 #include <primitives/block.h>
 #include <streams.h>
@@ -49,8 +50,10 @@ bool ReadBlockFromDisk(CBlock &block, const FlatFilePos &pos,
                      e.what(), pos.ToString());
     }
 
-    // Check the header
-    if (!CheckProofOfWork(block.GetHash(), block.nBits, params)) {
+    // Check the header (skip in mock block mode)
+    const bool skipPoW = IsMockBlockMode();
+    
+    if (!skipPoW && !CheckProofOfWork(block.GetHash(), block.nBits, params)) {
         return error("ReadBlockFromDisk: Errors in block header at %s",
                      pos.ToString());
     }
