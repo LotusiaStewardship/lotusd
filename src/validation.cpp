@@ -3729,8 +3729,13 @@ static bool CheckBlockHeader(const CBlockHeader &block,
     
     if (!skipPoW && validationOptions.shouldValidatePoW() &&
         !CheckProofOfWork(block.GetHash(), block.nBits, params)) {
+        LogPrint(BCLog::VALIDATION, "PoW check failed for block %s\n", 
+                 block.GetHash().ToString());
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER,
                              "high-hash", "proof of work failed");
+    } else if (skipPoW && validationOptions.shouldValidatePoW()) {
+        LogPrint(BCLog::VALIDATION, "PoW check bypassed (mock mode) for block %s\n",
+                 block.GetHash().ToString());
     }
 
     if (block.nReserved != 0) {

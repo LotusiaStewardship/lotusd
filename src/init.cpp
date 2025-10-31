@@ -56,6 +56,7 @@
 #include <script/sigcache.h>
 #include <script/standard.h>
 #include <shutdown.h>
+#include <httpexplorer.h>
 #include <mockblockgen.h>
 #include <sync.h>
 #include <timedata.h>
@@ -165,6 +166,7 @@ static boost::thread_group threadGroup;
 
 void Interrupt(NodeContext &node) {
     InterruptHTTPServer();
+    InterruptHTTPExplorer();
     InterruptHTTPRPC();
     InterruptRPC();
     InterruptREST();
@@ -204,6 +206,7 @@ void Shutdown(NodeContext &node) {
     }
 
     StopHTTPRPC();
+    StopHTTPExplorer();
     StopREST();
     StopRPC();
     StopHTTPServer();
@@ -863,6 +866,13 @@ void SetupServerArgs(NodeContext &node) {
         "(default: 0)",
         ArgsManager::ALLOW_INT,
         OptionsCategory::DEBUG_TEST);
+    argsman.AddArg(
+        "-explorerport=<port>",
+        "Serve a simple HTTP block explorer on <port>. Provides a basic web "
+        "interface to view blocks and transactions. Uses the same port as RPC "
+        "if not specified separately. Set to 0 to disable. (default: 0)",
+        ArgsManager::ALLOW_INT,
+        OptionsCategory::RPC);
     argsman.AddArg(
         "-maxuploadtarget=<n>",
         strprintf("Tries to keep outbound traffic under the given target (in "
@@ -1619,6 +1629,14 @@ static bool AppInitServers(Config &config,
     }
     if (args.GetBoolArg("-rest", DEFAULT_REST_ENABLE)) {
         StartREST(httpRPCRequestProcessor.context);
+    }
+    
+    // Start block explorer if enabled
+    const int explorerPort = args.GetArg("-explorerport", 0);
+    if (explorerPort > 0 || args.IsArgSet("-explorerport")) {
+        if (!InitHTTPExplorer()) {
+            return false;
+        }
     }
 
     StartHTTPServer();
@@ -2946,35 +2964,45 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                     forkHeight, blocksToRemove, currentHeight, forkHeight));
             }
             
-            LogPrintf("Fork height testing: Invalidating %d blocks above height %d...\n",
-                      blocksToRemove, forkHeight);
+            // If we're in mock mode and only slightly above fork height, just delete the extra blocks
+            // This avoids validation errors on mock blocks during InvalidateBlock
+            const bool inMockMode = args.GetArg("-mockblocktime", 0) > 0;
             
-            uiInterface.InitMessage(
-                strprintf(_("Invalidating %d blocks above fork height %d..."),
-                          blocksToRemove, forkHeight)
-                    .translated);
-            
-            // Find the block at fork height + 1 (first block to invalidate)
-            CBlockIndex *pindexInvalidate = active_chainstate.m_chain[forkHeight + 1];
-            
-            if (pindexInvalidate) {
-                BlockValidationState state;
+            if (inMockMode && blocksToRemove <= 100) {
+                LogPrintf("Mock mode: Skipping rewind of %d blocks (will be regenerated)\n",
+                          blocksToRemove);
+                // Just continue - the mock generator will handle it
+            } else {
+                LogPrintf("Fork height testing: Invalidating %d blocks above height %d...\n",
+                          blocksToRemove, forkHeight);
                 
-                if (!active_chainstate.InvalidateBlock(config, state, pindexInvalidate)) {
-                    return InitError(strprintf(
-                        _("Failed to invalidate blocks above fork height: %s"),
-                        state.ToString()));
+                uiInterface.InitMessage(
+                    strprintf(_("Invalidating %d blocks above fork height %d..."),
+                              blocksToRemove, forkHeight)
+                        .translated);
+                
+                // Find the block at fork height + 1 (first block to invalidate)
+                CBlockIndex *pindexInvalidate = active_chainstate.m_chain[forkHeight + 1];
+                
+                if (pindexInvalidate) {
+                    BlockValidationState state;
+                    
+                    if (!active_chainstate.InvalidateBlock(config, state, pindexInvalidate)) {
+                        return InitError(strprintf(
+                            _("Failed to invalidate blocks above fork height: %s"),
+                            state.ToString()));
+                    }
+                    
+                    // Activate the best chain at the fork height
+                    if (!active_chainstate.ActivateBestChain(config, state, nullptr)) {
+                        return InitError(strprintf(
+                            _("Failed to activate best chain after fork: %s"),
+                            state.ToString()));
+                    }
+                    
+                    LogPrintf("✅ Rewound to height %d (removed %d blocks)\n",
+                              active_chainstate.m_chain.Height(), blocksToRemove);
                 }
-                
-                // Activate the best chain at the fork height
-                if (!active_chainstate.ActivateBestChain(config, state, nullptr)) {
-                    return InitError(strprintf(
-                        _("Failed to activate best chain after fork: %s"),
-                        state.ToString()));
-                }
-                
-                LogPrintf("✅ Rewound to height %d (removed %d blocks)\n",
-                          active_chainstate.m_chain.Height(), blocksToRemove);
             }
         } else {
             LogPrintf("Fork height testing: Current chain height %d is at or "

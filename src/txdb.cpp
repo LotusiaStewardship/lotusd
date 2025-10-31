@@ -7,6 +7,7 @@
 
 #include <blockdb.h>
 #include <chain.h>
+#include <mockblockgen.h>
 #include <node/ui_interface.h>
 #include <pow/pow.h>
 #include <random.h>
@@ -319,7 +320,10 @@ bool CBlockTreeDB::LoadBlockIndexGuts(
         pindexNew->nStatus = diskindex.nStatus;
         pindexNew->nTx = diskindex.nTx;
 
-        if (!CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits,
+        // Skip PoW check in mock block mode (blocks generated for testing)
+        const bool skipPoW = IsMockBlockMode();
+        
+        if (!skipPoW && !CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits,
                               params)) {
             return error("%s: CheckProofOfWork failed: %s", __func__,
                          pindexNew->ToString());

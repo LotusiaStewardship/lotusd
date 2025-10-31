@@ -567,6 +567,7 @@ add_library(server
 	dbwrapper.cpp
 	dnsseeds.cpp
 	flatfile.cpp
+	httpexplorer.cpp
 	httprpc.cpp
 	httpserver.cpp
 	index/base.cpp
