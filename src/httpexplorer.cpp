@@ -6,6 +6,7 @@
 
 #include <blockdb.h>
 #include <chainparams.h>
+#include <core_io.h>
 #include <httpserver.h>
 #include <key_io.h>
 #include <primitives/block.h>
@@ -297,6 +298,10 @@ static bool explorer_handler(Config &config, HTTPRequest* req, const std::string
                     } else {
                         vinObj.pushKV("txid", in.prevout.GetTxId().GetHex());
                         vinObj.pushKV("vout", (int)in.prevout.GetN());
+                        UniValue scriptSig(UniValue::VOBJ);
+                        scriptSig.pushKV("hex", HexStr(in.scriptSig));
+                        scriptSig.pushKV("asm", ScriptToAsmStr(in.scriptSig, true));
+                        vinObj.pushKV("scriptSig", scriptSig);
                     }
                     vins.push_back(vinObj);
                 }
@@ -307,8 +312,8 @@ static bool explorer_handler(Config &config, HTTPRequest* req, const std::string
                     const auto& out = tx->vout[i];
                     UniValue voutObj(UniValue::VOBJ);
                     voutObj.pushKV("n", (int)i);
-                    // Convert to XPI: satoshis -> double with 6 decimals
-                    voutObj.pushKV("value", (double)(out.nValue / SATOSHI) / 1000000.0);
+                    // Convert to XPI properly: amount is in satoshis, COIN = 1,000,000 satoshis
+                    voutObj.pushKV("value", (double)(out.nValue / SATOSHI) / (COIN / SATOSHI));
                     
                     UniValue scriptPubKey(UniValue::VOBJ);
                     scriptPubKey.pushKV("type", GetScriptTypeName(out.scriptPubKey));
@@ -378,6 +383,7 @@ static bool explorer_handler(Config &config, HTTPRequest* req, const std::string
                     vinObj.pushKV("vout", (int)in.prevout.GetN());
                     UniValue scriptSig(UniValue::VOBJ);
                     scriptSig.pushKV("hex", HexStr(in.scriptSig));
+                    scriptSig.pushKV("asm", ScriptToAsmStr(in.scriptSig, true));
                     vinObj.pushKV("scriptSig", scriptSig);
                 }
                 vins.push_back(vinObj);
@@ -389,8 +395,8 @@ static bool explorer_handler(Config &config, HTTPRequest* req, const std::string
                 const auto& out = tx->vout[i];
                 UniValue voutObj(UniValue::VOBJ);
                 voutObj.pushKV("n", (int)i);
-                // Convert to XPI: satoshis -> double with 6 decimals
-                voutObj.pushKV("value", (double)(out.nValue / SATOSHI) / 1000000.0);
+                // Convert to XPI properly: amount is in satoshis, COIN = 1,000,000 satoshis
+                voutObj.pushKV("value", (double)(out.nValue / SATOSHI) / (COIN / SATOSHI));
                 
                 UniValue scriptPubKey(UniValue::VOBJ);
                 scriptPubKey.pushKV("type", GetScriptTypeName(out.scriptPubKey));

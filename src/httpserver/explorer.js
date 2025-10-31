@@ -244,11 +244,11 @@ async function showTransaction(txid) {
                     </div>
                 `;
             } else {
-                const scriptSigHex = input.scriptSig ? input.scriptSig.hex : 'N/A';
+                const scriptSigAsm = input.scriptSig ? (input.scriptSig.asm || input.scriptSig.hex) : 'N/A';
                 html += `
                     <div class="tx-card">
                         <strong>Previous Output:</strong> ${input.txid}:${input.vout}<br>
-                        <strong>ScriptSig:</strong> ${scriptSigHex}
+                        <strong>ScriptSig:</strong> <code style="word-break: break-all; white-space: pre-wrap; font-size: 0.85em;">${scriptSigAsm}</code>
                     </div>
                 `;
             }
