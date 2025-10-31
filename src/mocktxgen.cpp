@@ -19,10 +19,14 @@
 #include <script/signingprovider.h>
 #include <script/standard.h>
 #include <sync.h>
+#include <txmempool.h>
 #include <util/moneystr.h>
 #include <validation.h>
 
 #include <algorithm>
+
+// External mempool reference (from mockblockgen)
+extern CTxMemPool* g_mock_mempool;
 
 // Store keys for mock addresses
 static std::vector<CKey> g_mock_keys;
@@ -32,6 +36,11 @@ static std::map<CScript, CKey> g_script_to_key;
 // Cache of generated coinbase transactions for signing later
 static std::map<TxId, CTransactionRef> g_coinbase_cache;
 static RecursiveMutex cs_coinbase_cache;
+
+// Cache of recently spent outputs to prevent double-spending
+static std::set<COutPoint> g_recently_spent_outputs;
+static RecursiveMutex cs_spent_cache;
+static const size_t MAX_SPENT_CACHE = 50000;
 
 /**
  * Initialize mock addresses (call once)
@@ -67,6 +76,17 @@ CScript GetRandomMockScript() {
     return g_mock_scripts[GetRand(g_mock_scripts.size())];
 }
 
+/**
+ * Get the FIRST script from mock key pool (for consistent coinbase)
+ */
+CScript GetFirstMockScript() {
+    InitMockAddresses();
+    if (g_mock_scripts.empty()) {
+        return CScript();
+    }
+    return g_mock_scripts[0];
+}
+
 void RegisterMockCoinbase(const CTransactionRef& tx) {
     LOCK(cs_coinbase_cache);
     g_coinbase_cache[tx->GetId()] = tx;
@@ -79,29 +99,69 @@ void RegisterMockCoinbase(const CTransactionRef& tx) {
     }
 }
 
+void ClearSpentOutputsCache() {
+    LOCK(cs_spent_cache);
+    LogPrint(BCLog::NET, "MockTxGen: Clearing spent outputs cache (%d entries)\n", 
+             g_recently_spent_outputs.size());
+    g_recently_spent_outputs.clear();
+}
+
 std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHeight) {
     InitMockAddresses();
     
     std::vector<CTransactionRef> txs;
     
-    // Need at least 101 blocks for coinbase maturity (100 block maturity + 1)
-    if (currentHeight <= 1100) {
-        LogPrint(BCLog::NET, "MockTxGen: Too early, height %d (need > 1100)\n", currentHeight);
+    // Get fork height to avoid spending pre-fork coins (they don't have our keys)
+    int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+    if (forkHeight == 0) {
+        LogPrint(BCLog::NET, "MockTxGen: No fork height set\n");
         return txs;
     }
     
-    // Find spendable coinbase outputs from mature blocks (100+ blocks old)
+    // In mock mode, we can spend coinbases immediately (maturity checks are bypassed)
+    // Just need at least 2 blocks after fork (fork block + 1 coinbase to spend)
+    int minHeight = forkHeight + 2;
+    if (currentHeight <= minHeight) {
+        LogPrint(BCLog::NET, "MockTxGen: Too early, height %d (need > %d)\n", currentHeight, minHeight);
+        return txs;
+    }
+    
+    // Find spendable coinbase outputs from recent blocks (no maturity needed in mock mode!)
     std::vector<COutPoint> spendableCoins;
     
-    LogPrint(BCLog::NET, "MockTxGen: Searching for spendable coins from blocks %d to %d\n",
-             currentHeight - 200, currentHeight - 101);
+    // Build set of outpoints already spent in mempool
+    std::set<COutPoint> mempoolSpentCoins;
+    if (g_mock_mempool) {
+        LOCK(g_mock_mempool->cs);
+        for (const auto& entry : g_mock_mempool->mapTx) {
+            const CTransactionRef& tx = entry.GetSharedTx();
+            for (const auto& txin : tx->vin) {
+                mempoolSpentCoins.insert(txin.prevout);
+            }
+        }
+    }
+    
+    // Search for spendable coins from recent coinbases
+    // Only look at blocks AFTER fork height (pre-fork blocks don't have our keys!)
+    // In mock mode, look at last 50 blocks (no maturity requirement)
+    int searchStart = std::max(forkHeight + 1, currentHeight - 50);
+    int searchEnd = currentHeight - 1;  // Can spend coinbase from previous block!
+    
+    if (searchStart > searchEnd) {
+        LogPrint(BCLog::NET, "MockTxGen: No mock blocks yet (fork at %d, height %d)\n", 
+                forkHeight, currentHeight);
+        return txs;
+    }
+    
+    LogPrint(BCLog::NET, "MockTxGen: Searching for spendable coins from blocks %d to %d (%d already in mempool)\n",
+             searchStart, searchEnd, (int)mempoolSpentCoins.size());
     
     {
         LOCK(cs_main);
         CCoinsViewCache& view = ::ChainstateActive().CoinsTip();
         
-        // Look at blocks from 100-200 blocks ago
-        for (int h = currentHeight - 200; h < currentHeight - 100 && h >= 0; h++) {
+        // Look at recent blocks (only after fork height)
+        for (int h = searchStart; h <= searchEnd && h >= 0; h++) {
             CBlockIndex* pindex = ::ChainActive()[h];
             if (!pindex) continue;
             
@@ -121,6 +181,20 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
             // Check if outputs are unspent
             for (size_t i = 0; i < coinbase->vout.size(); i++) {
                 COutPoint outpoint(coinbase->GetId(), i);
+                
+                // Skip if already being spent in mempool
+                if (mempoolSpentCoins.count(outpoint) > 0) {
+                    continue;
+                }
+                
+                // Skip if recently spent by us
+                {
+                    LOCK(cs_spent_cache);
+                    if (g_recently_spent_outputs.count(outpoint) > 0) {
+                        continue;
+                    }
+                }
+                
                 Coin coin;
                 if (view.GetCoin(outpoint, coin) && !coin.IsSpent()) {
                     // Skip OP_RETURN outputs
@@ -133,7 +207,7 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
     }
     
     if (spendableCoins.empty()) {
-        LogPrint(BCLog::NET, "MockTxGen: No spendable coins available yet\n");
+        LogPrint(BCLog::NET, "MockTxGen: No spendable coins available (all in use or spent)\n");
         return txs;
     }
     
@@ -165,8 +239,24 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
         int numOutputs = 1 + GetRand(50);
         mtx.vout.resize(numOutputs);
         
-        // Distribute value randomly
-        Amount remaining = inputValue - 1000 * SATOSHI; // Leave fee
+        // Estimate transaction size for fee calculation
+        // Rough formula: 10 (version/locktime) + 1 (input count) + 148 (per input) + 
+        //                1 (output count) + 34*numOutputs (per output)
+        int estimatedSize = 10 + 1 + 148 + 1 + (34 * numOutputs);
+        
+        // Fee rate: 10 sat/byte (generous for mock testing)
+        int64_t feeAmount = estimatedSize * 10;
+        
+        // Distribute value randomly, leaving fee
+        Amount remaining = inputValue - feeAmount * SATOSHI;
+        
+        // Ensure we have enough value left after fee
+        if (remaining < (1000 * numOutputs * SATOSHI)) {
+            LogPrint(BCLog::NET, "MockTxGen: Input value too low for %d outputs (value=%d, fee=%d)\n",
+                    numOutputs, inputValue / SATOSHI, feeAmount);
+            continue;
+        }
+        
         for (int j = 0; j < numOutputs - 1; j++) {
             int64_t remainingInt = remaining / SATOSHI;
             int64_t shareInt = (remainingInt / (numOutputs - j)) * GetRand(100) / 100;
@@ -270,14 +360,37 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
             continue;
         }
         
+        // Mark this output as spent in our cache
+        {
+            LOCK(cs_spent_cache);
+            g_recently_spent_outputs.insert(input);
+            
+            // Limit cache size
+            if (g_recently_spent_outputs.size() > MAX_SPENT_CACHE) {
+                // Remove oldest entries (simple approach: clear half)
+                auto it = g_recently_spent_outputs.begin();
+                std::advance(it, MAX_SPENT_CACHE / 2);
+                g_recently_spent_outputs.erase(g_recently_spent_outputs.begin(), it);
+            }
+        }
+        
         CTransactionRef tx = MakeTransactionRef(mtx);
         txs.push_back(tx);
         
+        // Calculate actual fee paid
+        Amount totalOut = Amount::zero();
+        for (const auto& out : mtx.vout) {
+            totalOut += out.nValue;
+        }
+        Amount actualFee = inputValue - totalOut;
+        
         LogPrint(BCLog::NET, 
-                 "MockTxGen: Created tx %s: 1 in → %d out, value %s XPI\n",
+                 "MockTxGen: Created tx %s: 1 in → %d out, value %.3f XPI, fee %d sat (~%.1f sat/byte)\n",
                  tx->GetId().ToString().substr(0, 16),
                  numOutputs,
-                 FormatMoney(inputValue - 1000 * SATOSHI));
+                 (double)(totalOut / SATOSHI) / (COIN / SATOSHI),
+                 actualFee / SATOSHI,
+                 (double)(actualFee / SATOSHI) / estimatedSize);
     }
     
     return txs;

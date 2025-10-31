@@ -13,6 +13,7 @@
 #include <consensus/tx_verify.h>
 #include <consensus/validation.h>
 #include <policy/fees.h>
+#include <mockblockgen.h> // For IsMockBlockMode
 #include <policy/policy.h>
 #include <policy/settings.h>
 #include <reverse_iterator.h>
@@ -604,10 +605,17 @@ void CTxMemPool::removeForReorg(const Config &config,
                     assert(!coin.IsSpent());
                 }
 
-                if (coin.IsSpent() ||
-                    (coin.IsCoinBase() &&
-                     int64_t(nMemPoolHeight) - coin.GetHeight() <
-                         COINBASE_MATURITY)) {
+                // Skip coinbase maturity check in mock mode for rapid testing
+                if (coin.IsSpent()) {
+                    LogPrint(BCLog::NET, "removeForReorg: Removing tx %s - input %s is spent\n",
+                            tx.GetId().ToString().substr(0, 16), txin.prevout.ToString());
+                    txToRemove.insert(it);
+                    break;
+                }
+                if (coin.IsCoinBase() && !IsMockBlockMode() &&
+                    int64_t(nMemPoolHeight) - coin.GetHeight() < COINBASE_MATURITY) {
+                    LogPrint(BCLog::NET, "removeForReorg: Removing tx %s - coinbase not mature (height %d vs mempool %d)\n",
+                            tx.GetId().ToString().substr(0, 16), coin.GetHeight(), nMemPoolHeight);
                     txToRemove.insert(it);
                     break;
                 }

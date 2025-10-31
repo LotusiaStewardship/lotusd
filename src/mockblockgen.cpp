@@ -4,6 +4,7 @@
 
 #include <mockblockgen.h>
 
+#include <blockdb.h>
 #include <chainparams.h>
 #include <chain.h>
 #include <config.h>
@@ -30,7 +31,8 @@ static std::unique_ptr<std::thread> g_mock_block_thread;
 static std::atomic<bool> g_mock_block_running{false};
 
 // Store references to components needed for block generation
-static CTxMemPool *g_mock_mempool = nullptr;
+// g_mock_mempool is non-static for external access from mocktxgen
+CTxMemPool *g_mock_mempool = nullptr;
 static ChainstateManager *g_mock_chainman = nullptr;
 
 /**
@@ -48,8 +50,12 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
         return false;
     }
     
-    // Use provided script or pick random from pool
-    CScript coinbaseScript = scriptPubKey.empty() ? GetRandomMockScript() : scriptPubKey;
+    // Use provided script or always use FIRST key in pool for coinbase
+    // (so mocktxgen can always spend it)
+    CScript coinbaseScript = scriptPubKey.empty() ? GetFirstMockScript() : scriptPubKey;
+    
+    LogPrint(BCLog::NET, "MockBlockGen: Using coinbase script: %s\n", 
+            HexStr(coinbaseScript));
     
     std::unique_ptr<CBlockTemplate> pblocktemplate(
         BlockAssembler(config, *g_mock_mempool).CreateNewBlock(coinbaseScript));
@@ -88,6 +94,9 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
     CMutableTransaction coinbase(*pblock->vtx[0]);
     coinbase.vout[1].nValue = totalReward;
     
+    LogPrint(BCLog::NET, "MockBlockGen: Coinbase vout[1] script: %s\n",
+            HexStr(coinbase.vout[1].scriptPubKey));
+    
     // If miner fund is enabled, we need to adjust outputs
     // For simplicity in mock mode, just set the single output
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbase));
@@ -122,6 +131,10 @@ static bool GenerateMockBlock(const Config &config, const CScript &scriptPubKey)
         LogPrint(BCLog::NET, "MockBlockGen: Block was not new\n");
         return false;
     }
+    
+    // Clear spent outputs cache after successful block generation
+    // This allows reuse of outputs that may have been double-booked
+    ClearSpentOutputsCache();
     
     LogPrintf("🎲 Auto-generated block %d | Hash: %s\n",
               pblock->nHeight,
@@ -168,25 +181,146 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
     // Seed random number generator
     std::srand(std::time(nullptr) + GetRand(1000000));
     
-    while (g_mock_block_running && !ShutdownRequested()) {
-        // Randomize timing: interval ±1 second for network consensus
-        // This prevents all nodes from generating at exact same time
-        // Lowest hash wins (normal PoW consensus)
-        const int random_offset = (std::rand() % 3) - 1;  // -1, 0, or +1
-        const int actual_interval = interval_seconds + random_offset;
+    // Generate 150 blocks rapidly at start to bootstrap testnet
+    if (g_mock_chainman) {
+        const int currentHeight = g_mock_chainman->ActiveChain().Height();
+        const int targetHeight = forkHeight + 150;
         
-        LogPrint(BCLog::NET, 
-                 "MockBlockGen: Next block in %d seconds (base: %d, offset: %+d)\n",
-                 actual_interval, interval_seconds, random_offset);
-        
-        // Wait for the randomized interval
-        for (int i = 0; i < actual_interval && g_mock_block_running && 
-             !ShutdownRequested(); ++i) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (currentHeight < targetHeight) {
+            LogPrintf("🚀 MockBlockGen: Bootstrap - generating %d blocks rapidly...\n", 
+                     targetHeight - currentHeight);
+            
+            for (int i = currentHeight; i < targetHeight && g_mock_block_running && !ShutdownRequested(); i++) {
+                CScript coinbaseScript = userProvidedScript.empty() ? GetFirstMockScript() : userProvidedScript;
+                
+                if (!GenerateMockBlock(config, coinbaseScript)) {
+                    LogPrintf("MockBlockGen: Bootstrap failed at block %d\n", i);
+                    break;
+                }
+                
+                // Register coinbase for spending
+                CBlockIndex* pindex = g_mock_chainman->ActiveChain().Tip();
+                if (pindex) {
+                    CBlock block;
+                    if (ReadBlockFromDisk(block, pindex, Params().GetConsensus()) && 
+                        !block.vtx.empty()) {
+                        RegisterMockCoinbase(block.vtx[0]);
+                    }
+                }
+                
+                // Log progress every 25 blocks
+                if ((i - currentHeight + 1) % 25 == 0) {
+                    LogPrintf("🚀 Bootstrap progress: %d/%d blocks\n", 
+                             i - currentHeight + 1, targetHeight - currentHeight);
+                }
+            }
+            
+            LogPrintf("✅ MockBlockGen: Bootstrap complete! Generated %d blocks\n", 
+                     g_mock_chainman->ActiveChain().Height() - currentHeight);
         }
+    }
+    
+    int txGenCounter = 0;
+    
+    while (g_mock_block_running && !ShutdownRequested()) {
+        txGenCounter++;
+        
+        LogPrint(BCLog::NET, "MockBlockGen: Loop iteration %d\n", txGenCounter);
+        
+        // Wait 1 second between iterations
+        std::this_thread::sleep_for(std::chrono::seconds(1));
         
         if (!g_mock_block_running || ShutdownRequested()) {
+            LogPrintf("MockBlockGen: Shutdown requested in main loop\n");
             break;
+        }
+        
+        // Clean up conflicting/invalid mempool transactions every 3 seconds
+        // This keeps the mempool healthy by removing transactions with spent inputs
+        if (txGenCounter % 3 == 1) {
+            LogPrintf("🧹 Running mempool cleanup at counter=%d\n", txGenCounter);
+            
+            if (!g_mock_mempool || !g_mock_chainman) {
+                LogPrintf("🧹 Skipping cleanup: mempool=%p chainman=%p\n", 
+                         (void*)g_mock_mempool, (void*)g_mock_chainman);
+            } else {
+                int removedCount = 0;
+                int totalChecked = 0;
+                {
+                    LOCK(g_mock_mempool->cs);
+                    
+                    // Build set of all inputs being spent in mempool
+                    std::map<COutPoint, TxId> inputToTx;
+                    for (const auto& entry : g_mock_mempool->mapTx) {
+                        const CTransactionRef& tx = entry.GetSharedTx();
+                        for (const auto& txin : tx->vin) {
+                            inputToTx[txin.prevout] = tx->GetId();
+                        }
+                    }
+                    
+                    std::vector<CTransactionRef> toRemove;
+                    
+                    for (const auto& entry : g_mock_mempool->mapTx) {
+                        if (!g_mock_block_running || ShutdownRequested()) break;
+                        
+                        totalChecked++;
+                        const CTransactionRef& tx = entry.GetSharedTx();
+                        
+                        // Check if inputs are still valid
+                        bool shouldRemove = false;
+                        for (const auto& txin : tx->vin) {
+                            // Try to find the coin
+                            Coin coin;
+                            bool found = false;
+                            
+                            {
+                                LOCK(cs_main);
+                                if (!g_mock_chainman) break;
+                                CCoinsViewCache& view = g_mock_chainman->ActiveChainstate().CoinsTip();
+                                found = view.GetCoin(txin.prevout, coin);
+                            }
+                            
+                            if (!found) {
+                                // Input not found or already spent in a block
+                                shouldRemove = true;
+                                LogPrint(BCLog::NET, "MockBlockGen: Tx %s has spent input %s:%d\n",
+                                        tx->GetId().GetHex().substr(0, 16),
+                                        txin.prevout.GetTxId().GetHex().substr(0, 16),
+                                        txin.prevout.GetN());
+                                break;
+                            }
+                            
+                            // Check if input is being spent by another transaction in mempool
+                            // (this catches double-spends within mempool)
+                            auto it = inputToTx.find(txin.prevout);
+                            if (it != inputToTx.end() && it->second != tx->GetId()) {
+                                // This input is being spent by a different tx in mempool - conflict!
+                                shouldRemove = true;
+                                LogPrint(BCLog::NET, "MockBlockGen: Tx %s conflicts with %s in mempool (both spend %s:%d)\n",
+                                        tx->GetId().GetHex().substr(0, 16),
+                                        it->second.GetHex().substr(0, 16),
+                                        txin.prevout.GetTxId().GetHex().substr(0, 16),
+                                        txin.prevout.GetN());
+                                break;
+                            }
+                        }
+                        
+                        if (shouldRemove) {
+                            toRemove.push_back(tx);
+                        }
+                    }
+                    
+                    // Remove conflicting transactions
+                    for (const auto& tx : toRemove) {
+                        if (!g_mock_mempool) break;
+                        g_mock_mempool->removeRecursive(*tx, MemPoolRemovalReason::CONFLICT);
+                        removedCount++;
+                    }
+                }
+                
+                LogPrintf("🧹 Cleaned %d/%d conflicting transaction(s) from mempool\n", 
+                         removedCount, totalChecked);
+            }
         }
         
         // Generate random transactions to make blocks interesting
@@ -201,7 +335,7 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
             }
             
             // Generate random transactions to make blocks interesting
-            // Keep generating until we have at least 10 in mempool!
+            // Keep generating until we have at least 50 in mempool!
             if (currentHeight > 100) {
                 // Check current mempool size
                 int currentMempoolSize = 0;
@@ -211,10 +345,11 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
                 }
                 
                 // Keep generating if mempool is below target
-                if (currentMempoolSize < 10) {
+                const int targetMempoolSize = 50;
+                if (currentMempoolSize < targetMempoolSize) {
                     // Generate many more transactions to reach target
-                    // Attempt 30-50 transactions since many will be skipped
-                    int numAttempts = 30 + GetRand(21); // 30-50 attempts
+                    // Attempt 50-100 transactions since many will be skipped
+                    int numAttempts = 50 + GetRand(51); // 50-100 attempts
                     LogPrint(BCLog::NET, 
                              "MockTxGen: Mempool has %d tx, attempting %d new ones at height %d\n",
                              currentMempoolSize, numAttempts, currentHeight);
@@ -257,41 +392,58 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
                         }
                     }
                 } else {
-                    LogPrint(BCLog::NET, "MockTxGen: Mempool has %d tx (target: 10+), skipping generation\n",
-                             currentMempoolSize);
+                    LogPrint(BCLog::NET, "MockTxGen: Mempool has %d tx (target: %d+), skipping generation\n",
+                             currentMempoolSize, targetMempoolSize);
                 }
             }
         } catch (const std::exception &e) {
             LogPrint(BCLog::NET, "MockTxGen: Exception: %s\n", e.what());
         }
         
-        // Generate a block - normal PoW consensus applies
-        // If another node finds a better (lower) hash first, our block becomes orphan
-        try {
-            const int height_before = g_mock_chainman ? 
-                g_mock_chainman->ActiveChain().Height() : -1;
+        // Generate a block every N seconds (with randomization for consensus)
+        // This allows mempool to accumulate transactions
+        const bool shouldGenerateBlock = (txGenCounter % interval_seconds) == 0;
+        
+        if (shouldGenerateBlock) {
+            // Randomize timing: ±1 second for network consensus
+            // This prevents all nodes from generating at exact same time
+            // Lowest hash wins (normal PoW consensus)
+            const int random_offset = (std::rand() % 3) - 1;  // -1, 0, or +1
             
-            // Use user-provided script if specified, otherwise pick random from pool
-            CScript blockScript = userProvidedScript.empty() ? CScript() : userProvidedScript;
-            
-            // Final safety check before generating
-            if (!g_mock_block_running || ShutdownRequested() || 
-                !g_mock_mempool || !g_mock_chainman) {
-                break;
+            if (random_offset > 0) {
+                std::this_thread::sleep_for(std::chrono::seconds(random_offset));
             }
             
-            if (GenerateMockBlock(config, blockScript)) {
-                const int height_after = g_mock_chainman ?
+            LogPrint(BCLog::NET, 
+                     "MockBlockGen: Generating block (interval: %d, offset: %+d)\n",
+                     interval_seconds, random_offset);
+            
+            try {
+                const int height_before = g_mock_chainman ? 
                     g_mock_chainman->ActiveChain().Height() : -1;
                 
-                // Check if our block was actually added or orphaned
-                if (height_after == height_before) {
-                    LogPrintf("⚠️ Our block was orphaned (another node found better hash)\n");
+                // Use user-provided script if specified, otherwise pick random from pool
+                CScript blockScript = userProvidedScript.empty() ? CScript() : userProvidedScript;
+                
+                // Final safety check before generating
+                if (!g_mock_block_running || ShutdownRequested() || 
+                    !g_mock_mempool || !g_mock_chainman) {
+                    break;
                 }
+                
+                if (GenerateMockBlock(config, blockScript)) {
+                    const int height_after = g_mock_chainman ?
+                        g_mock_chainman->ActiveChain().Height() : -1;
+                    
+                    // Check if our block was actually added or orphaned
+                    if (height_after == height_before) {
+                        LogPrintf("⚠️ Our block was orphaned (another node found better hash)\n");
+                    }
+                }
+            } catch (const std::exception &e) {
+                LogPrintf("MockBlockGen: Exception during block generation: %s\n", 
+                          e.what());
             }
-        } catch (const std::exception &e) {
-            LogPrintf("MockBlockGen: Exception during block generation: %s\n", 
-                      e.what());
         }
     }
     
@@ -348,49 +500,41 @@ void StopMockBlockGenerator() {
     LogPrintf("MockBlockGen: Stopping...\n");
     g_mock_block_running = false;
     
-    // Wait for thread to finish with a simple timeout
-    if (g_mock_block_thread && g_mock_block_thread->joinable()) {
+    // Wait for thread to finish BEFORE clearing pointers
+    if (g_mock_block_thread) {
         try {
-            // Wait up to 3 seconds
-            auto start = std::chrono::steady_clock::now();
-            bool should_detach = false;
-            
-            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(3)) {
-                // Check if thread is still running
-                if (g_mock_block_running.load() == false) {
-                    // Thread should exit soon, give it a moment
+            // If thread is joinable, try to join it with timeout
+            if (g_mock_block_thread->joinable()) {
+                // Give thread up to 3 seconds to finish
+                auto start = std::chrono::steady_clock::now();
+                while (g_mock_block_thread->joinable()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                    
-                    // Try to join with a very short wait
-                    auto join_start = std::chrono::steady_clock::now();
-                    while (g_mock_block_thread->joinable() &&
-                           std::chrono::steady_clock::now() - join_start < std::chrono::milliseconds(500)) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    auto elapsed = std::chrono::steady_clock::now() - start;
+                    if (elapsed > std::chrono::seconds(3)) {
+                        LogPrintf("MockBlockGen: Timeout waiting for thread, detaching...\n");
+                        g_mock_block_thread->detach();
+                        break;
                     }
-                    
-                    if (g_mock_block_thread->joinable()) {
-                        // Still running, try join one more time
-                        continue;
-                    } else {
+                    // Check if thread finished
+                    if (!g_mock_block_running) {
+                        // Give it one more moment
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        if (g_mock_block_thread->joinable()) {
+                            LogPrintf("MockBlockGen: Force joining thread...\n");
+                            g_mock_block_thread->join();
+                        }
                         break;
                     }
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-            
-            // If thread still joinable after timeout, detach it
-            if (g_mock_block_thread->joinable()) {
-                LogPrintf("MockBlockGen: Thread timeout after 3s, detaching (thread will clean up on exit)\n");
-                g_mock_block_thread->detach();
             }
         } catch (const std::exception& e) {
             LogPrintf("MockBlockGen: Exception during shutdown: %s\n", e.what());
         }
+        
+        g_mock_block_thread.reset();
     }
     
-    g_mock_block_thread.reset();
-    
-    // Clear global pointers to avoid dangling references
+    // Clear global pointers AFTER thread is stopped
     g_mock_mempool = nullptr;
     g_mock_chainman = nullptr;
     

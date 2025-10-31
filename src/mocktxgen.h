@@ -23,9 +23,19 @@ class CScript;
 CScript GetRandomMockScript();
 
 /**
+ * Get the FIRST script from mock key pool (for consistent coinbase)
+ */
+CScript GetFirstMockScript();
+
+/**
  * Register a coinbase transaction in the cache for later signing
  */
 void RegisterMockCoinbase(const CTransactionRef& tx);
+
+/**
+ * Clear the spent outputs cache (call after blocks are mined)
+ */
+void ClearSpentOutputsCache();
 
 #endif // BITCOIN_MOCKTXGEN_H
 
