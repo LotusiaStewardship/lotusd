@@ -35,6 +35,9 @@ static std::atomic<bool> g_mock_block_running{false};
 CTxMemPool *g_mock_mempool = nullptr;
 static ChainstateManager *g_mock_chainman = nullptr;
 
+// Dynamic mempool target size (randomized each block)
+static std::atomic<int> g_target_mempool_size{50};
+
 /**
  * Generate a single block with minimal PoW for testing
  * If scriptPubKey is empty, uses a random mock key
@@ -345,7 +348,7 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
                 }
                 
                 // Keep generating if mempool is below target
-                const int targetMempoolSize = 50;
+                const int targetMempoolSize = g_target_mempool_size.load();
                 if (currentMempoolSize < targetMempoolSize) {
                     // Generate many more transactions to reach target
                     // Attempt 50-100 transactions since many will be skipped
@@ -438,6 +441,11 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
                     // Check if our block was actually added or orphaned
                     if (height_after == height_before) {
                         LogPrintf("⚠️ Our block was orphaned (another node found better hash)\n");
+                    } else {
+                        // Randomize target mempool size for next round (33-3333)
+                        int newTarget = 33 + GetRand(3301); // 33 to 3333
+                        g_target_mempool_size.store(newTarget);
+                        LogPrintf("🎯 New mempool target: %d transactions\n", newTarget);
                     }
                 }
             } catch (const std::exception &e) {
