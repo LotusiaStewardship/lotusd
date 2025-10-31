@@ -165,7 +165,6 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
             CBlockIndex* pindex = ::ChainActive()[h];
             if (!pindex) continue;
             
-            // Get the coinbase txid for this block
             CBlock block;
             if (!ReadBlockFromDisk(block, pindex, Params().GetConsensus())) {
                 continue;
@@ -173,33 +172,45 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
             
             if (block.vtx.empty()) continue;
             
+            // Register coinbase for cache
             const CTransactionRef& coinbase = block.vtx[0];
-            
-            // Register this coinbase in our cache for future signing
             RegisterMockCoinbase(coinbase);
             
-            // Check if outputs are unspent
-            for (size_t i = 0; i < coinbase->vout.size(); i++) {
-                COutPoint outpoint(coinbase->GetId(), i);
-                
-                // Skip if already being spent in mempool
-                if (mempoolSpentCoins.count(outpoint) > 0) {
-                    continue;
+            // Check ALL transactions in the block (not just coinbase)
+            for (const CTransactionRef& tx : block.vtx) {
+                // Register all transactions in cache for signing
+                if (tx->GetId() != coinbase->GetId()) {
+                    RegisterMockCoinbase(tx); // Name is misleading, but it works for any tx
                 }
                 
-                // Skip if recently spent by us
-                {
-                    LOCK(cs_spent_cache);
-                    if (g_recently_spent_outputs.count(outpoint) > 0) {
+                for (size_t i = 0; i < tx->vout.size(); i++) {
+                    COutPoint outpoint(tx->GetId(), i);
+                    
+                    // Skip if already being spent in mempool
+                    if (mempoolSpentCoins.count(outpoint) > 0) {
                         continue;
                     }
-                }
-                
-                Coin coin;
-                if (view.GetCoin(outpoint, coin) && !coin.IsSpent()) {
-                    // Skip OP_RETURN outputs
-                    if (!coin.GetTxOut().scriptPubKey.IsUnspendable()) {
-                        spendableCoins.push_back(outpoint);
+                    
+                    // Skip if recently spent by us
+                    {
+                        LOCK(cs_spent_cache);
+                        if (g_recently_spent_outputs.count(outpoint) > 0) {
+                            continue;
+                        }
+                    }
+                    
+                    Coin coin;
+                    if (view.GetCoin(outpoint, coin) && !coin.IsSpent()) {
+                        // Skip OP_RETURN outputs
+                        if (coin.GetTxOut().scriptPubKey.IsUnspendable()) {
+                            continue;
+                        }
+                        
+                        // Check if this output is spendable by our mock keys
+                        const CScript& scriptPubKey = coin.GetTxOut().scriptPubKey;
+                        if (g_script_to_key.find(scriptPubKey) != g_script_to_key.end()) {
+                            spendableCoins.push_back(outpoint);
+                        }
                     }
                 }
             }
