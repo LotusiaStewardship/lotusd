@@ -116,6 +116,32 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript scriptPubKey)
               interval_seconds);
     
     const Config &config = GetConfig();
+    const int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+    
+    // Wait until we reach fork height before generating blocks
+    if (forkHeight > 0) {
+        LogPrintf("MockBlockGen: Waiting for chain to reach fork height %d...\n", 
+                  forkHeight);
+        
+        while (g_mock_block_running && !ShutdownRequested()) {
+            int currentHeight = -1;
+            {
+                LOCK(cs_main);
+                if (g_mock_chainman && g_mock_chainman->ActiveChain().Tip()) {
+                    currentHeight = g_mock_chainman->ActiveChain().Height();
+                }
+            }
+            
+            if (currentHeight >= forkHeight) {
+                LogPrintf("MockBlockGen: Fork height %d reached! Starting block generation...\n",
+                          forkHeight);
+                break;
+            }
+            
+            // Check every second
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
     
     // Seed random number generator
     std::srand(std::time(nullptr) + GetRand(1000000));

@@ -874,6 +874,12 @@ void SetupServerArgs(NodeContext &node) {
         ArgsManager::ALLOW_INT,
         OptionsCategory::RPC);
     argsman.AddArg(
+        "-resettestnet",
+        "Force rewind to testnetforkheight even in mock mode. Use this to "
+        "reset your mock blockchain and start fresh. (default: false)",
+        ArgsManager::ALLOW_BOOL,
+        OptionsCategory::DEBUG_TEST);
+    argsman.AddArg(
         "-maxuploadtarget=<n>",
         strprintf("Tries to keep outbound traffic under the given target (in "
                   "MiB per 24h). Limit does not apply to peers with 'download' "
@@ -2964,12 +2970,13 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                     forkHeight, blocksToRemove, currentHeight, forkHeight));
             }
             
-            // If we're in mock mode and only slightly above fork height, just delete the extra blocks
-            // This avoids validation errors on mock blocks during InvalidateBlock
+            // If we're in mock mode and only slightly above fork height, just skip rewind
+            // unless -resettestnet is specified
             const bool inMockMode = args.GetArg("-mockblocktime", 0) > 0;
+            const bool forceReset = args.GetBoolArg("-resettestnet", false);
             
-            if (inMockMode && blocksToRemove <= 100) {
-                LogPrintf("Mock mode: Skipping rewind of %d blocks (will be regenerated)\n",
+            if (inMockMode && blocksToRemove <= 100 && !forceReset) {
+                LogPrintf("Mock mode: Skipping rewind of %d blocks (use -resettestnet to force)\n",
                           blocksToRemove);
                 // Just continue - the mock generator will handle it
             } else {

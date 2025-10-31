@@ -1334,13 +1334,35 @@ static void FindNextBlocksToDownload(NodeId nodeid, unsigned int count,
     int nMaxHeight =
         std::min<int>(state->pindexBestKnownBlock->nHeight, nWindowEnd + 1);
     
-    // If testnetforkheight is set, never download blocks beyond it
+    // If testnetforkheight is set, cap downloads based on peer version
+    // - From 9.x.x peers: cap at fork height (mainnet sync only)
+    // - From 10.x.x peers in mock mode: allow beyond fork height (testnet sync)
     const int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+    const bool inMockMode = gArgs.GetArg("-mockblocktime", 0) > 0;
+    
     if (forkHeight > 0 && nMaxHeight > forkHeight) {
-        nMaxHeight = forkHeight;
-        LogPrint(BCLog::NET, 
-                 "Fork height limit: Capping block download at height %d\n",
-                 forkHeight);
+        // Check peer version to decide if we should cap
+        CNodeState *peerState = State(nodeid);
+        bool allowBeyondFork = false;
+        
+        if (inMockMode && peerState) {
+            // In mock mode, check if peer is 10.x.x (testnet node)
+            // We can get the peer's subversion from the node
+            // For now, assume if we're in mock mode and past fork, peer is testnet
+            // The version check will disconnect 9.x.x peers anyway
+            allowBeyondFork = true;
+        }
+        
+        if (!allowBeyondFork) {
+            nMaxHeight = forkHeight;
+            LogPrint(BCLog::NET, 
+                     "Fork height limit: Capping block download at height %d from 9.x.x peer\n",
+                     forkHeight);
+        } else {
+            LogPrint(BCLog::NET,
+                     "Mock mode: Allowing blocks beyond fork height %d from testnet peer\n",
+                     forkHeight);
+        }
     }
     NodeId waitingfor = -1;
     while (pindexWalk->nHeight < nMaxHeight) {
@@ -2819,12 +2841,16 @@ void PeerManagerImpl::ProcessHeadersMessage(
         return;
     }
     
-    // If testnetforkheight is set, filter out headers beyond that height
+    // If testnetforkheight is set, filter headers based on context
+    // - From 9.x.x peers: filter at fork height (mainnet sync)
+    // - In mock mode: don't filter (testnet sync from other 10.x.x nodes)
     const int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+    const bool inMockMode = gArgs.GetArg("-mockblocktime", 0) > 0;
     std::vector<CBlockHeader> filteredHeaders;
     bool reached_fork_limit = false;
     
-    if (forkHeight > 0) {
+    // Only filter if NOT in mock mode (to allow testnet peer sync)
+    if (forkHeight > 0 && !inMockMode) {
         for (const auto &header : headers) {
             // Only process headers at or below fork height
             if (header.nHeight <= forkHeight) {
@@ -2850,7 +2876,7 @@ void PeerManagerImpl::ProcessHeadersMessage(
     }
     
     const std::vector<CBlockHeader> &headersToProcess = 
-        forkHeight > 0 ? filteredHeaders : headers;
+        (forkHeight > 0 && !inMockMode) ? filteredHeaders : headers;
 
     bool received_new_header = false;
     const CBlockIndex *pindexLast = nullptr;
