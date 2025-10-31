@@ -307,18 +307,15 @@ public:
         m_assumed_chain_state_size =
             ChainParamsConstants::TESTNET_ASSUMED_CHAINSTATE_SIZE;
 
-        genesis = CreateGenesisBlock(0x1c100000, 1761895672, 16704268795535989018ull);
+        genesis = CreateGenesisBlock(0x1c100000, 1761897416, 5806276906627559174ull);
         consensus.hashGenesisBlock = genesis.GetHash();
         assert(genesis.GetSize() == 379);
         assert(consensus.hashGenesisBlock ==
-               uint256S("00000000fbf23fc4b30ac7688cdeed5e1bebcb4206a9756aa72c5b"
-                        "5148f86733"));
+                uint256S("0000000023f15634c841794cbed32336b50eea49c243d76cce6e5cccba239245"));
         assert(genesis.hashMerkleRoot ==
-               uint256S("37f392d88f70cdada6d366a25a7ef90b6711bf2d6b5ffea4f39727"
-                        "dcb90af34c"));
+                uint256S("b53892251f0500fdd915440ee19e59c0a5f29412a9718f85f4b4a45a6b73a4d4"));
         assert(genesis.hashExtendedMetadata ==
-               uint256S("9a538906e6466ebd2617d321f71bc94e56056ce213d366773699e2"
-                        "8158e00614"));
+                uint256S("9a538906e6466ebd2617d321f71bc94e56056ce213d366773699e28158e00614"));
 
         vFixedSeeds.clear();
         vSeeds.clear();
