@@ -1033,6 +1033,12 @@ static void CheckForkWarningConditions() EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
     if (::ChainstateActive().IsInitialBlockDownload()) {
         return;
     }
+    
+    // In mock mode, forks are expected (multiple nodes generating blocks)
+    // Don't warn about them
+    if (IsMockBlockMode()) {
+        return;
+    }
 
     // If our best fork is no longer within 72 blocks (+/- 12 hours if no one
     // mines it) of our head, drop it

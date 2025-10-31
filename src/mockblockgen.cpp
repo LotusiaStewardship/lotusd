@@ -12,6 +12,7 @@
 #include <key_io.h>
 #include <logging.h>
 #include <miner.h>
+#include <mocktxgen.h>
 #include <node/context.h>
 #include <pow/pow.h>
 #include <random.h>
@@ -165,6 +166,40 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript scriptPubKey)
         
         if (!g_mock_block_running || ShutdownRequested()) {
             break;
+        }
+        
+        // Generate random transactions to make blocks interesting
+        try {
+            const int currentHeight = g_mock_chainman ? 
+                g_mock_chainman->ActiveChain().Height() : 0;
+            
+            // Generate 0-10 random transactions
+            if (currentHeight > 100) {
+                int numTxs = GetRand(11); // 0-10 txs
+                if (numTxs > 0) {
+                    auto txs = GenerateRandomTransactions(numTxs, currentHeight);
+                    
+                    // Add to mempool
+                    if (g_mock_mempool && !txs.empty()) {
+                        LOCK(g_mock_mempool->cs);
+                        for (const auto& tx : txs) {
+                            TxValidationState state;
+                            bool missing_inputs = false;
+                            if (AcceptToMemoryPool(GetConfig(), *g_mock_mempool, state, tx,
+                                                  &missing_inputs,
+                                                  false /* bypass_limits */,
+                                                  nullptr /* nAbsurdFee */)) {
+                                LogPrint(BCLog::NET, "MockTxGen: Added tx to mempool\n");
+                            } else {
+                                LogPrint(BCLog::NET, "MockTxGen: Failed to add tx: %s\n",
+                                        state.ToString());
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception &e) {
+            LogPrint(BCLog::NET, "MockTxGen: Failed to generate txs: %s\n", e.what());
         }
         
         // Generate a block - normal PoW consensus applies

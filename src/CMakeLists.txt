@@ -580,6 +580,7 @@ add_library(server
 	miner.cpp
 	minerfund.cpp
 	mockblockgen.cpp
+	mocktxgen.cpp
 	net.cpp
 	net_processing.cpp
 	versionfilter.cpp
