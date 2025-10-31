@@ -161,8 +161,8 @@ std::vector<CTransactionRef> GenerateRandomTransactions(int count, int currentHe
         mtx.vin.resize(1);
         mtx.vin[0].prevout = input;
         
-        // Random number of outputs (1-5)
-        int numOutputs = 1 + GetRand(4);
+        // Random number of outputs (1-50 for maximum chaos!)
+        int numOutputs = 1 + GetRand(50);
         mtx.vout.resize(numOutputs);
         
         // Distribute value randomly

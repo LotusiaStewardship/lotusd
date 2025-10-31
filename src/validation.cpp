@@ -2270,11 +2270,36 @@ static void UpdateTip(CTxMemPool &mempool, const CChainParams &params,
                   FormatISO8601Date(blockTime),
                   timeBehindStr);
     } else if (is_synced) {
-        // Fully synced - show new blocks
-        LogPrintf("✅ Block %d | %s | %s\n",
+        // Fully synced - show new blocks with detailed transaction info
+        // Load block to get transaction details
+        CBlock block;
+        int numTxs = 0;
+        int totalInputs = 0;
+        int totalOutputs = 0;
+        
+        if (ReadBlockFromDisk(block, pindexNew, params.GetConsensus())) {
+            numTxs = block.vtx.size();
+            for (const auto& tx : block.vtx) {
+                totalInputs += tx->vin.size();
+                totalOutputs += tx->vout.size();
+            }
+        }
+        
+        // Format date in human-readable form: "2025-10-31 13:55:40"
+        std::string humanDate = FormatISO8601DateTime(blockTime);
+        // Remove the 'T' and 'Z' for better readability
+        std::replace(humanDate.begin(), humanDate.end(), 'T', ' ');
+        if (!humanDate.empty() && humanDate.back() == 'Z') {
+            humanDate.pop_back();
+        }
+        
+        LogPrintf("✅ Block %d | %s | %s | %d tx (%d in, %d out)\n",
                   pindexNew->nHeight,
                   pindexNew->GetBlockHash().ToString().substr(0, 16) + "...",
-                  FormatISO8601DateTime(blockTime));
+                  humanDate,
+                  numTxs,
+                  totalInputs,
+                  totalOutputs);
     } else {
         // Syncing - show progress
         const double cacheSize = ::ChainstateActive().CoinsTip().DynamicMemoryUsage() * (1.0 / (1 << 20));

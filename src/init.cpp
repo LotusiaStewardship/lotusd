@@ -2978,6 +2978,27 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
             if (inMockMode && blocksToRemove <= 100 && !forceReset) {
                 LogPrintf("Mock mode: Skipping rewind of %d blocks (use -resettestnet to force)\n",
                           blocksToRemove);
+                
+                // Clear any "invalid" flags on mock blocks above fork height
+                // This happens when blocks were marked invalid during a previous rewind
+                LogPrintf("Mock mode: Clearing invalid flags on blocks above fork height...\n");
+                for (int h = forkHeight + 1; h <= currentHeight; h++) {
+                    CBlockIndex *pindex = active_chainstate.m_chain[h];
+                    if (pindex && pindex->nStatus.isInvalid()) {
+                        BlockValidationState state;
+                        active_chainstate.ResetBlockFailureFlags(pindex);
+                        LogPrint(BCLog::VALIDATION, 
+                                "Mock mode: Cleared invalid flag on block %d\n", h);
+                    }
+                }
+                
+                // Reactivate best chain to incorporate the cleared blocks
+                BlockValidationState state;
+                if (!active_chainstate.ActivateBestChain(config, state, nullptr)) {
+                    LogPrintf("Warning: Failed to activate best chain after clearing flags: %s\n",
+                             state.ToString());
+                }
+                
                 // Just continue - the mock generator will handle it
             } else {
                 LogPrintf("Fork height testing: Invalidating %d blocks above height %d...\n",

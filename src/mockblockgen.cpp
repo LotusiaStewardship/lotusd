@@ -180,9 +180,15 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
             const int currentHeight = g_mock_chainman ? 
                 g_mock_chainman->ActiveChain().Height() : 0;
             
-            // Generate 0-5 random transactions (reduced to avoid mempool issues)
+            // Safety check for shutdown
+            if (!g_mock_block_running || ShutdownRequested() || 
+                !g_mock_mempool || !g_mock_chainman) {
+                break;
+            }
+            
+            // Generate 1-13 random transactions for maximum network activity!
             if (currentHeight > 100) {
-                int numTxs = GetRand(6); // 0-5 txs
+                int numTxs = 1 + GetRand(13); // 1-13 transactions
                 if (numTxs > 0) {
                     LogPrint(BCLog::NET, 
                              "MockTxGen: Attempting to generate %d transactions at height %d\n",
@@ -231,6 +237,12 @@ static void MockBlockGeneratorThread(int interval_seconds, CScript userProvidedS
             
             // Use user-provided script if specified, otherwise pick random from pool
             CScript blockScript = userProvidedScript.empty() ? CScript() : userProvidedScript;
+            
+            // Final safety check before generating
+            if (!g_mock_block_running || ShutdownRequested() || 
+                !g_mock_mempool || !g_mock_chainman) {
+                break;
+            }
             
             if (GenerateMockBlock(config, blockScript)) {
                 const int height_after = g_mock_chainman ?
@@ -293,34 +305,50 @@ bool StartMockBlockGenerator(NodeContext &node, int block_interval_seconds) {
 }
 
 void StopMockBlockGenerator() {
-    if (!g_mock_block_running) {
+    if (!g_mock_block_running && !g_mock_block_thread) {
         return;
     }
     
     LogPrintf("MockBlockGen: Stopping...\n");
     g_mock_block_running = false;
     
-    // Give thread 5 seconds to stop gracefully
-    if (g_mock_block_thread && g_mock_block_thread->joinable()) {
-        // Use detach if join hangs - thread will clean up on its own
-        auto start = std::chrono::steady_clock::now();
-        while (g_mock_block_thread->joinable()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            auto elapsed = std::chrono::steady_clock::now() - start;
-            if (elapsed > std::chrono::seconds(3)) {
-                LogPrintf("MockBlockGen: Thread not responding, detaching...\n");
-                g_mock_block_thread->detach();
-                break;
-            }
-            // Try to join
-            if (g_mock_block_running == false) {
-                g_mock_block_thread->join();
-                break;
+    // Wait for thread to finish
+    if (g_mock_block_thread) {
+        if (g_mock_block_thread->joinable()) {
+            try {
+                // Set a timeout using a separate thread
+                std::atomic<bool> joined{false};
+                std::thread timeout_thread([&]() {
+                    if (g_mock_block_thread->joinable()) {
+                        g_mock_block_thread->join();
+                        joined = true;
+                    }
+                });
+                
+                // Wait up to 5 seconds
+                auto start = std::chrono::steady_clock::now();
+                while (!joined && 
+                       std::chrono::steady_clock::now() - start < std::chrono::seconds(5)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                
+                if (joined) {
+                    timeout_thread.join();
+                } else {
+                    LogPrintf("MockBlockGen: Thread timeout, detaching...\n");
+                    timeout_thread.detach();
+                }
+            } catch (const std::exception& e) {
+                LogPrintf("MockBlockGen: Exception during shutdown: %s\n", e.what());
             }
         }
+        g_mock_block_thread.reset();
     }
     
-    g_mock_block_thread.reset();
+    // Clear global pointers to avoid dangling references
+    g_mock_mempool = nullptr;
+    g_mock_chainman = nullptr;
+    
     LogPrintf("MockBlockGen: Stopped\n");
 }
 
