@@ -34,6 +34,7 @@
 #include <pow/pow.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
+#include <protocol.h>
 #include <random.h>
 #include <reverse_iterator.h>
 #include <script/script.h>
@@ -2251,6 +2252,7 @@ static void UpdateTip(CTxMemPool &mempool, const CChainParams &params,
             LogPrintf("Testnet: Forcing exit from initial block download at height %d\n",
                       pindexNew->nHeight);
             chainstate.ForceExitIBD();
+            SetServiceFlagsIBDCache(true);
         }
     }
 }
