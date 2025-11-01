@@ -1006,6 +1006,10 @@ bool CChainState::IsInitialBlockDownload() const {
     return false;
 }
 
+void CChainState::ForceExitIBD() {
+    m_cached_finished_ibd.store(true, std::memory_order_relaxed);
+}
+
 static CBlockIndex const *pindexBestForkTip = nullptr;
 static CBlockIndex const *pindexBestForkBase = nullptr;
 
@@ -2243,10 +2247,10 @@ static void UpdateTip(CTxMemPool &mempool, const CChainParams &params,
     // This allows private testnets to start serving headers and operating normally
     if (params.IsTestChain() && pindexNew->nHeight > 0) {
         CChainState &chainstate = ::ChainstateActive();
-        if (!chainstate.m_cached_finished_ibd.load(std::memory_order_relaxed)) {
+        if (chainstate.IsInitialBlockDownload()) {
             LogPrintf("Testnet: Forcing exit from initial block download at height %d\n",
                       pindexNew->nHeight);
-            chainstate.m_cached_finished_ibd.store(true, std::memory_order_relaxed);
+            chainstate.ForceExitIBD();
         }
     }
 }

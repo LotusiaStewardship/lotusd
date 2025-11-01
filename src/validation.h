@@ -970,6 +970,12 @@ public:
     bool IsInitialBlockDownload() const;
 
     /**
+     * Force the node to exit Initial Block Download mode.
+     * Used for testnet to allow private testnets to serve blocks immediately.
+     */
+    void ForceExitIBD();
+
+    /**
      * Make various assertions about the state of the block index.
      *
      * By default this only executes fully when using the Regtest chain; see:
