@@ -2238,6 +2238,17 @@ static void UpdateTip(CTxMemPool &mempool, const CChainParams &params,
               ::ChainstateActive().CoinsTip().DynamicMemoryUsage() *
                   (1.0 / (1 << 20)),
               ::ChainstateActive().CoinsTip().GetCacheSize());
+    
+    // For testnet: force exit from IBD after first block beyond genesis
+    // This allows private testnets to start serving headers and operating normally
+    if (params.IsTestChain() && pindexNew->nHeight > 0) {
+        CChainState &chainstate = ::ChainstateActive();
+        if (!chainstate.m_cached_finished_ibd.load(std::memory_order_relaxed)) {
+            LogPrintf("Testnet: Forcing exit from initial block download at height %d\n",
+                      pindexNew->nHeight);
+            chainstate.m_cached_finished_ibd.store(true, std::memory_order_relaxed);
+        }
+    }
 }
 
 /**
