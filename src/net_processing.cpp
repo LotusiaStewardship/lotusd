@@ -1254,10 +1254,13 @@ static void FindNextBlocksToDownload(NodeId nodeid, unsigned int count,
     // Make sure pindexBestKnownBlock is up to date, we'll need it.
     ProcessBlockAvailability(nodeid);
 
+    // On testnet, bypass minimum chain work check to allow syncing from fresh nodes
+    const bool isTestnet = Params().IsTestChain();
+    
     if (state->pindexBestKnownBlock == nullptr ||
         state->pindexBestKnownBlock->nChainWork <
             ::ChainActive().Tip()->nChainWork ||
-        state->pindexBestKnownBlock->nChainWork < nMinimumChainWork) {
+        (!isTestnet && state->pindexBestKnownBlock->nChainWork < nMinimumChainWork)) {
         // This peer has nothing interesting.
         return;
     }
