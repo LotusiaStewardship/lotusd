@@ -6506,8 +6506,12 @@ bool PeerManagerImpl::SendMessages(const Config &config, CNode *pto) {
 
         CNodeState &state = *State(pto->GetId());
 
+        // On testnet, allow downloading from limited nodes (they may have exited IBD after connection)
+        const bool isTestnet = m_chainparams.IsTestChain();
+        const bool canDownloadFromPeer = isTestnet || !pto->m_limited_node;
+        
         if (!pto->fClient &&
-            ((fFetch && !pto->m_limited_node) ||
+            ((fFetch && canDownloadFromPeer) ||
              !::ChainstateActive().IsInitialBlockDownload()) &&
             state.nBlocksInFlight < MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             std::vector<const CBlockIndex *> vToDownload;
