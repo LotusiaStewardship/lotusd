@@ -1,37 +1,38 @@
 # Winter Solstice 2025 Network Upgrade
 
-**Version:** 10.4.2  
+**Version:** 10.4.9  
 **Activation Date:** December 21, 2025 at 15:03:00 UTC  
-**Epoch Name:** Second Samuel  
+**Epoch Name:** 2nd Samuel  
 **Commit Range:** 73d3390bb..4c2f97e77
 
 ## Overview
 
-The Winter Solstice 2025 upgrade marks the continuation of Lotus's biannual protocol upgrade cycle, introducing the **Second Samuel** epoch. This upgrade maintains network consensus, updates the miner fund distribution addresses, and implements critical improvements to the protocol's signature and scripting capabilities.
+The Winter Solstice 2025 upgrade marks the continuation of Lotus's biannual protocol upgrade cycle, introducing the **2nd Samuel** epoch. This upgrade maintains network consensus, updates the miner fund distribution addresses, and implements critical improvements to the protocol's signature and scripting capabilities.
 
 ## Key Changes
 
-### 1. Second Samuel Epoch Activation
+### 1. 2nd Samuel Epoch Activation
 
 **Technical Details:**
 
 - Activation timestamp: `1766329380` (December 21, 2025, 15:03:00 UTC)
-- New miner fund address: `lotus_16PSJLhSoTULMfjm7cjBo66qZFvEexoV9vUTg1DzE`
+- New miner fund addresses:
+  - `lotus_16PSJMYJL6FxpRh9nP8iFZPiGhLM8p5S9L5dVXUcJ`
+  - `lotus_16PSJHGmfZkU8zFrzU8Gw198o4j2XUryNnrMccuvZ`
 - Implements cycling payout mechanism introduced in the Numbers epoch
 
 **Benefits:**
 
 - Maintains transparent and predictable miner fund distribution
 - Ensures continuous network development funding
-- Provides smooth transition from First Samuel epoch
+- Provides smooth transition from 1st Samuel epoch
 
-### 2. First Kings Epoch Pre-Implementation
+### 2. 1st Kings Epoch Pre-Implementation
 
 **Technical Details:**
 
 - Pre-activation timestamp: `1782030240` (June 21, 2026, 08:24:00 UTC)
 - Implements forward-looking replay protection mechanism
-- Address: `lotus_16PSJMZoM7aR6AmVBnEh1MXhCfYXVs5KZQMBEj8Lk`
 
 **Benefits:**
 
@@ -61,8 +62,8 @@ The Winter Solstice 2025 upgrade marks the continuation of Lotus's biannual prot
 
 1. **Activation Functions**
 
-   - `IsSecondSamuelEnabled()` - Checks Second Samuel activation status
-   - `IsFirstKingsEnabled()` - Checks First Kings pre-activation status
+   - `IsSecondSamuelEnabled()` - Checks 2nd Samuel activation status
+   - `IsFirstKingsEnabled()` - Checks 1st Kings pre-activation status
    - Both use Median Time Past (MTP) for deterministic activation
 
 2. **Miner Fund Updates**
@@ -72,7 +73,7 @@ The Winter Solstice 2025 upgrade marks the continuation of Lotus's biannual prot
    - Enforced via consensus rules in coinbase validation
 
 3. **Replay Protection**
-   - Replay protection window set to First Kings activation time
+   - Replay protection window set to 1st Kings activation time
    - Provides 6-month buffer between upgrades
    - Uses `SCRIPT_ENABLE_REPLAY_PROTECTION` flag
 
@@ -87,8 +88,8 @@ The Winter Solstice 2025 upgrade marks the continuation of Lotus's biannual prot
 
 **Mainnet:**
 
-- Second Samuel: `1766329380` (Dec 21, 2025)
-- First Kings: `1782030240` (Jun 21, 2026)
+- 2nd Samuel: `1766329380` (Dec 21, 2025)
+- 1st Kings: `1782030240` (Jun 21, 2026)
 
 **Testnet:**
 
@@ -129,8 +130,8 @@ Comprehensive test coverage includes:
 
 ## Version History
 
-- **10.4.2** - Winter Solstice 2025 (Second Samuel + Taproot)
-- **9.4.2** - Summer Solstice 2025 (First Samuel)
+- **10.4.2** - Winter Solstice 2025 (2nd Samuel + Taproot)
+- **9.4.2** - Summer Solstice 2025 (1st Samuel)
 - **8.3.x** - Winter Solstice 2024 (Ruth)
 
 ## Technical Specifications
@@ -157,7 +158,7 @@ if (IsNumbersEnabled(params, pindex)) {
     flags |= SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS;  // ❌ Disabled
 }
 
-// Second Samuel epoch (2025) - The above code is removed
+// 2nd Samuel epoch (2025) - The above code is removed
 // Taproot and SIGHASH_LOTUS are now enabled by default ✅
 // No disable flag is set, so these features work normally
 ```
@@ -167,7 +168,7 @@ if (IsNumbersEnabled(params, pindex)) {
 1. **From `GetNextBlockScriptFlags()`:**
 
    ```cpp
-   // REMOVED in Second Samuel:
+   // REMOVED in 2nd Samuel:
    if (IsNumbersEnabled(params, pindex)) {
        flags |= SCRIPT_DISABLE_TAPROOT_SIGHASH_LOTUS;
    }
@@ -176,7 +177,7 @@ if (IsNumbersEnabled(params, pindex)) {
 2. **From `MemPoolAccept::PreChecks()`:**
 
    ```cpp
-   // REMOVED in Second Samuel:
+   // REMOVED in 2nd Samuel:
    if (fRequireStandardPolicy && TxHasPayToTaproot(tx)) {
        return state.Invalid(TxValidationResult::TX_NOT_STANDARD,
                             "bad-taproot-phased-out");
@@ -185,7 +186,7 @@ if (IsNumbersEnabled(params, pindex)) {
 
 3. **From `ConnectBlock()`:**
    ```cpp
-   // REMOVED in Second Samuel:
+   // REMOVED in 2nd Samuel:
    if (IsNumbersEnabled(consensusParams, pindex->pprev)) {
        if (TxHasPayToTaproot(tx)) {
            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
@@ -198,7 +199,7 @@ if (IsNumbersEnabled(params, pindex)) {
 
 ### Security
 
-- ✅ Replay protection maintained through First Kings pre-activation
+- ✅ Replay protection maintained through 1st Kings pre-activation
 - ✅ Taproot privacy and security features enabled
 - ✅ Enhanced signature flexibility with SIGHASH_LOTUS
 
