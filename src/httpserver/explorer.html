@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌸 Lotus Block Explorer</title>
+    <link rel="stylesheet" href="/explorer/style.css">
+</head>
+<body>
+    <div class="update-indicator" id="updateIndicator">🔄 Updated</div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🌸 Lotus Block Explorer</h1>
+            <div class="subtitle">Real-time blockchain monitoring</div>
+            <div class="tabs">
+                <button class="tab-button active" onclick="showHome()">📦 Blocks</button>
+                <button class="tab-button" onclick="showMempool()">💸 Mempool</button>
+            </div>
+        </div>
+        
+        <div id="homeView">
+            <div class="stats-grid" id="stats">
+                <div class="stat-card">
+                    <div class="stat-label">⛓️ Block Height</div>
+                    <div class="stat-value" id="height">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">🔗 Best Block Hash</div>
+                    <div class="stat-value hash-value" id="hash">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">🌐 Network</div>
+                    <div class="stat-value" id="chain">-</div>
+                </div>
+            </div>
+            
+            <div class="blocks-container">
+                <h2>📦 Recent Blocks</h2>
+                <table class="block-table">
+                    <thead>
+                        <tr>
+                            <th>Height</th>
+                            <th>Block Hash</th>
+                            <th>Timestamp</th>
+                            <th>Transactions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blocks">
+                        <tr><td colspan="4" class="loading">⏳ Loading blocks...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div id="mempoolView" style="display: none;">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">💸 Transactions</div>
+                    <div class="stat-value" id="mempoolCount">-</div>
+                </div>
+            </div>
+            
+            <div class="blocks-container">
+                <h2>💸 Mempool Transactions</h2>
+                <table class="block-table">
+                    <thead>
+                        <tr>
+                            <th>TxID</th>
+                            <th>Size</th>
+                            <th>Fee</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mempoolTxs">
+                        <tr><td colspan="4" class="loading">⏳ Loading mempool...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/explorer/script.js"></script>
+</body>
+</html>
+

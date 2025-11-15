@@ -15,6 +15,8 @@
 #include <script/script_flags.h>
 #include <util/moneystr.h> // For FormatMoney
 #include <version.h>       // For PROTOCOL_VERSION
+#include <mockblockgen.h>  // For IsMockBlockMode
+#include <logging.h>        // For LogPrint
 
 static bool IsFinalTx(const CTransaction &tx, int nBlockHeight,
                       int64_t nBlockTime) {
@@ -169,13 +171,21 @@ bool CheckTxInputs(const CTransaction &tx, TxValidationState &state,
         assert(!coin.IsSpent());
 
         // If prev is coinbase, check that it's matured
-        if (coin.IsCoinBase() &&
-            nSpendHeight - coin.GetHeight() < COINBASE_MATURITY) {
-            return state.Invalid(
-                TxValidationResult::TX_PREMATURE_SPEND,
-                "bad-txns-premature-spend-of-coinbase",
-                strprintf("tried to spend coinbase at depth %d",
-                          nSpendHeight - coin.GetHeight()));
+        // (skip this check in mock mode for rapid testing)
+        bool inMockMode = IsMockBlockMode();
+        if (coin.IsCoinBase()) {
+            int depth = nSpendHeight - coin.GetHeight();
+            if (depth < COINBASE_MATURITY) {
+                if (inMockMode) {
+                    LogPrint(BCLog::NET, "CheckTxInputs: Mock mode ACTIVE, skipping coinbase maturity check (depth=%d)\n", depth);
+                } else {
+                    LogPrint(BCLog::NET, "CheckTxInputs: Mock mode OFF, rejecting immature coinbase (depth=%d)\n", depth);
+                    return state.Invalid(
+                        TxValidationResult::TX_PREMATURE_SPEND,
+                        "bad-txns-premature-spend-of-coinbase",
+                        strprintf("tried to spend coinbase at depth %d", depth));
+                }
+            }
         }
 
         // Check for negative or overflow input values

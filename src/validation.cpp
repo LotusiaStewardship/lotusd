@@ -23,6 +23,7 @@
 #include <hash.h>
 #include <index/txindex.h>
 #include <logging.h>
+#include <mockblockgen.h>
 #include <logging/timer.h>
 #include <minerfund.h>
 #include <node/ui_interface.h>
@@ -1039,6 +1040,12 @@ static void CheckForkWarningConditions() EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
     if (::ChainstateActive().IsInitialBlockDownload()) {
         return;
     }
+    
+    // In mock mode, forks are expected (multiple nodes generating blocks)
+    // Don't warn about them
+    if (IsMockBlockMode()) {
+        return;
+    }
 
     // If our best fork is no longer within 72 blocks (+/- 12 hours if no one
     // mines it) of our head, drop it
@@ -1918,7 +1925,11 @@ bool CChainState::ConnectBlock(const CBlock &block, BlockValidationState &state,
     Amount amountFeeReward = nFees / 2;
     Amount blockReward =
         amountFeeReward + GetBlockSubsidy(block.nBits, consensusParams);
-    if (block.vtx[0]->GetValueOut() > blockReward) {
+    
+    // Skip coinbase amount check in mock block mode (subsidy calculation complex with miner fund)
+    const bool skipCoinbaseCheck = IsMockBlockMode();
+    
+    if (!skipCoinbaseCheck && block.vtx[0]->GetValueOut() > blockReward) {
         LogPrintf("ERROR: ConnectBlock(): coinbase pays too much (actual=%d vs "
                   "limit=%d)\n",
                   block.vtx[0]->GetValueOut(), blockReward);
@@ -1930,7 +1941,8 @@ bool CChainState::ConnectBlock(const CBlock &block, BlockValidationState &state,
         consensusParams, options.shouldValidateMinerFund(), pindex->pprev,
         blockReward);
 
-    if (!requiredOutputs.empty()) {
+    // Skip miner fund validation in mock block mode
+    if (!skipCoinbaseCheck && !requiredOutputs.empty()) {
         auto nextRequiredOutput = requiredOutputs.begin();
         // Miner fund outputs must appear in order.
         // Can be separated by non-miner fund outputs.
@@ -2227,17 +2239,92 @@ static void UpdateTip(CTxMemPool &mempool, const CChainParams &params,
         g_best_block_cv.notify_all();
     }
 
-    LogPrintf("%s: new best=%s height=%d version=0x%08x log2_work=%f tx=%ld "
-              "date='%s' progress=%f cache=%.1fMiB(%utxo)\n",
-              __func__, pindexNew->GetBlockHash().ToString(),
-              pindexNew->nHeight, pindexNew->nHeaderVersion,
-              log(pindexNew->nChainWork.getdouble()) / log(2.0),
-              pindexNew->GetChainTxCount(),
-              FormatISO8601DateTime(pindexNew->GetBlockTime()),
-              GuessVerificationProgress(params.TxData(), pindexNew),
-              ::ChainstateActive().CoinsTip().DynamicMemoryUsage() *
-                  (1.0 / (1 << 20)),
-              ::ChainstateActive().CoinsTip().GetCacheSize());
+    // Beautiful, concise sync progress
+    static int64_t nLastTipUpdate = 0;
+    static int nLastHeight = 0;
+    const int64_t now = GetTimeMillis();
+    const int64_t blockTime = pindexNew->GetBlockTime();
+    const int64_t currentTime = GetTime();
+    const int64_t timeBehind = currentTime - blockTime;
+    
+    // Calculate sync status based on block age
+    const bool is_synced = timeBehind < 3600; // Less than 1 hour behind = synced
+    const bool is_rolling_back = (nLastHeight > 0 && pindexNew->nHeight < nLastHeight);
+    
+    // During sync, throttle to every 5 seconds for readability
+    // When synced or rolling back, always show updates
+    if (!is_synced && !is_rolling_back && now - nLastTipUpdate < 5000) {
+        nLastHeight = pindexNew->nHeight;
+        return;
+    }
+    nLastTipUpdate = now;
+    nLastHeight = pindexNew->nHeight;
+    
+    // Format time behind
+    std::string timeBehindStr;
+    if (timeBehind < 3600) {
+        timeBehindStr = strprintf("%dm", timeBehind / 60);
+    } else if (timeBehind < 86400) {
+        timeBehindStr = strprintf("%dh", timeBehind / 3600);
+    } else {
+        timeBehindStr = strprintf("%dd", timeBehind / 86400);
+    }
+    
+    if (is_rolling_back) {
+        // Rolling back blocks (invalidation)
+        LogPrintf("⏪ Rolling back to block %d (%s) | %s behind current time\n",
+                  pindexNew->nHeight,
+                  FormatISO8601Date(blockTime),
+                  timeBehindStr);
+    } else if (is_synced) {
+        // Fully synced - show new blocks with detailed transaction info
+        // Load block to get transaction details
+        CBlock block;
+        int numTxs = 0;
+        int totalInputs = 0;
+        int totalOutputs = 0;
+        
+        if (ReadBlockFromDisk(block, pindexNew, params.GetConsensus())) {
+            numTxs = block.vtx.size();
+            for (const auto& tx : block.vtx) {
+                totalInputs += tx->vin.size();
+                totalOutputs += tx->vout.size();
+            }
+        }
+        
+        // Format date in human-readable form: "2025-10-31 13:55:40"
+        std::string humanDate = FormatISO8601DateTime(blockTime);
+        // Remove the 'T' and 'Z' for better readability
+        std::replace(humanDate.begin(), humanDate.end(), 'T', ' ');
+        if (!humanDate.empty() && humanDate.back() == 'Z') {
+            humanDate.pop_back();
+        }
+        
+        LogPrintf("✅ Block %d | %s | %s | %d tx (%d in, %d out)\n",
+                  pindexNew->nHeight,
+                  pindexNew->GetBlockHash().ToString().substr(0, 16) + "...",
+                  humanDate,
+                  numTxs,
+                  totalInputs,
+                  totalOutputs);
+    } else {
+        // Syncing - show progress
+        const double cacheSize = ::ChainstateActive().CoinsTip().DynamicMemoryUsage() * (1.0 / (1 << 20));
+        LogPrintf("🌸 Block %d | %s | %s behind | Cache: %.1f MB\n",
+                  pindexNew->nHeight,
+                  FormatISO8601Date(blockTime),
+                  timeBehindStr,
+                  cacheSize);
+    }
+    
+    // Check if we've reached the fork height - if so, trigger peer version checks
+    const int forkHeight = gArgs.GetArg("-testnetforkheight", 0);
+    if (forkHeight > 0 && pindexNew->nHeight == forkHeight) {
+        LogPrintf("🔱 FORK HEIGHT REACHED (%d) - Initiating peer version filtering\n", 
+                  forkHeight);
+        // Signal the connection manager to check all peer versions
+        uiInterface.NotifyAlertChanged();
+    }
 }
 
 /**
@@ -2662,9 +2749,9 @@ CBlockIndex *CChainState::FindMostWorkChain() {
 
                 if (pindexNew->nChainWork > requiredWork) {
                     // We have enough, clear the parked state.
-                    LogPrintf("Unpark chain up to block %s as it has "
-                              "accumulated enough PoW.\n",
-                              pindexNew->GetBlockHash().ToString());
+                    LogPrint(BCLog::VALIDATION,
+                             "✅ Unparking chain to block %s (sufficient PoW)\n",
+                             pindexNew->GetBlockHash().ToString().substr(0, 16) + "...");
                     fParkedChain = false;
                     UnparkBlock(pindexTest);
                 }
@@ -3675,10 +3762,18 @@ static bool CheckBlockHeader(const CBlockHeader &block,
                              const Consensus::Params &params,
                              BlockValidationOptions validationOptions) {
     // Check proof of work matches claimed amount
-    if (validationOptions.shouldValidatePoW() &&
+    // Skip PoW check if in mock block mode (for testing)
+    const bool skipPoW = IsMockBlockMode();
+    
+    if (!skipPoW && validationOptions.shouldValidatePoW() &&
         !CheckProofOfWork(block.GetHash(), block.nBits, params)) {
+        LogPrint(BCLog::VALIDATION, "PoW check failed for block %s\n", 
+                 block.GetHash().ToString());
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER,
                              "high-hash", "proof of work failed");
+    } else if (skipPoW && validationOptions.shouldValidatePoW()) {
+        LogPrint(BCLog::VALIDATION, "PoW check bypassed (mock mode) for block %s\n",
+                 block.GetHash().ToString());
     }
 
     if (block.nReserved != 0) {
@@ -3830,8 +3925,10 @@ static bool ContextualCheckBlockHeader(const CChainParams &params,
     assert(pindexPrev != nullptr);
     const int nHeight = pindexPrev->nHeight + 1;
 
-    // Check proof of work
-    if (block.nBits != GetNextWorkRequired(pindexPrev, &block, params)) {
+    // Check proof of work (skip in mock block mode for testing)
+    const bool skipDiffCheck = IsMockBlockMode();
+    
+    if (!skipDiffCheck && block.nBits != GetNextWorkRequired(pindexPrev, &block, params)) {
         LogPrintf("bad bits after height: %d\n", pindexPrev->nHeight);
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER,
                              "bad-diffbits", "incorrect proof of work");
@@ -4004,8 +4101,6 @@ static bool ContextualCheckBlock(const CBlock &block,
     if (nHeight > 0) {
         // Get the coinbase transaction's first output scriptPubKey
         const CScript &scriptPubKey = block.vtx[0]->vout[0].scriptPubKey;
-        std::string scriptHex = HexStr(scriptPubKey);
-        LogPrintf("DEBUG: Coinbase scriptPubKey: %s\n", scriptHex);
         
         // Early blocks may not follow the height encoding rule
         // Define a height after which we strictly enforce the rule
@@ -4013,47 +4108,35 @@ static bool ContextualCheckBlock(const CBlock &block,
         bool strictChecking = (nHeight >= HEIGHT_ENCODING_ENFORCED_AFTER);
         const int SHAME_PREFIX_ENFORCED_BEFORE = 1018000;
         bool strictCheckingCoinbaseShame = (nHeight < SHAME_PREFIX_ENFORCED_BEFORE);
+        
         // Empty script
         if (scriptPubKey.empty()) {
-            LogPrintf("DEBUG: Empty scriptPubKey\n");
             return !strictChecking;
         }
         
         // Check for OP_RETURN
         if (scriptPubKey[0] != 0x6a) { // 0x6a is OP_RETURN
-            LogPrintf("DEBUG: Script does not start with OP_RETURN. First byte: 0x%02x\n", 
-                     scriptPubKey[0]);
             return !strictChecking;
         }
-        
-        LogPrintf("DEBUG: Found OP_RETURN at position 0\n");
         
         // Position after OP_RETURN
         size_t pos = 1;
         if (pos >= scriptPubKey.size()) {
-            LogPrintf("DEBUG: No data after OP_RETURN\n");
             return !strictChecking;
         }
         
         // Parse prefix length and data
         uint8_t prefixLen = scriptPubKey[pos++];
-        LogPrintf("DEBUG: Prefix length byte at position %zu: 0x%02x (%u)\n", 
-                  pos-1, prefixLen, prefixLen);
         
         if (pos + prefixLen > scriptPubKey.size()) {
-            LogPrintf("DEBUG: Not enough bytes for prefix data\n");
             return !strictChecking;
         }
         
         std::vector<uint8_t> prefixData(scriptPubKey.begin() + pos, 
                                        scriptPubKey.begin() + pos + prefixLen);
-        std::string prefixHex = HexStr(prefixData);
-        LogPrintf("DEBUG: Prefix data at position %zu: %s\n", pos, prefixHex);
         
         // Verify that the prefix matches the expected COINBASE_PREFIX
         if (prefixLen != COINBASE_PREFIX.size() || prefixData != COINBASE_PREFIX) {
-            LogPrintf("DEBUG: Prefix data doesn't match expected COINBASE_PREFIX. Expected: %s, Got: %s\n",
-                      HexStr(COINBASE_PREFIX), prefixHex);
             return !strictCheckingCoinbaseShame;
         }
         
@@ -4062,23 +4145,17 @@ static bool ContextualCheckBlock(const CBlock &block,
         
         // Parse height length and data
         if (pos >= scriptPubKey.size()) {
-            LogPrintf("DEBUG: No height length byte found\n");
             return !strictChecking;
         }
         
         uint8_t heightLen = scriptPubKey[pos++];
-        LogPrintf("DEBUG: Height length byte at position %zu: 0x%02x (%u)\n", 
-                  pos-1, heightLen, heightLen);
         
         if (pos + heightLen > scriptPubKey.size() || heightLen > 3) {
-            LogPrintf("DEBUG: Not enough bytes for height data or height too large\n");
             return !strictChecking;
         }
         
         std::vector<uint8_t> heightData(scriptPubKey.begin() + pos, 
                                       scriptPubKey.begin() + pos + heightLen);
-        std::string heightHex = HexStr(heightData);
-        LogPrintf("DEBUG: Height data at position %zu: %s\n", pos, heightHex);
         
         // Convert the little-endian bytes to an integer
         int nHeight_coinbase = 0;
@@ -4086,13 +4163,11 @@ static bool ContextualCheckBlock(const CBlock &block,
             nHeight_coinbase |= static_cast<int>(heightData[i]) << (8 * i);
         }
         
-        LogPrintf("DEBUG: Parsed height from coinbase: %d (expected: %d)\n", 
-                  nHeight_coinbase, nHeight);
-        
         // Verify the height matches
         if (nHeight_coinbase != nHeight) {
-            LogPrintf("WARNING: block height mismatch in coinbase: coinbase=%d (hex: %s) vs. block=%d.\n", 
-                      nHeight_coinbase, heightHex, nHeight);
+            LogPrint(BCLog::VALIDATION,
+                     "Coinbase height mismatch: coinbase=%d vs block=%d\n", 
+                     nHeight_coinbase, nHeight);
             return !strictChecking;
         }
     }
@@ -4247,13 +4322,51 @@ bool ChainstateManager::ProcessNewBlockHeaders(
     if (NotifyHeaderTip()) {
         if (::ChainstateActive().IsInitialBlockDownload() && ppindex &&
             *ppindex) {
-            LogPrintf("Synchronizing blockheaders, height: %d (~%.2f%%)\n",
-                      (*ppindex)->nHeight,
-                      100.0 /
-                          ((*ppindex)->nHeight +
-                           (GetAdjustedTime() - (*ppindex)->GetBlockTime()) /
-                               Params().GetConsensus().nPowTargetSpacing) *
-                          (*ppindex)->nHeight);
+            // Throttle header sync messages - only show every 50k blocks
+            static int nLastHeaderHeight = 0;
+            static int64_t nLastHeaderTime = 0;
+            const int currentHeaderHeight = (*ppindex)->nHeight;
+            const int64_t now = GetTimeMillis();
+            
+            // Show every 50k blocks OR every 10 seconds during fast sync
+            const bool should_log = (currentHeaderHeight - nLastHeaderHeight >= 50000) ||
+                                   (now - nLastHeaderTime >= 10000) ||
+                                   (currentHeaderHeight % 100000 == 0);
+            
+            if (should_log) {
+                nLastHeaderHeight = currentHeaderHeight;
+                nLastHeaderTime = now;
+                
+                const int64_t blockTime = (*ppindex)->GetBlockTime();
+                const int64_t timeBehind = GetAdjustedTime() - blockTime;
+                
+                // Calculate sync rate
+                static int64_t nFirstLogTime = 0;
+                static int nFirstLogHeight = 0;
+                if (nFirstLogTime == 0) {
+                    nFirstLogTime = now;
+                    nFirstLogHeight = currentHeaderHeight;
+                }
+                
+                const int64_t timeDelta = now - nFirstLogTime;
+                const int heightDelta = currentHeaderHeight - nFirstLogHeight;
+                const double blocksPerSec = (timeDelta > 0) ? 
+                    (heightDelta * 1000.0 / timeDelta) : 0;
+                
+                std::string timeBehindStr;
+                if (timeBehind < 3600) {
+                    timeBehindStr = strprintf("%dm", timeBehind / 60);
+                } else if (timeBehind < 86400) {
+                    timeBehindStr = strprintf("%dh", timeBehind / 3600);
+                } else {
+                    timeBehindStr = strprintf("%dd %dh", 
+                                            timeBehind / 86400, 
+                                            (timeBehind % 86400) / 3600);
+                }
+                
+                LogPrintf("📥 Headers → %d | %s behind | %.0f/sec\n",
+                          currentHeaderHeight, timeBehindStr, blocksPerSec);
+            }
         }
     }
     return true;
@@ -4412,11 +4525,16 @@ bool CChainState::AcceptBlock(const Config &config,
     // later, during FindMostWorkChain. We mark the block as parked at the very
     // last minute so we can make sure everything is ready to be reorged if
     // needed.
-    if (gArgs.GetBoolArg("-parkdeepreorg", true)) {
+    // 
+    // DISABLED in mock mode - reorgs are expected and normal when nodes sync
+    const bool skipParkProtection = IsMockBlockMode();
+    
+    if (!skipParkProtection && gArgs.GetBoolArg("-parkdeepreorg", true)) {
         const CBlockIndex *pindexFork = m_chain.FindFork(pindex);
         if (pindexFork && pindexFork->nHeight + 1 < m_chain.Height()) {
-            LogPrintf("Park block %s as it would cause a deep reorg.\n",
-                      pindex->GetBlockHash().ToString());
+            LogPrint(BCLog::VALIDATION,
+                     "🅿️ Parking block %s (deep reorg protection)\n",
+                     pindex->GetBlockHash().ToString().substr(0, 16) + "...");
             pindex->nStatus = pindex->nStatus.withParked();
             setDirtyBlockIndex.insert(pindex);
         }

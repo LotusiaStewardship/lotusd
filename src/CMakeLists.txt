@@ -541,6 +541,31 @@ if(BUILD_LIBBITCOINCONSENSUS)
 	)
 endif()
 
+# Generate embedded explorer resources at build time
+set(EXPLORER_HTML "${CMAKE_CURRENT_SOURCE_DIR}/httpserver/explorer.html")
+set(EXPLORER_CSS "${CMAKE_CURRENT_SOURCE_DIR}/httpserver/explorer.css")
+set(EXPLORER_JS "${CMAKE_CURRENT_SOURCE_DIR}/httpserver/explorer.js")
+set(EXPLORER_RESOURCES_H "${CMAKE_CURRENT_BINARY_DIR}/explorer_resources.h")
+
+add_custom_command(
+	OUTPUT "${EXPLORER_RESOURCES_H}"
+	COMMAND ${CMAKE_COMMAND}
+		-DHTML_FILE=${EXPLORER_HTML}
+		-DCSS_FILE=${EXPLORER_CSS}
+		-DJS_FILE=${EXPLORER_JS}
+		-DOUTPUT_FILE=${EXPLORER_RESOURCES_H}
+		-P "${CMAKE_CURRENT_SOURCE_DIR}/httpserver/embed_resources.cmake"
+	DEPENDS
+		"${EXPLORER_HTML}"
+		"${EXPLORER_CSS}"
+		"${EXPLORER_JS}"
+		"${CMAKE_CURRENT_SOURCE_DIR}/httpserver/embed_resources.cmake"
+	COMMENT "Embedding explorer HTML/CSS/JS resources"
+	VERBATIM
+)
+
+add_custom_target(explorer_resources DEPENDS "${EXPLORER_RESOURCES_H}")
+
 # Bitcoin server facilities
 add_library(server
 	addrdb.cpp
@@ -567,6 +592,7 @@ add_library(server
 	dbwrapper.cpp
 	dnsseeds.cpp
 	flatfile.cpp
+	httpexplorer.cpp
 	httprpc.cpp
 	httpserver.cpp
 	index/base.cpp
@@ -578,8 +604,11 @@ add_library(server
 	invrequest.cpp
 	miner.cpp
 	minerfund.cpp
+	mockblockgen.cpp
+	mocktxgen.cpp
 	net.cpp
 	net_processing.cpp
+	versionfilter.cpp
 	node/coin.cpp
 	node/coinstats.cpp
 	node/context.cpp
@@ -612,7 +641,12 @@ add_library(server
 	validationinterface.cpp
 )
 
+# Server depends on generated explorer resources
+add_dependencies(server explorer_resources)
+
 target_include_directories(server PRIVATE leveldb/helpers/memenv)
+# Add build directory for generated headers
+target_include_directories(server PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 target_link_libraries(server
 	bitcoinconsensus
