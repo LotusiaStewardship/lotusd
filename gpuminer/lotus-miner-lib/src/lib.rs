@@ -10,7 +10,6 @@ pub use settings::ConfigSettings;
 pub use logger::{Log, LogSeverity, HashrateEntry, LoggerConfig, init_global_logger, LogEntry};
 
 use std::{
-    convert::TryInto,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -30,8 +29,9 @@ pub struct Server {
     miner: std::sync::Mutex<Miner>,
     node_settings: Mutex<NodeSettings>,
     block_state: Mutex<BlockState>,
-    rng: Mutex<rand::rngs::StdRng>,
-    metrics_timestamp: Mutex<SystemTime>,
+    // Use parking_lot style RwLock pattern - rng doesn't need async, use std::sync for speed
+    rng: std::sync::Mutex<rand::rngs::StdRng>,
+    metrics_timestamp: std::sync::Mutex<SystemTime>,
     metrics_nonces: AtomicU64,
     hashrate_data_points: Mutex<Vec<(SystemTime, u64)>>,
     last_total_nonces: AtomicU64,
@@ -58,7 +58,28 @@ struct BlockState {
 pub type ServerRef = Arc<Server>;
 
 impl Server {
-    pub fn from_config(config: ConfigSettings, report_hashrate_interval: Duration) -> Self {
+    /// Create a new Server from configuration.
+    /// 
+    /// # Errors
+    /// Returns an error if GPU initialization fails (e.g., no OpenCL devices found,
+    /// invalid GPU index, or driver issues).
+    pub fn from_config(config: ConfigSettings, report_hashrate_interval: Duration) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Validate rpc_poll_interval - must be positive
+        if config.rpc_poll_interval <= 0 {
+            return Err(format!(
+                "Invalid rpc_poll_interval: {}. Must be a positive integer.",
+                config.rpc_poll_interval
+            ).into());
+        }
+        
+        // Validate kernel_size - reasonable bounds (8 to 30)
+        if config.kernel_size < 8 || config.kernel_size > 30 {
+            return Err(format!(
+                "Invalid kernel_size: {}. Must be between 8 and 30.",
+                config.kernel_size
+            ).into());
+        }
+        
         // Optimized mining settings:
         // - local_work_size: 256 is a good default for most GPUs (power of 2, good occupancy)
         // - inner_iter_size: 32 provides good balance between kernel launches and work per thread
@@ -71,15 +92,19 @@ impl Server {
             gpu_indices: vec![config.gpu_index as usize],
             kernel_type: config.kernel_type,
         };
-        let miner = Miner::setup(mining_settings.clone()).unwrap();
-        Server {
+        
+        // Initialize the miner - this can fail if GPU is not available
+        let miner = Miner::setup(mining_settings.clone())
+            .map_err(|e| format!("Failed to initialize GPU miner: {}. Check your GPU drivers and OpenCL installation.", e))?;
+        
+        Ok(Server {
             miner: std::sync::Mutex::new(miner),
             client: reqwest::Client::new(),
             node_settings: Mutex::new(NodeSettings {
                 bitcoind_url: config.rpc_url.clone(),
                 bitcoind_user: config.rpc_user.clone(),
                 bitcoind_password: config.rpc_password.clone(),
-                rpc_poll_interval: config.rpc_poll_interval.try_into().unwrap(),
+                rpc_poll_interval: config.rpc_poll_interval as u64,
                 miner_addr: config.mine_to_address.clone(),
                 pool_mining: config.pool_mining,
             }),
@@ -89,14 +114,14 @@ impl Server {
                 next_block: None,
                 extra_nonce: 0,
             }),
-            rng: Mutex::new(rand::rngs::StdRng::from_entropy()),
-            metrics_timestamp: Mutex::new(SystemTime::now()),
+            rng: std::sync::Mutex::new(rand::rngs::StdRng::from_entropy()),
+            metrics_timestamp: std::sync::Mutex::new(SystemTime::now()),
             metrics_nonces: AtomicU64::new(0),
             hashrate_data_points: Mutex::new(Vec::new()),
             last_total_nonces: AtomicU64::new(0),
             log: Log::new(),
             report_hashrate_interval,
-        }
+        })
     }
 
     pub async fn run(self: ServerRef) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -489,6 +514,7 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
             let log = server_clone.log();
             log.info("🚀 Starting high-efficiency mining processor", Some("Miner"));
             
+            // Start the work prefetcher in a separate task
             tokio::spawn({
                 let inner_server = Arc::clone(&server_clone);
                 async move {
@@ -514,198 +540,157 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 }
             });
             
+            // Number of consecutive mining batches to run before yielding
+            // Higher values = less context switch overhead, but less responsive to new work
+            const BATCHES_PER_YIELD: u32 = 8;
+            
             loop {
-                let has_next_block = {
-                    let block_state = server_clone.block_state.lock().await;
-                    block_state.next_block.is_some()
-                };
-                
-                if !has_next_block {
-                    log.debug("⏳ Waiting for prefetch to complete before mining", Some("Miner"));
-                    let mut wait_count = 0;
-                    while !has_next_block && wait_count < 20 {
-                        tokio::time::sleep(Duration::from_millis(5)).await;
-                        wait_count += 1;
-                        
-                        let block_state = server_clone.block_state.lock().await;
-                        if block_state.next_block.is_some() {
-                            break;
-                        }
-                    }
-                    
-                    if !has_next_block {
-                        log.info("⚠️ Prefetch not completed in time, fetching directly", Some("Miner"));
-                        if let Err(err) = update_next_block(&server_clone).await {
-                            log.error(format!("Failed to fetch work: {:?}", err), Some("Miner"));
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                            continue;
-                        }
-                    }
-                }
-                
-                let current_work = {
+                // Get work - single lock acquisition to get everything we need
+                let work_data = {
                     let mut block_state = server_clone.block_state.lock().await;
                     
+                    // Try to use next_block if available
                     if let Some(next_block) = block_state.next_block.take() {
-                        let next_header_start = hex::encode(&next_block.header[0..16]);
-                        
-                        if let Some(current_block) = &block_state.current_block {
-                            let current_header_start = hex::encode(&current_block.header[0..16]);
-                            
-                            if current_header_start == next_header_start {
-                                log.debug(format!("🔄 Skipping identical work header: {}", current_header_start), Some("Miner"));
-                                block_state.next_block = Some(next_block);
-                                block_state.current_work.nonce_idx = 0;
-                                log.debug("♻️ Reset nonce index for existing work to prevent exhaustion", Some("Miner"));
-                                Some(block_state.current_work.clone())
-                            } else {
-                                log.debug(format!("📝 Switching work from {} to {}", 
-                                    current_header_start, next_header_start), Some("Miner"));
-                                block_state.current_work = Work::from_header(next_block.header, next_block.target);
-                                block_state.current_block = Some(next_block);
-                                Some(block_state.current_work.clone())
-                            }
-                        } else {
-                            log.debug(format!("📝 Setting new work with header: {}", next_header_start), Some("Miner"));
-                            block_state.current_work = Work::from_header(next_block.header, next_block.target);
-                            block_state.current_block = Some(next_block);
-                            Some(block_state.current_work.clone())
-                        }
-                    } else {
-                        if let Some(_) = &block_state.current_block {
-                            block_state.current_work.nonce_idx = 0;
-                            log.debug("♻️ Reset nonce index for reused work to prevent exhaustion", Some("Miner"));
-                            Some(block_state.current_work.clone())
-                        } else {
-                            None
-                        }
+                        block_state.current_work = Work::from_header(next_block.header, next_block.target);
+                        block_state.current_block = Some(next_block);
                     }
-                };
-                
-                if current_work.is_none() {
-                    log.error("❌ No work available despite prefetching, retrying...", Some("Miner"));
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    continue;
-                }
-                
-                let mut work = current_work.unwrap();
-                
-                if work.nonce_idx > 1000 {
-                    log.debug("♻️ Resetting high nonce index to prevent exhaustion", Some("Miner"));
-                    work.nonce_idx = 0;
                     
-                    let mut block_state = server_clone.block_state.lock().await;
-                    if let Some(_) = &block_state.current_block {
+                    // Reset nonce index if it's getting high
+                    if block_state.current_work.nonce_idx > 1000 {
                         block_state.current_work.nonce_idx = 0;
                     }
-                }
+                    
+                    // Get work and block if available
+                    block_state.current_block.as_ref().map(|block| {
+                        (block_state.current_work.clone(), block.clone())
+                    })
+                };
                 
-                let big_nonce = server_clone.rng.lock().await.gen();
-                work.set_big_nonce(big_nonce);
+                // If no work available, wait briefly and retry
+                let (mut work, current_block) = match work_data {
+                    Some(data) => data,
+                    None => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        continue;
+                    }
+                };
                 
-                let start_time = std::time::Instant::now();
-                log.debug(format!("⚡ Starting mining with nonce base {}", big_nonce), Some("Miner"));
-                
+                // Run multiple mining batches in a single spawn_blocking call
+                // This dramatically reduces the overhead of task spawning
                 let mining_result = tokio::task::spawn_blocking({
                     let inner_server = Arc::clone(&server_clone);
                     move || {
                         let log = inner_server.log();
-                        let mut miner = inner_server.miner.lock().unwrap();
-                        if !miner.has_nonces_left(&work) {
-                            log.error("Error: Exhaustively searched nonces", Some("Miner"));
-                            return Ok((None, 0));
+                        let mut miner = match inner_server.miner.lock() {
+                            Ok(guard) => guard,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        
+                        let mut found_nonce: Option<u64> = None;
+                        let mut total_nonces: u64 = 0;
+                        let mut batches_run: u32 = 0;
+                        
+                        // Run multiple batches before returning to async context
+                        for _ in 0..BATCHES_PER_YIELD {
+                            // Generate a new big_nonce for each batch
+                            let big_nonce: u64 = {
+                                let mut rng = inner_server.rng.lock().unwrap();
+                                rng.gen()
+                            };
+                            work.set_big_nonce(big_nonce);
+                            
+                            if !miner.has_nonces_left(&work) {
+                                // Reset and continue
+                                work.nonce_idx = 0;
+                            }
+                            
+                            match miner.find_nonce(&work, log) {
+                                Ok(Some(nonce)) => {
+                                    found_nonce = Some(nonce);
+                                    total_nonces += miner.num_nonces_per_search();
+                                    batches_run += 1;
+                                    break; // Found a share, return immediately
+                                }
+                                Ok(None) => {
+                                    total_nonces += miner.num_nonces_per_search();
+                                    work.nonce_idx += 1;
+                                    batches_run += 1;
+                                }
+                                Err(e) => {
+                                    log.error(format!("Mining error: {:?}", e), Some("Miner"));
+                                    break;
+                                }
+                            }
                         }
-                        miner
-                            .find_nonce(&work, inner_server.log())
-                            .map(|nonce| (nonce, miner.num_nonces_per_search()))
+                        
+                        (found_nonce, total_nonces, batches_run, work)
                     }
                 })
                 .await;
                 
-                let mining_duration = start_time.elapsed();
-                log.debug(format!("✅ Mining batch completed in {}ms", 
-                    mining_duration.as_millis()), Some("Miner"));
-                
-                let (nonce, num_nonces_per_search) = match mining_result {
-                    Ok(Ok((nonce, num_nonces))) => (nonce, num_nonces),
-                    Ok(Err(err)) => {
-                        log.error(format!("Mining error: {:?}", err), Some("Miner"));
-                        (None, 0)
-                    },
+                let (found_nonce, total_nonces, _batches_run, updated_work) = match mining_result {
+                    Ok(result) => result,
                     Err(err) => {
                         log.error(format!("Task join error: {:?}", err), Some("Miner"));
-                        (None, 0)
+                        continue;
                     }
                 };
                 
-                if let Some(nonce) = nonce {
-                    work.set_big_nonce(nonce);
+                // Update metrics atomically (no lock needed)
+                if total_nonces > 0 {
+                    server_clone.metrics_nonces.fetch_add(total_nonces, Ordering::Relaxed);
+                    
+                    // Update work state with new nonce_idx
+                    let mut block_state = server_clone.block_state.lock().await;
+                    block_state.current_work.nonce_idx = updated_work.nonce_idx;
+                }
+                
+                // Handle found nonce
+                if let Some(nonce) = found_nonce {
+                    let mut submit_work = updated_work.clone();
+                    submit_work.set_big_nonce(nonce);
                     log.info(format!("💎 Block hash below target with nonce: {}", nonce), Some("Share"));
                     
+                    // Fetch new work immediately after finding a share
                     let fetch_server = Arc::clone(&server_clone);
                     tokio::spawn(async move {
-                        let log = fetch_server.log();
-                        log.info("⚡ Share found, fetching fresh work in parallel with submission...", Some("Miner"));
                         if let Err(err) = update_next_block(&fetch_server).await {
-                            log.error(format!("Failed to update next block after share: {:?}", err), Some("Miner"));
-                        } else {
-                            log.debug("✅ Successfully fetched new work after share", Some("Miner"));
+                            fetch_server.log().error(format!("Failed to update next block after share: {:?}", err), Some("Miner"));
                         }
                     });
                     
-                    let block = {
-                        let mut block_state = server_clone.block_state.lock().await;
-                        if let Some(mut block) = block_state.current_block.take() {
-                            block.header = *work.header();
-                            Some(block)
-                        } else {
-                            log.bug("Bug: Found nonce but no block! Contact the developers.", Some("Share"));
-                            None
+                    // Submit the block/share asynchronously
+                    let mut submit_block_data = current_block;
+                    submit_block_data.header = *submit_work.header();
+                    
+                    let submit_server = Arc::clone(&server_clone);
+                    tokio::spawn(async move {
+                        if let Err(err) = submit_block(&submit_server, &submit_block_data).await {
+                            submit_server.log().error(format!(
+                                "submit_block error: {:?}. This could be a connection issue.",
+                                err
+                            ), Some("Miner"));
                         }
-                    };
-                    
-                    if let Some(block) = block {
-                        let submit_server = Arc::clone(&server_clone);
-                        tokio::spawn(async move {
-                            let log = submit_server.log();
-                            if let Err(err) = submit_block(&submit_server, &block).await {
-                                log.error(format!(
-                                    "submit_block error: {:?}. This could be a connection issue.",
-                                    err
-                                ), Some("Miner"));
-                            }
-                        });
-                    }
-                    
-                    // Continue mining immediately without waiting for share submission
-                    // The mining loop will immediately fetch the next work item
-                } else if num_nonces_per_search > 0 {
-                    // Update statistics even when no nonce is found
-                    let mut block_state = server_clone.block_state.lock().await;
-                    block_state.current_work.nonce_idx += 1;
-                    server_clone.metrics_nonces.fetch_add(num_nonces_per_search, Ordering::AcqRel);
+                    });
                 }
                 
-                // Report hashrate if needed
-                {
-                    let mut timestamp = server_clone.metrics_timestamp.lock().await;
-                    let elapsed = match SystemTime::now().duration_since(*timestamp) {
-                        Ok(elapsed) => elapsed,
-                        Err(err) => {
-                            log.bug(format!("Bug: Elapsed time error: {}. Contact the developers.", err), Some("Miner"));
-                            continue;
-                        }
-                    };
-                    
-                    if elapsed > server_clone.report_hashrate_interval {
-                        let hashrate = server_clone.calculate_moving_average_hashrate().await;
-                        log.report_hashrate(hashrate);
-                        *timestamp = SystemTime::now();
-                    }
+                // Report hashrate if needed (fast check with std::sync::Mutex)
+                let should_report = {
+                    let timestamp = server_clone.metrics_timestamp.lock().unwrap();
+                    SystemTime::now().duration_since(*timestamp)
+                        .map(|elapsed| elapsed > server_clone.report_hashrate_interval)
+                        .unwrap_or(false)
+                };
+                
+                if should_report {
+                    let hashrate = server_clone.calculate_moving_average_hashrate().await;
+                    log.report_hashrate(hashrate);
+                    let mut timestamp = server_clone.metrics_timestamp.lock().unwrap();
+                    *timestamp = SystemTime::now();
                 }
                 
-                // Next iteration will immediately get the already prefetched work
-                // This creates a zero-wait mining cycle
+                // Minimal yield to allow prefetcher to update work if needed
+                tokio::task::yield_now().await;
             }
         });
     }
@@ -781,7 +766,11 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 }
             }
             
-            let big_nonce = server.rng.lock().await.gen();
+            // Generate big_nonce using std::sync::Mutex (fast, no await needed)
+            let big_nonce = {
+                let mut rng = server.rng.lock().unwrap();
+                rng.gen()
+            };
             work.set_big_nonce(big_nonce);
             
             // Run the mining operation on the GPU
@@ -789,7 +778,10 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 let server = Arc::clone(&server);
                 move || {
                     let log = server.log();
-                    let mut miner = server.miner.lock().unwrap();
+                    let mut miner = match server.miner.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
                     if !miner.has_nonces_left(&work) {
                         log.error(format!(
                             "Error: Exhaustively searched nonces. This could be fixed by lowering \
@@ -854,22 +846,21 @@ async fn mine_some_nonces(server: ServerRef) -> Result<(), Box<dyn std::error::E
                 server.metrics_nonces.fetch_add(num_nonces_per_search, Ordering::AcqRel);
             }
             
-            // Update and report hashrate if needed
-            {
-                let mut timestamp = server.metrics_timestamp.lock().await;
-                let elapsed = match SystemTime::now().duration_since(*timestamp) {
-                    Ok(elapsed) => elapsed,
-                    Err(err) => {
-                        log.bug(format!("Bug: Elapsed time error: {}. Contact the developers.", err), Some("Miner"));
-                        return Ok(());
-                    }
-                };
-                
-                if elapsed > server.report_hashrate_interval {
-                    let hashrate = server.calculate_moving_average_hashrate().await;
-                    log.report_hashrate(hashrate);
-                    *timestamp = SystemTime::now();
-                }
+            // Update and report hashrate if needed - use std::sync::Mutex (fast, no await)
+            // Check if enough time has elapsed to report hashrate
+            let should_report = {
+                let timestamp = server.metrics_timestamp.lock().unwrap();
+                SystemTime::now().duration_since(*timestamp)
+                    .map(|elapsed| elapsed > server.report_hashrate_interval)
+                    .unwrap_or(false)
+            };
+            
+            if should_report {
+                let hashrate = server.calculate_moving_average_hashrate().await;
+                log.report_hashrate(hashrate);
+                // Update timestamp after reporting
+                let mut timestamp = server.metrics_timestamp.lock().unwrap();
+                *timestamp = SystemTime::now();
             }
             
             // For solo mining, we break here

@@ -86,6 +86,7 @@ pub struct Miner {
     header_buffer: Buffer<u32>,
     buffer: Buffer<u32>,
     settings: MiningSettings,
+    #[allow(dead_code)] // May be used for future kernel-specific optimizations
     kernel_type: KernelType,
 }
 
@@ -481,59 +482,33 @@ impl Miner {
         
         debug!("🧮 Processing nonce batch starting at base: {}", base);
         
-        // Write header data to buffer
+        // Write header data to buffer - this is a fast operation
         self.header_buffer.write(&partial_header_ints[..]).enq().map_err(Ocl)?;
         
-        // Use the mine method to set the kernel arguments based on kernel type
-        match self.kernel_type {
-            KernelType::LotusOG => {
-                // Set the arguments for Lotus OG kernel
-                self.search_kernel
-                    .set_arg("offset", base).map_err(Ocl)?;
-                self.search_kernel
-                    .set_arg("partial_header", &self.header_buffer).map_err(Ocl)?;
-                self.search_kernel
-                    .set_arg("output", &self.buffer).map_err(Ocl)?;
-            },
-            KernelType::POCLBM => {
-                // Use the same simple argument setting for POCLBM
-                self.search_kernel
-                    .set_arg("offset", base).map_err(Ocl)?;
-                self.search_kernel
-                    .set_arg("partial_header", &self.header_buffer).map_err(Ocl)?;
-                self.search_kernel
-                    .set_arg("output", &self.buffer).map_err(Ocl)?;
-            }
-        }
+        // Set kernel arguments - common for both kernel types
+        // Note: Arguments only need to be set when they change, but offset changes every call
+        self.search_kernel.set_arg("offset", base).map_err(Ocl)?;
+        self.search_kernel.set_arg("partial_header", &self.header_buffer).map_err(Ocl)?;
+        self.search_kernel.set_arg("output", &self.buffer).map_err(Ocl)?;
         
-        let mut vec = vec![0; self.buffer.len()];
+        // Clear output buffer - use a pre-allocated zeroed buffer for efficiency
+        // Only the flag at 0x80 and potential nonces need to be cleared
+        let mut vec = vec![0u32; self.buffer.len()];
         self.buffer.write(&vec).enq().map_err(Ocl)?;
         
-        // Setup kernel execution with appropriate work group size based on kernel type
-        let cmd = match self.kernel_type {
-            KernelType::LotusOG => {
-                // For Lotus OG kernel, we can use the original settings
-                self.search_kernel
-                    .cmd()
-                    .global_work_size(self.settings.kernel_size)
-            },
-            KernelType::POCLBM => {
-                // For POCLBM kernel, we need to set both global and local work sizes
-                // The POCLBM kernel typically requires a local work size that is a power of 2
-                // and meets alignment requirements
-                let local_work_size = 64; // Common value that works on most GPUs
-                debug!("🔧 Using local_work_size={} for POCLBM kernel", local_work_size);
-                
-                self.search_kernel
-                    .cmd()
-                    .global_work_size(self.settings.kernel_size)
-                    .local_work_size(local_work_size)
-            }
-        };
+        // Enqueue kernel execution
+        // The kernel will run asynchronously on the GPU
+        let cmd = self.search_kernel
+            .cmd()
+            .global_work_size(self.settings.kernel_size);
         
         unsafe {
             cmd.enq().map_err(Ocl)?;
         }
+        
+        // Read results - this blocks until the kernel completes
+        // This is the primary source of GPU idle time between batches
+        // The GPU is computing while we wait for the previous read to complete
         self.buffer.read(&mut vec).enq().map_err(Ocl)?;
         
         // Update total hashes processed

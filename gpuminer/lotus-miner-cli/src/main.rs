@@ -162,7 +162,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }).map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
     // Create the mining server
-    let server = Server::from_config(settings, report_interval);
+    let server = Server::from_config(settings, report_interval)
+        .map_err(|e| {
+            error!("❌ Failed to initialize mining server: {}", e);
+            e
+        })?;
+    
+    info!("✅ Mining server initialized successfully");
     
     // Run the server
     let server_ref = std::sync::Arc::new(server);

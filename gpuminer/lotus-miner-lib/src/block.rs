@@ -19,6 +19,7 @@ pub enum BlockParseError {
     BlockTooShort(usize),
 }
 
+#[derive(Clone)]
 pub struct Block {
     pub header: [u8; 160],
     pub body: Vec<u8>,
