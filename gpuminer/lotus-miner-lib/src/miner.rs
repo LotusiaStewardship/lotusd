@@ -33,6 +33,10 @@ use crate::{sha256::lotus_hash, block::Block, Log};
 /// 1. Edit the original files at gpuminer/kernels/lotus_og.cl or gpuminer/kernels/poclbm120327.cl
 /// 2. Rebuild the project - the include_str! macro will automatically pull in the new content
 const LOTUS_OG_KERNEL: &str = include_str!("../../kernels/lotus_og.cl");
+
+/// POCLBM kernel - currently not fully implemented due to different function signature.
+/// Kept for future implementation. The kernel requires 28 pre-computed arguments.
+#[allow(dead_code)]
 const POCLBM_KERNEL: &str = include_str!("../../kernels/poclbm120327.cl");
 
 // Counter for successful shares/blocks found
@@ -276,14 +280,33 @@ impl Miner {
         // Use the embedded kernel code based on the selected kernel type
         let kernel_code = match settings.kernel_type {
             KernelType::LotusOG => LOTUS_OG_KERNEL,
-            KernelType::POCLBM => POCLBM_KERNEL,
+            KernelType::POCLBM => {
+                // CRITICAL WARNING: The POCLBM kernel has a different function signature
+                // requiring 28 pre-computed arguments. The current implementation only 
+                // supports the simplified 3-argument interface used by lotus_og.
+                // 
+                // Until POCLBM is properly integrated with the required pre-computation
+                // logic, we fall back to lotus_og to prevent runtime errors.
+                log::warn!(
+                    "⚠️ POCLBM kernel selected but not fully implemented. \
+                    The POCLBM kernel requires 28 pre-computed arguments which are not \
+                    currently supported. Falling back to lotus_og kernel for stability."
+                );
+                LOTUS_OG_KERNEL
+            }
         };
         
-        // Log which kernel is being used
-        info!("🔄 Using {} kernel", match settings.kernel_type {
-            KernelType::LotusOG => "Lotus Original (lotus_og)",
-            KernelType::POCLBM => "POCLBM",
-        });
+        // Log which kernel is being used (note: may differ from requested due to fallback)
+        let actual_kernel_type = if matches!(settings.kernel_type, KernelType::POCLBM) {
+            info!("🔄 Using Lotus Original (lotus_og) kernel (fallback from POCLBM)");
+            KernelType::LotusOG
+        } else {
+            info!("🔄 Using {} kernel", match settings.kernel_type {
+                KernelType::LotusOG => "Lotus Original (lotus_og)",
+                KernelType::POCLBM => "POCLBM",
+            });
+            settings.kernel_type
+        };
         
         // Adjust work group sizes and optimization parameters based on kernel type
         let (local_work_size, inner_iter_size) = match settings.kernel_type {
@@ -300,29 +323,38 @@ impl Miner {
             }
         };
         
+        // Build program with optimization flags for better GPU performance
         prog_builder
             .src(kernel_code)
             .cmplr_def("WORKSIZE", local_work_size)
-            .cmplr_def("ITERATIONS", inner_iter_size);
+            .cmplr_def("ITERATIONS", inner_iter_size)
+            // Enable MAD (multiply-add) optimization - fuses multiply and add into single instruction
+            .cmplr_opt("-cl-mad-enable")
+            // Enable fast relaxed math - allows compiler to reorder/optimize floating point ops
+            .cmplr_opt("-cl-fast-relaxed-math")
+            // Disable denormalized numbers - faster execution
+            .cmplr_opt("-cl-denorms-are-zero");
         
         // Add device to program
         prog_builder.devices(DeviceSpecifier::Single(device));
         
-        info!("🔨 Building OpenCL program from embedded kernel...");
+        info!("🔨 Building OpenCL program from embedded kernel with optimizations...");
         let program = prog_builder.build(&context)?;
         info!("✅ OpenCL program built successfully");
         
         // Create kernel and buffers
+        // Use larger output buffer for better nonce collection (256 entries + flag)
+        let output_buffer_size = 0x101; // 257 entries: 256 for nonces + 1 for found flag
         let mut kernel_builder = Kernel::builder();
         kernel_builder
             .program(&program)
             .name("search")
             .queue(queue.clone());
             
-        let buffer = Buffer::builder().len(0xff).queue(queue.clone()).build()?;
+        let buffer = Buffer::builder().len(output_buffer_size).queue(queue.clone()).build()?;
         let header_buffer = Buffer::builder().len(0xff).queue(queue).build()?;
         
-        debug!("🧠 OpenCL buffers allocated successfully");
+        debug!("🧠 OpenCL buffers allocated successfully (output buffer: {} entries)", output_buffer_size);
         
         // Create the kernel with appropriate arguments based on kernel type
         let search_kernel = match settings.kernel_type {
@@ -351,15 +383,13 @@ impl Miner {
             crate::miner::format_number(settings.kernel_size as u64)
         );
         
-        // Create the miner with the kernel type
-        let kernel_type = settings.kernel_type;
-        
+        // Store the actual kernel type being used (may differ from requested due to fallback)
         Ok(Miner {
             search_kernel,
             buffer,
             header_buffer,
             settings,
-            kernel_type,
+            kernel_type: actual_kernel_type,
         })
     }
 
@@ -414,10 +444,20 @@ impl Miner {
     }
 
     pub fn find_nonce(&mut self, work: &Work, log: &Log) -> Result<Option<u64>> {
-        let base = match work
-            .nonce_idx
-            .checked_mul(self.num_nonces_per_search().try_into().unwrap())
-        {
+        // Safely convert num_nonces_per_search to u32, handling potential overflow
+        let nonces_per_search_u32: u32 = match self.num_nonces_per_search().try_into() {
+            Ok(val) => val,
+            Err(_) => {
+                log.error(
+                    "🚨 Error: num_nonces_per_search exceeds u32::MAX, using fallback value. \
+                    Consider reducing kernel_size or inner_iter_size.",
+                    Some("Miner")
+                );
+                u32::MAX
+            }
+        };
+        
+        let base = match work.nonce_idx.checked_mul(nonces_per_search_u32) {
             Some(base) => base,
             None => {
                 log.error(

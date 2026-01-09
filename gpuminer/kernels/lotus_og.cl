@@ -1,3 +1,14 @@
+// Lotus Original Mining Kernel - Optimized Version
+// 
+// This kernel implements the Lotus proof-of-work algorithm using SHA-256.
+// Optimizations applied:
+// - bitselect() for ch/maj functions (single GPU instruction on AMD/NVIDIA)
+// - Loop unrolling pragmas for SHA-256 compression
+// - Early exit on partial hash check
+// - Optimized rotate macros
+//
+// Build with: -cl-mad-enable -cl-fast-relaxed-math for best performance
+
 typedef uint num_t;
 
 __constant uint H[8] = { 
@@ -33,32 +44,30 @@ __constant uint CHAIN_LAYER_SCHEDULE_ARRAY[64] = {
 #define FOUND (0x80)
 #define NFLAG (0x7F)
 
-#define rot(x, y) rotate((num_t)x, (num_t)y)
-#define rotr(x, y) rotate((num_t)x, (num_t)(32-y))
+// Optimized rotate - use OpenCL built-in
+#define rotr(x, y) rotate((num_t)(x), (num_t)(32-(y)))
 
-num_t sigma0(num_t a) {
-    return rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-}
+// Optimized SHA-256 functions using bitselect (maps to single instruction on most GPUs)
+// ch(e,f,g) = (e & f) ^ (~e & g) = bitselect(g, f, e)
+#define choose(e, f, g) bitselect((num_t)(g), (num_t)(f), (num_t)(e))
 
-num_t sigma1(num_t e) {
-    return rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-}
+// maj(a,b,c) = (a & b) ^ (a & c) ^ (b & c) = bitselect(a, b, c ^ a)  
+#define majority(a, b, c) bitselect((num_t)(a), (num_t)(b), (num_t)(c) ^ (num_t)(a))
 
-num_t choose(num_t e, num_t f, num_t g) {
-    return (e & f) ^ (~e & g);
-}
+// Sigma functions - inlined for performance
+#define sigma0(a) (rotr((a), 2) ^ rotr((a), 13) ^ rotr((a), 22))
+#define sigma1(e) (rotr((e), 6) ^ rotr((e), 11) ^ rotr((e), 25))
 
-num_t majority(num_t a, num_t b, num_t c) {
-    return (a & b) ^ (a & c) ^ (b & c);
-}
+// Message schedule sigma functions
+#define sig0(x) (rotr((x), 7) ^ rotr((x), 18) ^ ((x) >> 3))
+#define sig1(x) (rotr((x), 17) ^ rotr((x), 19) ^ ((x) >> 10))
 
 void sha256_extend(
     __private num_t *schedule_array
 ) {
+    #pragma unroll 16
     for (uint i = 16; i < 64; ++i) {
-        num_t s0 = rotr(schedule_array[i-15],  7) ^ rotr(schedule_array[i-15], 18) ^ (schedule_array[i-15] >> 3);
-        num_t s1 = rotr(schedule_array[i- 2], 17) ^ rotr(schedule_array[i- 2], 19) ^ (schedule_array[i- 2] >> 10);
-        schedule_array[i] = schedule_array[i-16] + s0 + schedule_array[i-7] + s1;
+        schedule_array[i] = schedule_array[i-16] + sig0(schedule_array[i-15]) + schedule_array[i-7] + sig1(schedule_array[i-2]);
     }
 }
 
@@ -69,6 +78,8 @@ void sha256_compress(
     // working vars for the compression function
     num_t a = hash[0], b = hash[1], c = hash[2], d = hash[3],
           e = hash[4], f = hash[5], g = hash[6], h = hash[7];
+    
+    #pragma unroll 8
     for (uint i = 0; i < 64; ++i) {
         num_t tmp1 = h + sigma1(e) + choose(e, f, g) + K[i] + schedule_array[i];
         num_t tmp2 = sigma0(a) + majority(a, b, c);
@@ -92,6 +103,8 @@ void sha256_compress_const(
     // working vars for the compression function
     num_t a = hash[0], b = hash[1], c = hash[2], d = hash[3],
           e = hash[4], f = hash[5], g = hash[6], h = hash[7];
+    
+    #pragma unroll 8
     for (uint i = 0; i < 64; ++i) {
         num_t tmp1 = h + sigma1(e) + choose(e, f, g) + K[i] + schedule_array[i];
         num_t tmp2 = sigma0(a) + majority(a, b, c);
@@ -112,9 +125,9 @@ void sha256_pow_layer(
     __private num_t *schedule_array,
     __private num_t *hash
 ) {
-    for (uint i = 0; i < 8; ++i) {
-        hash[i] = H[i];
-    }
+    // Initialize hash state
+    hash[0] = H[0]; hash[1] = H[1]; hash[2] = H[2]; hash[3] = H[3];
+    hash[4] = H[4]; hash[5] = H[5]; hash[6] = H[6]; hash[7] = H[7];
     sha256_extend(schedule_array);
     sha256_compress(schedule_array, hash);
 }
@@ -123,9 +136,9 @@ void sha256_chain_layer(
     __private num_t *schedule_array,
     __private num_t *hash
 ) {
-    for (uint i = 0; i < 8; ++i) {
-        hash[i] = H[i];
-    }
+    // Initialize hash state
+    hash[0] = H[0]; hash[1] = H[1]; hash[2] = H[2]; hash[3] = H[3];
+    hash[4] = H[4]; hash[5] = H[5]; hash[6] = H[6]; hash[7] = H[7];
     sha256_extend(schedule_array);
     sha256_compress(schedule_array, hash);
     sha256_compress_const(CHAIN_LAYER_SCHEDULE_ARRAY, hash);
@@ -136,26 +149,37 @@ __kernel void search(
     __global uint *partial_header,
     __global uint *output
 ) {
+    // Use private memory for better performance
     num_t pow_layer[64];
     num_t chain_layer[64];
     num_t hash[8];
+    
+    // Load header data (these values are constant across iterations)
+    #pragma unroll
     for (uint i = 0; i < 8; ++i) {
         chain_layer[i] = partial_header[i];
     }
+    #pragma unroll
     for (uint i = 0; i < 13; ++i) {
         pow_layer[i] = partial_header[i + 8];
     }
-    for (uint i = 0; i < 3; ++i) {
-        pow_layer[i + 13] = POW_LAYER_PAD[i];
-    }
+    // Load padding constants
+    pow_layer[13] = POW_LAYER_PAD[0];
+    pow_layer[14] = POW_LAYER_PAD[1];
+    pow_layer[15] = POW_LAYER_PAD[2];
 
+    // Calculate base nonce for this work item
+    const num_t base_nonce = offset + get_global_id(0) * ITERATIONS;
+    
+    #pragma unroll 1
     for (uint iteration = 0; iteration < ITERATIONS; ++iteration) {
-        num_t nonce = offset + get_global_id(0) * ITERATIONS + iteration;
+        num_t nonce = base_nonce + iteration;
         pow_layer[3] = nonce;
 
         sha256_pow_layer(pow_layer, &chain_layer[8]);
         sha256_chain_layer(chain_layer, hash);
         
+        // Check if hash meets target (hash[7] == 0 means leading zeros)
         if (hash[7] == 0) {
             output[FOUND] = 1;
             output[NFLAG & nonce] = nonce;

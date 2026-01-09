@@ -8,7 +8,7 @@ use eframe::{
     },
     epi,
 };
-use lotus_miner_lib::{settings, ConfigSettings, LogEntry, Miner, Server, ServerRef};
+use lotus_miner_lib::{settings, ConfigSettings, LogEntry, Miner, Server, ServerRef, miner::KernelType};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
@@ -21,6 +21,7 @@ pub struct UserSettings {
     bitcoind_password: String,
     rpc_poll_interval: u64,
     gpu_index: i64,
+    pool_mining: bool,
 }
 
 pub struct MinerApp {
@@ -51,6 +52,7 @@ impl MinerApp {
                 bitcoind_password: config_settings.rpc_password,
                 rpc_poll_interval: config_settings.rpc_poll_interval.try_into().unwrap(),
                 gpu_index: config_settings.gpu_index,
+                pool_mining: config_settings.pool_mining,
             },
             Err(err) => {
                 eprintln!("Failed to load config, falling back to defaults: {}", err);
@@ -62,6 +64,7 @@ impl MinerApp {
                     bitcoind_password: settings::DEFAULT_PASSWORD.to_string(),
                     rpc_poll_interval: settings::DEFAULT_RPC_POLL_INTERVAL.try_into().unwrap(),
                     gpu_index: settings::DEFAULT_GPU_INDEX,
+                    pool_mining: false,
                 }
             }
         };
@@ -73,6 +76,8 @@ impl MinerApp {
             mine_to_address: user_settings.mine_to_address.clone(),
             kernel_size: user_settings.intensity.into(),
             gpu_index: user_settings.gpu_index,
+            pool_mining: user_settings.pool_mining,
+            kernel_type: KernelType::LotusOG,
         };
         MinerApp {
             user_settings,
@@ -265,7 +270,7 @@ impl epi::App for MinerApp {
                 if let Err(err) = ctx.set_contents(logs) {
                     self.server
                         .log()
-                        .error(format!("Error setting clipboard: {}", err));
+                        .error(format!("Error setting clipboard: {}", err), Some("GUI"));
                 }
             }
             ScrollArea::auto_sized().show(ui, |ui| {
@@ -280,7 +285,7 @@ impl epi::App for MinerApp {
 impl MinerApp {
     fn _apply_settings(&mut self) {
         let server = Arc::clone(&self.server);
-        self.server.log().info("Applying settings");
+        self.server.log().info("Applying settings", Some("GUI"));
         let user_settings = self.user_settings.clone();
         self.rt.spawn(async move {
             let mut node_settings = server.node_settings().await;
@@ -289,11 +294,12 @@ impl MinerApp {
             node_settings.bitcoind_password = user_settings.bitcoind_password;
             node_settings.rpc_poll_interval = user_settings.rpc_poll_interval;
             node_settings.miner_addr = user_settings.mine_to_address;
+            node_settings.pool_mining = user_settings.pool_mining;
             let mut miner = server.miner();
             miner.set_intensity(user_settings.intensity);
             let result = miner.update_gpu_index(user_settings.gpu_index);
             if let Err(err) = result {
-                server.log().error(err);
+                server.log().error(format!("{}", err), Some("GUI"));
             }
         });
     }

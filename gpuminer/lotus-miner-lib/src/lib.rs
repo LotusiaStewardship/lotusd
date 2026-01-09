@@ -59,9 +59,13 @@ pub type ServerRef = Arc<Server>;
 
 impl Server {
     pub fn from_config(config: ConfigSettings, report_hashrate_interval: Duration) -> Self {
+        // Optimized mining settings:
+        // - local_work_size: 256 is a good default for most GPUs (power of 2, good occupancy)
+        // - inner_iter_size: 32 provides good balance between kernel launches and work per thread
+        // - kernel_size: Configurable via config, represents total work items per kernel dispatch
         let mining_settings = MiningSettings {
             local_work_size: 256,
-            inner_iter_size: 16,
+            inner_iter_size: 32, // Increased from 16 for better GPU utilization
             kernel_size: 1 << config.kernel_size,
             sleep: 0,
             gpu_indices: vec![config.gpu_index as usize],
@@ -117,7 +121,9 @@ impl Server {
                     if let Err(err) = mine_some_nonces(Arc::clone(&server)).await {
                         log.error(format!("mine_some_nonces error: {:?}", err), Some("Miner"));
                     }
-                    tokio::time::sleep(Duration::from_micros(3)).await;
+                    // Yield to allow other tasks to run, but don't add unnecessary delay
+                    // The mining operation itself provides natural pacing
+                    tokio::task::yield_now().await;
                 }
             }
         });
@@ -131,7 +137,16 @@ impl Server {
     }
 
     pub fn miner<'a>(&'a self) -> std::sync::MutexGuard<'a, Miner> {
-        self.miner.lock().unwrap()
+        // Note: If the mutex is poisoned (a thread panicked while holding it),
+        // we recover by taking ownership of the lock anyway. The miner state may
+        // be inconsistent, but continuing is better than crashing the entire app.
+        match self.miner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("Miner mutex was poisoned, recovering...");
+                poisoned.into_inner()
+            }
+        }
     }
 
     pub fn log(&self) -> &Log {
@@ -147,9 +162,11 @@ impl Server {
         let mut data_points = self.hashrate_data_points.lock().await;
         data_points.push((now, new_nonces));
         
-        let cutoff = now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default() - Duration::from_secs(60);
+        // Retain data points from the last 60 seconds
+        // Compare directly against `now` rather than using UNIX_EPOCH arithmetic
+        let cutoff_duration = Duration::from_secs(60);
         data_points.retain(|(time, _)| {
-            time.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default() >= cutoff
+            now.duration_since(*time).unwrap_or(Duration::MAX) <= cutoff_duration
         });
         
         // Calculate total nonces and time span across all retained data points
@@ -292,7 +309,16 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
         }
     };
     
-    let block = create_block(&unsolved_block);
+    let block = match create_block(&unsolved_block) {
+        Ok(block) => block,
+        Err(e) => {
+            log.error(format!(
+                "Failed to parse block from node response: {}. This may indicate a protocol mismatch.",
+                e
+            ), Some("Miner"));
+            return Ok(());
+        }
+    };
     
     let total_time = request_start.elapsed();
     
