@@ -10,6 +10,7 @@ pub use settings::ConfigSettings;
 pub use logger::{Log, LogSeverity, HashrateEntry, LoggerConfig, init_global_logger, LogEntry};
 
 use std::{
+    convert::TryInto,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -36,6 +37,9 @@ pub struct Server {
     last_total_nonces: AtomicU64,
     log: Log,
     report_hashrate_interval: Duration,
+    /// Tracks the last prev_hash we logged about to prevent duplicate log messages.
+    /// None = haven't logged startup yet, Some(hash) = last hash we logged about
+    last_logged_prev_hash: Mutex<Option<[u8; 32]>>,
 }
 
 pub struct NodeSettings {
@@ -71,10 +75,20 @@ impl Server {
             ).into());
         }
         
+        // Validate kernel_size - must be between 8 and 31 (u32 can hold 1 << 31)
+        // Values above ~24-26 may exceed GPU hardware limits anyway
+        if config.kernel_size < 8 || config.kernel_size > 31 {
+            return Err(format!(
+                "Invalid kernel_size: {}. Must be between 8 and 31. Note: values above ~24 may exceed GPU hardware limits.",
+                config.kernel_size
+            ).into());
+        }
+        
         let mining_settings = MiningSettings {
             local_work_size: 256,
             inner_iter_size: 16,
-            kernel_size: 1 << config.kernel_size,
+            // Use 1u32 to ensure proper bit width for the shift
+            kernel_size: 1u32 << config.kernel_size,
             sleep: 0,
             gpu_indices: vec![config.gpu_index as usize],
             kernel_type: config.kernel_type,
@@ -108,6 +122,7 @@ impl Server {
             last_total_nonces: AtomicU64::new(0),
             log: Log::new(),
             report_hashrate_interval,
+            last_logged_prev_hash: Mutex::new(None),
         })
     }
 
@@ -133,7 +148,7 @@ impl Server {
                     if let Err(err) = mine_some_nonces(Arc::clone(&server)).await {
                         log.error(format!("mine_some_nonces error: {:?}", err), Some("Miner"));
                     }
-                    tokio::time::sleep(Duration::from_micros(3)).await;
+                    tokio::time::sleep(Duration::from_micros(1)).await;
                 }
             }
         });
@@ -323,19 +338,33 @@ async fn update_next_block(server: &Server) -> Result<(), Box<dyn std::error::Er
     
     let mut block_state = server.block_state.lock().await;
     
-    if let Some(current_block) = &block_state.current_block {
-        if current_block.prev_hash() != block.prev_hash() {
+    // Get the new block's prev_hash for comparison
+    let new_prev_hash: [u8; 32] = block.prev_hash().try_into().unwrap_or([0u8; 32]);
+    
+    // Check if we should log this chain tip change (deduplicate concurrent calls)
+    let mut last_logged = server.last_logged_prev_hash.lock().await;
+    let should_log = match &*last_logged {
+        None => true, // First time - log startup
+        Some(last_hash) => last_hash != &new_prev_hash, // Only log if hash changed
+    };
+    
+    if should_log {
+        if last_logged.is_none() {
+            // First time logging - startup message
+            log.info(format!(
+                "🌱 Started mining on chain tip: {}",
+                display_hash(&new_prev_hash)
+            ), Some("Miner"));
+        } else {
+            // Chain tip changed - switch message
             log.info(format!(
                 "🔀 Switched to new chain tip: {}",
-                display_hash(&block.prev_hash())
+                display_hash(&new_prev_hash)
             ), Some("Miner"));
         }
-    } else {
-        log.info(format!(
-            "🌱 Started mining on chain tip: {}",
-            display_hash(&block.prev_hash())
-        ), Some("Miner"));
+        *last_logged = Some(new_prev_hash);
     }
+    drop(last_logged); // Release the lock early
     
     block_state.extra_nonce += 1;
     block_state.next_block = Some(block);
