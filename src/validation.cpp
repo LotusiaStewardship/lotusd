@@ -4005,7 +4005,7 @@ static bool ContextualCheckBlock(const CBlock &block,
         // Get the coinbase transaction's first output scriptPubKey
         const CScript &scriptPubKey = block.vtx[0]->vout[0].scriptPubKey;
         std::string scriptHex = HexStr(scriptPubKey);
-        LogPrintf("DEBUG: Coinbase scriptPubKey: %s\n", scriptHex);
+        //LogPrintf("DEBUG: Coinbase scriptPubKey: %s\n", scriptHex);
         
         // Early blocks may not follow the height encoding rule
         // Define a height after which we strictly enforce the rule
@@ -4015,45 +4015,45 @@ static bool ContextualCheckBlock(const CBlock &block,
         bool strictCheckingCoinbaseShame = (nHeight < SHAME_PREFIX_ENFORCED_BEFORE);
         // Empty script
         if (scriptPubKey.empty()) {
-            LogPrintf("DEBUG: Empty scriptPubKey\n");
+            //LogPrintf("DEBUG: Empty scriptPubKey\n");
             return !strictChecking;
         }
         
         // Check for OP_RETURN
         if (scriptPubKey[0] != 0x6a) { // 0x6a is OP_RETURN
-            LogPrintf("DEBUG: Script does not start with OP_RETURN. First byte: 0x%02x\n", 
-                     scriptPubKey[0]);
+            //LogPrintf("DEBUG: Script does not start with OP_RETURN. First byte: 0x%02x\n", 
+             //        scriptPubKey[0]);
             return !strictChecking;
         }
         
-        LogPrintf("DEBUG: Found OP_RETURN at position 0\n");
+        //LogPrintf("DEBUG: Found OP_RETURN at position 0\n");
         
         // Position after OP_RETURN
         size_t pos = 1;
         if (pos >= scriptPubKey.size()) {
-            LogPrintf("DEBUG: No data after OP_RETURN\n");
+            //LogPrintf("DEBUG: No data after OP_RETURN\n");
             return !strictChecking;
         }
         
         // Parse prefix length and data
         uint8_t prefixLen = scriptPubKey[pos++];
-        LogPrintf("DEBUG: Prefix length byte at position %zu: 0x%02x (%u)\n", 
-                  pos-1, prefixLen, prefixLen);
+        //LogPrintf("DEBUG: Prefix length byte at position %zu: 0x%02x (%u)\n", 
+        //          pos-1, prefixLen, prefixLen);
         
         if (pos + prefixLen > scriptPubKey.size()) {
-            LogPrintf("DEBUG: Not enough bytes for prefix data\n");
+            //LogPrintf("DEBUG: Not enough bytes for prefix data\n");
             return !strictChecking;
         }
         
         std::vector<uint8_t> prefixData(scriptPubKey.begin() + pos, 
                                        scriptPubKey.begin() + pos + prefixLen);
         std::string prefixHex = HexStr(prefixData);
-        LogPrintf("DEBUG: Prefix data at position %zu: %s\n", pos, prefixHex);
+        //LogPrintf("DEBUG: Prefix data at position %zu: %s\n", pos, prefixHex);
         
         // Verify that the prefix matches the expected COINBASE_PREFIX
         if (prefixLen != COINBASE_PREFIX.size() || prefixData != COINBASE_PREFIX) {
-            LogPrintf("DEBUG: Prefix data doesn't match expected COINBASE_PREFIX. Expected: %s, Got: %s\n",
-                      HexStr(COINBASE_PREFIX), prefixHex);
+            //LogPrintf("DEBUG: Prefix data doesn't match expected COINBASE_PREFIX. Expected: %s, Got: %s\n",
+            //          HexStr(COINBASE_PREFIX), prefixHex);
             return !strictCheckingCoinbaseShame;
         }
         
@@ -4062,23 +4062,23 @@ static bool ContextualCheckBlock(const CBlock &block,
         
         // Parse height length and data
         if (pos >= scriptPubKey.size()) {
-            LogPrintf("DEBUG: No height length byte found\n");
+            //LogPrintf("DEBUG: No height length byte found\n");
             return !strictChecking;
         }
         
         uint8_t heightLen = scriptPubKey[pos++];
-        LogPrintf("DEBUG: Height length byte at position %zu: 0x%02x (%u)\n", 
-                  pos-1, heightLen, heightLen);
+        //LogPrintf("DEBUG: Height length byte at position %zu: 0x%02x (%u)\n", 
+        //          pos-1, heightLen, heightLen);
         
         if (pos + heightLen > scriptPubKey.size() || heightLen > 3) {
-            LogPrintf("DEBUG: Not enough bytes for height data or height too large\n");
+            //LogPrintf("DEBUG: Not enough bytes for height data or height too large\n");
             return !strictChecking;
         }
         
         std::vector<uint8_t> heightData(scriptPubKey.begin() + pos, 
                                       scriptPubKey.begin() + pos + heightLen);
         std::string heightHex = HexStr(heightData);
-        LogPrintf("DEBUG: Height data at position %zu: %s\n", pos, heightHex);
+        //LogPrintf("DEBUG: Height data at position %zu: %s\n", pos, heightHex);
         
         // Convert the little-endian bytes to an integer
         int nHeight_coinbase = 0;
@@ -4086,13 +4086,13 @@ static bool ContextualCheckBlock(const CBlock &block,
             nHeight_coinbase |= static_cast<int>(heightData[i]) << (8 * i);
         }
         
-        LogPrintf("DEBUG: Parsed height from coinbase: %d (expected: %d)\n", 
-                  nHeight_coinbase, nHeight);
+        //LogPrintf("DEBUG: Parsed height from coinbase: %d (expected: %d)\n", 
+        //          nHeight_coinbase, nHeight);
         
         // Verify the height matches
         if (nHeight_coinbase != nHeight) {
-            LogPrintf("WARNING: block height mismatch in coinbase: coinbase=%d (hex: %s) vs. block=%d.\n", 
-                      nHeight_coinbase, heightHex, nHeight);
+            //LogPrintf("WARNING: block height mismatch in coinbase: coinbase=%d (hex: %s) vs. block=%d.\n", 
+            //          nHeight_coinbase, heightHex, nHeight);
             return !strictChecking;
         }
     }
