@@ -1,5 +1,8 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2016 The Bitcoin Core developers
+// Copyright (c) 2017-2021 The Bitcoin developers
+// Copyright (c) 2021-2023 The Logos Foundation
+// Copyright (c) 2024-2026 The Lotusia Stewardship
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,8 +12,6 @@
 #include <primitives/blockhash.h>
 #include <script/script.h>
 #include <uint256.h>
-
-#include <limits>
 
 namespace Consensus {
 
@@ -26,6 +27,7 @@ struct CoinbaseAddresses {
     std::vector<std::string> firstSamuel;
     std::vector<std::string> secondSamuel;
     std::vector<std::string> firstKings;
+    std::vector<std::string> secondKings;
 };
 
 /**
@@ -64,6 +66,9 @@ struct Params {
     /** Unit time used for MTP activation of 2026-06-21T08:24:00.000Z protocol
      * upgrade */
     int firstKingsActivationTime;
+    /** Unit time used for MTP activation of 2026-12-21T15:03:00.000Z protocol
+     * upgrade */
+    int secondKingsActivationTime;
 
     /**
      * Don't warn about unknown BIP 9 activations below this height.
@@ -76,6 +81,13 @@ struct Params {
     bool enableMinerFund;
     CoinbaseAddresses coinbasePayoutAddresses;
 
+    /**
+     * Enable or disable difficulty-based subsidy calculation.
+     * When enabled, the block subsidy is calculated based on the current
+     * difficulty level rather than using a fixed halving schedule.
+     * This is used in GetBlockSubsidy() in src/validation.cpp to determine
+     * the mining reward for each block.
+     */
     bool enableDifficultyBasedSubsidy;
 
     /** Proof of work parameters */

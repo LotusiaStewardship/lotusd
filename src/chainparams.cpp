@@ -10,8 +10,8 @@
 #include <chainparamsseeds.h>
 #include <consensus/consensus.h>
 #include <consensus/merkle.h>
-#include <hash.h>
 #include <currencyunit.h>
+#include <hash.h>
 #include <network.h>
 #include <tinyformat.h>
 #include <util/strencodings.h>
@@ -124,6 +124,8 @@ public:
         consensus.secondSamuelActivationTime = 1766329380;
         // 2026-06-21T08:24:00.000Z protocol upgrade
         consensus.firstKingsActivationTime = 1782030240;
+        // 2026-12-21T15:03:00.000Z protocol upgrade
+        consensus.secondKingsActivationTime = 1798074180;
 
         /**
          * The message start string is designed to be unlikely to occur in
@@ -287,7 +289,10 @@ public:
             testnetActivationOffset;
         // 2026-06-21T08:24:00.000Z protocol upgrade
         consensus.firstKingsActivationTime =
-            mainnetConsensus.firstKingsActivationTime -
+            mainnetConsensus.firstKingsActivationTime - testnetActivationOffset;
+        // 2026-12-21T15:03:00.000Z protocol upgrade
+        consensus.secondKingsActivationTime =
+            mainnetConsensus.secondKingsActivationTime -
             testnetActivationOffset;
 
         // "ltdk" with MSB set
@@ -418,6 +423,9 @@ public:
         // 2026-06-21T08:24:00.000Z protocol upgrade
         consensus.firstKingsActivationTime =
             mainnetConsensus.firstKingsActivationTime;
+        // 2026-12-21T15:03:00.000Z protocol upgrade
+        consensus.secondKingsActivationTime =
+            mainnetConsensus.secondKingsActivationTime;
 
         // "lrdk" with MSB set
         diskMagic[0] = 0xec;
