@@ -1,5 +1,14 @@
-#include <string>
-#include <vector>
+
+// Copyright (c) 2021-2023 The Logos Foundation
+// Copyright (c) 2024-2026 The Lotusia Stewardship
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+/**
+ * This file contains the coinbase reward addresses for the Lotus network.
+ * These addresses receive a portion of the block reward and are organized
+ * by network upgrade epoch (genesis, exodus, leviticus, etc.).
+ */
 
 #include <consensus/params.h>
 
@@ -137,15 +146,15 @@ Consensus::CoinbaseAddresses AddressSets = {
         {
             "lotus_16PSJJYp3YkVyctW8LRbp6UhbsrQMJghL3jjze3b7",
         },
-    .judges =
+    .judges = 
         {
             "lotus_16PSJMaps9sQg7aBQgyY1RdHb2fZYdmWhQPbgus75"
         },
-    .ruth =
+    .ruth = 
         {
             "lotus_16PSJPi88MtH34Ti3dZza4MFRF9XUVd3fKc6Ec3TV"
         },
-    .firstSamuel =
+    .firstSamuel = 
         {
             "lotus_16PSJKi4ucDByLHn3mTQaBijiNZmczAdALVDGS53V"
         },
@@ -155,6 +164,12 @@ Consensus::CoinbaseAddresses AddressSets = {
             "lotus_16PSJMYJL6FxpRh9nP8iFZPiGhLM8p5S9L5dVXUcJ",
             // faithful turtle
             "lotus_16PSJHGmfZkU8zFrzU8Gw198o4j2XUryNnrMccuvZ"
+        },
+    .firstKings =
+        {
+            // faithful turtle
+            "lotus_16PSJQXrnTrUbhnxPpPgf1jd16JFkWk8TdbpALVME"
+            // TODO: add hash turtle before mainnet launch
         },
 };
 } // namespace RewardAddresses

@@ -271,16 +271,40 @@ bool CheckSequenceLocks(const CTxMemPool &pool, const CTransaction &tx,
     return EvaluateSequenceLocks(index, lockPair);
 }
 
-// Command-line argument "-replayprotectionactivationtime=<timestamp>" will
-// cause the node to switch to replay protected SigHash ForkID value when the
-// median timestamp of the previous 11 blocks is greater than or equal to
-// <timestamp>. Defaults to the pre-defined timestamp when not set.
+// Check if replay protection is enabled based on the median time past.
+//
+// Replay protection is a security feature that prevents transactions from one
+// blockchain fork from being valid on another fork. This is achieved by using
+// a different SigHash ForkID value after a certain activation time.
+//
+// The activation time can be configured via the command-line argument
+// "-replayprotectionactivationtime=<timestamp>". When the median timestamp
+// of the previous 11 blocks (Median Time Past or MTP) is greater than or
+// equal to the specified timestamp, the node will switch to using the
+// replay-protected SigHash ForkID value.
+//
+// If the command-line argument is not set, the function defaults to using
+// the consensus-defined secondKingsActivationTime parameter.
+//
+// @param params The consensus parameters containing default activation times.
+// @param nMedianTimePast The median time past of the previous 11 blocks.
+// @return true if replay protection should be enabled, false otherwise.
 static bool IsReplayProtectionEnabled(const Consensus::Params &params,
                                       int64_t nMedianTimePast) {
     return nMedianTimePast >= gArgs.GetArg("-replayprotectionactivationtime",
-                                           params.firstKingsActivationTime);
+                                           params.secondKingsActivationTime);
 }
 
+// Check if replay protection is enabled based on the previous block index.
+//
+// This is a convenience overload that extracts the Median Time Past (MTP)
+// from the provided block index and delegates to the primary
+// IsReplayProtectionEnabled function.
+//
+// @param params The consensus parameters containing default activation times.
+// @param pindexPrev Pointer to the previous block index. If nullptr, replay
+//                   protection is considered disabled.
+// @return true if replay protection should be enabled, false otherwise.
 static bool IsReplayProtectionEnabled(const Consensus::Params &params,
                                       const CBlockIndex *pindexPrev) {
     if (pindexPrev == nullptr) {
