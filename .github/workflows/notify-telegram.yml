@@ -1,0 +1,17 @@
+name: Telegram Notifications
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [closed]
+
+jobs:
+  notify:
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
+    uses: lotusia/monorepo/.github/workflows/notify-telegram.yml@main
+    with:
+      repo: ${{ github.repository }}
+    secrets:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
