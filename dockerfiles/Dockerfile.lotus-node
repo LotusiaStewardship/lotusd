@@ -34,7 +34,7 @@ RUN mkdir build && cd build && \
       -DENABLE_GLIBC_BACK_COMPAT=ON \
       -DCLIENT_VERSION_IS_RELEASE=ON \
       -DENABLE_CLANG_TIDY=OFF && \
-    ninja lotus-cli && \
+    ninja lotusd && \
     ninja security-check && \
     ninja symbol-check
 
@@ -47,16 +47,28 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
-RUN mkdir -p /opt/lotus/bin
+RUN mkdir -p /opt/lotus/bin /root/.lotus
 
-# Copy built binary from builder stage
-COPY --from=builder /lotus-source/build/src/lotus-cli /opt/lotus/bin/
+# Copy built binary from builder stage as lotus-node
+COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/lotus-node
 
 # Set permissions
-RUN chmod +x /opt/lotus/bin/lotus-cli
+RUN chmod +x /opt/lotus/bin/lotus-node
 
 # Add to PATH
 ENV PATH="/opt/lotus/bin:${PATH}"
 
-ENTRYPOINT ["/opt/lotus/bin/lotus-cli"]
-CMD ["--help"]
+# Expose commonly used ports
+# P2P network
+EXPOSE 9333
+# RPC interface
+EXPOSE 9332
+# RPC port from docker-compose
+EXPOSE 58525
+
+# Set working directory
+WORKDIR /root
+
+# Default command to run the node daemon
+ENTRYPOINT ["/opt/lotus/bin/lotus-node"]
+CMD ["-reindex", "-printtoconsole", "-datadir=/root/.lotus", "-addnode=116.103.232.62", "-addnode=69.234.67.246", "-addnode=146.70.211.96", "-addnode=70.92.25.116", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-rpcuser=lotus", "-rpcpassword=lkdjflheoiueiiir", "-rpcallowip=10.128.0.0/16", "-rpcbind=0.0.0.0:58525", "-rpcport=58525", "-rpcallowip=127.0.0.1", "-rpcthreads=8", "-disablewallet=0"]

@@ -1,39 +1,20 @@
 # Build stage
-FROM ubuntu:24.04 AS builder
+FROM ubuntu:20.04 AS builder
 
-# Install build dependencies
+# Install build prerequisites for the depends system
 RUN apt-get update && apt-get install -y \
     build-essential \
+    autoconf \
+    automake \
     cmake \
-    libssl-dev \
-    libzmq3-dev \
-    libboost-all-dev \
-    libevent-dev \
-    libdb++-dev \
-    libminiupnpc-dev \
-    libnng-dev \
-    libjemalloc-dev \
+    curl \
+    git \
+    libtool \
+    ninja-build \
+    patch \
     pkg-config \
-    libsqlite3-dev \
-    flatbuffers-compiler \
-    libflatbuffers-dev \
-    qtbase5-dev \
-    qt5-qmake \
-    libqt5gui5 \
-    libqt5core5a \
-    libqt5dbus5 \
-    qttools5-dev \
-    qttools5-dev-tools \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libqrencode-dev \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
-
-# Create CMake configuration file for Flatbuffers
-RUN mkdir -p /usr/lib/cmake/flatbuffers && \
-    echo 'set(FLATBUFFERS_INCLUDE_DIR "/usr/include")' > /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
-    echo 'set(FLATBUFFERS_LIBRARIES "/usr/lib/x86_64-linux-gnu/libflatbuffers.a")' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
-    echo 'set(FLATBUFFERS_FOUND TRUE)' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake
 
 # Set working directory for the source code
 WORKDIR /lotus-source
@@ -41,41 +22,28 @@ WORKDIR /lotus-source
 # Copy the source code
 COPY . .
 
-# Build the binary
-RUN mkdir build
-WORKDIR /lotus-source/build
-RUN cmake ..
-RUN make lotus-tx -j$(nproc)
+# Build dependencies using the depends system
+RUN make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
 
-# Runtime stage
-FROM ubuntu:24.04
+# Build the binary using the depends toolchain
+RUN mkdir build && cd build && \
+    cmake -GNinja .. \
+      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
+      -DENABLE_REDUCE_EXPORTS=ON \
+      -DENABLE_STATIC_LIBSTDCXX=ON \
+      -DENABLE_GLIBC_BACK_COMPAT=ON \
+      -DCLIENT_VERSION_IS_RELEASE=ON \
+      -DENABLE_CLANG_TIDY=OFF && \
+    ninja lotus-tx && \
+    ninja security-check && \
+    ninja symbol-check
 
-# Install runtime dependencies
+# Runtime stage -- use ubuntu:20.04 to match glibc back-compat target
+FROM ubuntu:20.04
+
+# Install minimal runtime dependencies (depends system statically links most libs)
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    libssl-dev \
-    libzmq3-dev \
-    libboost-all-dev \
-    libevent-dev \
-    libdb++-dev \
-    libminiupnpc-dev \
-    libnng-dev \
-    libjemalloc-dev \
-    pkg-config \
-    libsqlite3-dev \
-    flatbuffers-compiler \
-    libflatbuffers-dev \
-    qtbase5-dev \
-    qt5-qmake \
-    libqt5gui5 \
-    libqt5core5a \
-    libqt5dbus5 \
-    qttools5-dev \
-    qttools5-dev-tools \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libqrencode-dev \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
@@ -85,10 +53,10 @@ RUN mkdir -p /opt/lotus/bin
 COPY --from=builder /lotus-source/build/src/lotus-tx /opt/lotus/bin/
 
 # Set permissions
-RUN chmod +x /opt/lotus/bin/*
+RUN chmod +x /opt/lotus/bin/lotus-tx
 
 # Add to PATH
 ENV PATH="/opt/lotus/bin:${PATH}"
 
 ENTRYPOINT ["/opt/lotus/bin/lotus-tx"]
-CMD ["--help"] 
+CMD ["--help"]
