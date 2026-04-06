@@ -1,5 +1,9 @@
 FROM rust:slim-bookworm AS builder
 
+# Prevent interactive prompts during apt-get install (e.g., tzdata)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
 # Install minimal build dependencies for Rust and OpenCL headers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
