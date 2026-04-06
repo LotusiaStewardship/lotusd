@@ -36,6 +36,7 @@ RUN make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
 # Build the binary using the depends toolchain
 RUN mkdir build && cd build && \
     cmake -GNinja .. \
+      -DBASEPREFIX=/lotus-source/depends \
       -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
       -DENABLE_REDUCE_EXPORTS=ON \
       -DENABLE_STATIC_LIBSTDCXX=ON \
