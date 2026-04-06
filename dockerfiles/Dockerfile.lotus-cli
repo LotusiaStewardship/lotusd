@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     automake \
     cmake \
     curl \
+    gperf \
     git \
     libtool \
     ninja-build \
