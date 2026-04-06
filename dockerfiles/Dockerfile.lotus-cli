@@ -5,6 +5,12 @@ FROM debian:buster AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
+# Debian Buster is archived - use archive.debian.org repositories
+RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian buster-backports main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until
+
 # Install CMake from buster-backports (matches gitian build environment)
 RUN apt-get update && apt-get install -y -t buster-backports cmake && \
     rm -rf /var/lib/apt/lists/*
@@ -53,6 +59,11 @@ FROM debian:buster
 # Prevent interactive prompts during apt-get install
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
+
+# Debian Buster is archived - use archive.debian.org repositories
+RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until
 
 # Install minimal runtime dependencies (depends system statically links most libs)
 RUN apt-get update && apt-get install -y \
