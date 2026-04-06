@@ -15,6 +15,10 @@ RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /
 RUN apt-get update && apt-get install -y -t buster-backports cmake && \
     rm -rf /var/lib/apt/lists/*
 
+# Remove buster-backports to avoid dependency conflicts with other packages
+RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list
+
 # Install build prerequisites for the depends system
 RUN apt-get update && apt-get install -y \
     build-essential \
