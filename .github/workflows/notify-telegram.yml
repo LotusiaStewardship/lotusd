@@ -9,7 +9,7 @@ on:
 jobs:
   notify:
     if: github.event_name == 'push' || github.event.pull_request.merged == true
-    uses: LotusiaStewardship/monorepo/.github/workflows/notify-telegram.yml@master
+    uses: LotusiaStewardship/actions/.github/workflows/notify-telegram.yml@master
     with:
       repo: ${{ github.repository }}
     secrets:
