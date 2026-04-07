@@ -29,7 +29,14 @@ jobs:
   build-core:
     name: 🏗️ Core Components
     needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
+    if: >-
+      always() &&
+      needs.version-management.outputs.source_changed == 'true' &&
+      (
+        github.event_name == 'pull_request' ||
+        needs.version-management.outputs.should_bump == 'false' ||
+        needs.version-management.outputs.version_bumped == 'true'
+      )
     uses: ./.github/workflows/lotus-core-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
@@ -38,7 +45,14 @@ jobs:
   build-tools:
     name: 🔧 Tool Components
     needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
+    if: >-
+      always() &&
+      needs.version-management.outputs.source_changed == 'true' &&
+      (
+        github.event_name == 'pull_request' ||
+        needs.version-management.outputs.should_bump == 'false' ||
+        needs.version-management.outputs.version_bumped == 'true'
+      )
     uses: ./.github/workflows/lotus-tools-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
@@ -47,7 +61,14 @@ jobs:
   build-gui:
     name: 🖥️ GUI Components
     needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
+    if: >-
+      always() &&
+      needs.version-management.outputs.source_changed == 'true' &&
+      (
+        github.event_name == 'pull_request' ||
+        needs.version-management.outputs.should_bump == 'false' ||
+        needs.version-management.outputs.version_bumped == 'true'
+      )
     uses: ./.github/workflows/lotus-gui-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
@@ -56,7 +77,14 @@ jobs:
   build-miner:
     name: ⛏️ Mining Components
     needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
+    if: >-
+      always() &&
+      needs.version-management.outputs.source_changed == 'true' &&
+      (
+        github.event_name == 'pull_request' ||
+        needs.version-management.outputs.should_bump == 'false' ||
+        needs.version-management.outputs.version_bumped == 'true'
+      )
     uses: ./.github/workflows/lotus-miner-build.yml
     with:
       version: ${{ needs.version-management.outputs.version }}

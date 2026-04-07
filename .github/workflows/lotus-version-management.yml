@@ -7,6 +7,9 @@ on:
       should_bump:
         description: "Whether the version should be bumped"
         value: ${{ jobs.version-check.outputs.should_bump }}
+      source_changed:
+        description: "Whether source-affecting files were changed"
+        value: ${{ jobs.version-check.outputs.source_changed }}
       version_bumped:
         description: "Whether the version was actually bumped"
         value: ${{ jobs.version-bump.outputs.version_bumped || 'false' }}
@@ -30,6 +33,7 @@ jobs:
     outputs:
       current_version: ${{ steps.get-version.outputs.version }}
       should_bump: ${{ steps.check-bump.outputs.should_bump }}
+      source_changed: ${{ steps.check-source-changes.outputs.source_changed }}
 
     steps:
     - name: Checkout code
@@ -44,16 +48,69 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Current version: $VERSION"
 
+    - name: Check for source-affecting changes
+      id: check-source-changes
+      run: |
+        # Get the last tag to compare against
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+        if [[ -z "$LATEST_TAG" ]]; then
+          # No tags yet, check all commits
+          echo "No tags found, checking all commits for source changes"
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only --diff-filter=ACMR HEAD 2>/dev/null || echo "")
+        else
+          # Check what changed since the last tag
+          echo "Checking changes since last tag: $LATEST_TAG"
+          CHANGED_FILES=$(git diff --name-only "$LATEST_TAG" HEAD)
+        fi
+
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
+
+        # Define source-affecting paths
+        SOURCE_PATHS=(
+          "src/"
+          "gpuminer/"
+          "depends/"
+          "cmake/"
+          "dockerfiles/"
+          "contrib/aur/"
+        )
+
+        SOURCE_CHANGED=false
+        for path in "${SOURCE_PATHS[@]}"; do
+          if echo "$CHANGED_FILES" | grep -q "^${path}"; then
+            echo "Source change detected in: $path"
+            SOURCE_CHANGED=true
+            break
+          fi
+        done
+
+        if [[ "$SOURCE_CHANGED" == "true" ]]; then
+          echo "source_changed=true" >> $GITHUB_OUTPUT
+          echo "Result: Source-affecting files changed"
+        else
+          echo "source_changed=false" >> $GITHUB_OUTPUT
+          echo "Result: No source-affecting files changed (docs, CI config, web apps, etc.)"
+        fi
+
     - name: Check if version bump is needed
       id: check-bump
       run: |
+        SOURCE_CHANGED="${{ steps.check-source-changes.outputs.source_changed }}"
+
         # Get the latest tag
         LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
         echo "Latest tag: $LATEST_TAG"
 
         if [[ "$LATEST_TAG" == "none" ]]; then
+          # No tags exist yet, always bump
           echo "should_bump=true" >> $GITHUB_OUTPUT
           echo "Version bump needed: No tags exist yet"
+        elif [[ "$SOURCE_CHANGED" != "true" ]]; then
+          # No source changes, no bump needed
+          echo "should_bump=false" >> $GITHUB_OUTPUT
+          echo "Version bump not needed: No source-affecting changes"
         else
           # Count commits since last tag
           COMMITS_SINCE_TAG=$(git rev-list $LATEST_TAG..HEAD --count)
@@ -61,10 +118,10 @@ jobs:
           
           if [[ "$COMMITS_SINCE_TAG" -gt 0 ]]; then
             echo "should_bump=true" >> $GITHUB_OUTPUT
-            echo "Version bump needed: $COMMITS_SINCE_TAG commits since last tag"
+            echo "Version bump needed: $COMMITS_SINCE_TAG commits since last tag with source changes"
           else
             echo "should_bump=false" >> $GITHUB_OUTPUT
-            echo "Version bump not needed: Only $COMMITS_SINCE_TAG commits since last tag"
+            echo "Version bump not needed: No new commits since last tag"
           fi
         fi
 
@@ -73,7 +130,7 @@ jobs:
     name: 📈 Bump Version
     needs: [ version-check ]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true' && needs.version-check.outputs.source_changed == 'true'
     outputs:
       new_version: ${{ steps.bump-version.outputs.new_version }}
       version_bumped: ${{ steps.commit.outputs.version_bumped }}
@@ -130,7 +187,7 @@ jobs:
     name: 🔄 Prepare Revert
     needs: [ version-check ]
     runs-on: ubuntu-latest
-    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true'
+    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.version-check.outputs.should_bump == 'true' && needs.version-check.outputs.source_changed == 'true'
     outputs:
       prev_version: ${{ steps.calculate-prev-version.outputs.prev_version }}
 
@@ -139,13 +196,10 @@ jobs:
       id: calculate-prev-version
       run: |
         CURRENT_VERSION="${{ needs.version-check.outputs.current_version }}"
-        # Split version into components
-        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-        # Calculate the previous version
-        PREV_PATCH=$((PATCH - 1))
-        PREV_VERSION="$MAJOR.$MINOR.$PREV_PATCH"
-        echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
-        echo "Current version: $CURRENT_VERSION, Previous version: $PREV_VERSION"
+        # The current version IS the version to revert to (it's the version before bump)
+        # The bump will increment it, so we just need to save what we have now
+        echo "prev_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "Version to revert to: $CURRENT_VERSION (this is the pre-bump version)"
 
     # This job will be referenced by other workflows, but doesn't do anything unless told to
     # It simply provides a hook for the main workflow to monitor build statuses and revert if needed
