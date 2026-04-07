@@ -11,16 +11,10 @@ RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /
     echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list && \
     echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until
 
-# Install CMake from buster-backports (matches gitian build environment)
-RUN apt-get update && apt-get install -y -t buster-backports cmake && \
-    rm -rf /var/lib/apt/lists/*
-
-# Remove buster-backports to avoid dependency conflicts with other packages
-RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
-    echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list
-
-# Install build prerequisites for the depends system
+# Install CMake from buster-backports and build prerequisites in a single step
+# to avoid dependency conflicts (matches gitian build environment)
 RUN apt-get update && apt-get install -y \
+    -t buster-backports cmake \
     build-essential \
     autoconf \
     automake \
