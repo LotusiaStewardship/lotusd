@@ -12,7 +12,7 @@
 
 /**
  * TxIndex is used to look up transactions included in the blockchain by ID.
- * The index is written to a LevelDB database and records the filesystem
+ * The index is written to a SQLite database and records the filesystem
  * location of each transaction by transaction ID.
  */
 class TxIndex final : public BaseIndex {

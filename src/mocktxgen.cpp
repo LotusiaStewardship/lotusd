@@ -5,6 +5,7 @@
 #include <mocktxgen.h>
 
 #include <blockdb.h>
+#include <util/system.h>
 #include <chainparams.h>
 #include <coins.h>
 #include <key.h>

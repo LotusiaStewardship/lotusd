@@ -109,7 +109,6 @@ if(ENABLE_COVERAGE)
 		"depends"
 		"src/bench"
 		"src/crypto/ctaes"
-		"src/leveldb"
 		"src/univalue"
 	)
 

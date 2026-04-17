@@ -2934,7 +2934,7 @@ static RPCHelpMan dumptxoutset() {
                 // (iii) constructing a cursor to the coinsdb for use below this
                 // block.
                 //
-                // Cursors returned by leveldb iterate over snapshots, so the
+                // Cursors iterate over snapshots, so the
                 // contents of the pcursor will not be affected by simultaneous
                 // writes during use below this block.
                 //

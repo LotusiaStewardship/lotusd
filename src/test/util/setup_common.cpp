@@ -27,6 +27,7 @@
 #include <script/scriptcache.h>
 #include <script/sigcache.h>
 #include <streams.h>
+#include <sqlite/block_tree_sqlite.h>
 #include <txdb.h>
 #include <txmempool.h>
 #include <util/strencodings.h>
@@ -103,7 +104,7 @@ BasicTestingSetup::BasicTestingSetup(
             "-logtimemicros",
             "-debug",
             "-debugexclude=libevent",
-            "-debugexclude=leveldb",
+            "-debugexclude=sqlitedb",
             "-allownonstdtxnconsensus=1",
             "-useecashprefix"
         },
@@ -182,7 +183,8 @@ TestingSetup::TestingSetup(const std::string &chainName,
     threadGroup.create_thread([&] { m_node.scheduler->serviceQueue(); });
     GetMainSignals().RegisterBackgroundSignalScheduler(*m_node.scheduler);
 
-    pblocktree.reset(new CBlockTreeDB(1 << 20, true));
+    pblocktree.reset(new CBlockTreeSqlite(
+        GetDataDir() / "blocks" / "index.sqlite", 1 << 20, true));
 
     m_node.mempool = std::make_unique<CTxMemPool>(1);
 

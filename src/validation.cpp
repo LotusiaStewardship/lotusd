@@ -7,6 +7,9 @@
 #include <validation.h>
 
 #include <arith_uint256.h>
+#include <modules/module_registry.h>
+#include <sqlite/block_analytics.h>
+#include <sqlite/coins_view_sqlite.h>
 #include <avalanche/avalanche.h>
 #include <avalanche/processor.h>
 #include <blockdb.h>
@@ -45,6 +48,7 @@
 #include <shutdown.h>
 #include <timedata.h>
 #include <tinyformat.h>
+#include <sqlite/block_tree_db.h>
 #include <txdb.h>
 #include <txmempool.h>
 #include <undo.h>
@@ -67,9 +71,9 @@
 #define MILLI 0.001
 
 /** Time to wait between writing blocks/block index to disk. */
-static constexpr std::chrono::hours DATABASE_WRITE_INTERVAL{1};
+static constexpr std::chrono::seconds DATABASE_WRITE_INTERVAL{10};
 /** Time to wait between flushing chainstate to disk. */
-static constexpr std::chrono::hours DATABASE_FLUSH_INTERVAL{24};
+static constexpr std::chrono::seconds DATABASE_FLUSH_INTERVAL{10};
 const std::vector<std::string> CHECKLEVEL_DOC{
     "level 0 reads the blocks from disk",
     "level 1 verifies block validity",
@@ -178,7 +182,7 @@ CBlockIndex *FindForkInGlobalIndex(const CChain &chain,
     return chain.Genesis();
 }
 
-std::unique_ptr<CBlockTreeDB> pblocktree;
+std::unique_ptr<IBlockTreeDB> pblocktree;
 
 static uint32_t GetNextBlockScriptFlags(const Consensus::Params &params,
                                         const CBlockIndex *pindex);
@@ -939,11 +943,22 @@ Amount GetBlockSubsidy(uint32_t nBits,
     return blockSubsidy * SATOSHI;
 }
 
-CoinsViews::CoinsViews(std::string ldb_name, size_t cache_size_bytes,
+static std::unique_ptr<CCoinsView> MakeCoinsDB(const std::string &db_name,
+                                               size_t cache_size_bytes,
+                                               bool in_memory,
+                                               bool should_wipe) {
+    fs::path dbpath = GetDataDir() / db_name / "chainstate.sqlite";
+    TryCreateDirectories(dbpath.parent_path());
+    LogPrintf("Using SQLite chainstate database: %s\n",
+              fs::PathToString(dbpath));
+    return std::make_unique<CCoinsViewSqlite>(dbpath, cache_size_bytes,
+                                              in_memory, should_wipe);
+}
+
+CoinsViews::CoinsViews(std::string db_name, size_t cache_size_bytes,
                        bool in_memory, bool should_wipe)
-    : m_dbview(GetDataDir() / ldb_name, cache_size_bytes, in_memory,
-               should_wipe),
-      m_catcherview(&m_dbview) {}
+    : m_dbview(MakeCoinsDB(db_name, cache_size_bytes, in_memory, should_wipe)),
+      m_catcherview(m_dbview.get()) {}
 
 void CoinsViews::InitCache() {
     m_cacheview = std::make_unique<CCoinsViewCache>(&m_catcherview);
@@ -955,11 +970,11 @@ CChainState::CChainState(CTxMemPool &mempool, BlockManager &blockman,
       m_from_snapshot_blockhash(from_snapshot_blockhash) {}
 
 void CChainState::InitCoinsDB(size_t cache_size_bytes, bool in_memory,
-                              bool should_wipe, std::string leveldb_name) {
+                              bool should_wipe, std::string db_name) {
     if (!m_from_snapshot_blockhash.IsNull()) {
-        leveldb_name += "_" + m_from_snapshot_blockhash.ToString();
+        db_name += "_" + m_from_snapshot_blockhash.ToString();
     }
-    m_coins_views = std::make_unique<CoinsViews>(leveldb_name, cache_size_bytes,
+    m_coins_views = std::make_unique<CoinsViews>(db_name, cache_size_bytes,
                                                  in_memory, should_wipe);
 }
 
@@ -1512,6 +1527,14 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
         }
     }
 
+    if (g_module_registry) {
+        g_module_registry->DisconnectBlock(block, pindex, Params());
+    }
+
+    if (g_block_analytics) {
+        g_block_analytics->DisconnectBlock(block, pindex, Params());
+    }
+
     // Move best block pointer to previous block.
     view.SetBestBlock(block.hashPrevBlock);
 
@@ -1988,6 +2011,14 @@ MinerFundSuccess:
     assert(pindex->phashBlock);
     // add this block to the view's block chain
     view.SetBestBlock(pindex->GetBlockHash());
+
+    if (!fJustCheck && g_block_analytics) {
+        g_block_analytics->ConnectBlock(block, pindex, params);
+    }
+
+    if (!fJustCheck && g_module_registry) {
+        g_module_registry->ConnectBlock(block, pindex, params);
+    }
 
     int64_t nTime5 = GetTimeMicros();
     nTimeIndex += nTime5 - nTime4;
@@ -2612,9 +2643,9 @@ bool CChainState::ConnectTip(const Config &config, BlockValidationState &state,
              (nTime4 - nTime3) * MILLI, nTimeFlush * MICRO,
              nTimeFlush * MILLI / nBlocksTotal);
 
-    // Write the chain state to disk, if necessary.
+    // Write the chain state to disk periodically or if cache is critical.
     if (!FlushStateToDisk(config.GetChainParams(), state,
-                          FlushStateMode::IF_NEEDED)) {
+                          FlushStateMode::PERIODIC)) {
         return false;
     }
 
@@ -4873,7 +4904,7 @@ CBlockIndex *BlockManager::InsertBlockIndex(const BlockHash &hash) {
 }
 
 bool BlockManager::LoadBlockIndex(
-    const Consensus::Params &params, CBlockTreeDB &blocktree,
+    const Consensus::Params &params, IBlockTreeDB &blocktree,
     std::set<CBlockIndex *, CBlockIndexWorkComparator>
         &block_index_candidates) {
     AssertLockHeld(cs_main);

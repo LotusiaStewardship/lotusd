@@ -10,6 +10,9 @@
 #include <init.h>
 
 #include <addrman.h>
+#include <modules/module_registry.h>
+#include <sqlite/block_analytics.h>
+#include <sqlite/block_tree_sqlite.h>
 #include <amount.h>
 #include <avalanche/avalanche.h>
 #include <avalanche/processor.h>
@@ -28,6 +31,7 @@
 #include <flatfile.h>
 #include <fs.h>
 #include <hash.h>
+#include <api/api_server.h>
 #include <httprpc.h>
 #include <httpserver.h>
 #include <index/blockfilterindex.h>
@@ -114,8 +118,8 @@ static const bool DEFAULT_REST_ENABLE = false;
 static const bool DEFAULT_STOPAFTERBLOCKIMPORT = false;
 
 #ifdef WIN32
-// Win32 LevelDB doesn't use filedescriptors, and the ones used for accessing
-// block files don't count towards the fd_set size limit anyway.
+// Win32 doesn't use filedescriptors for database access, and the ones used
+// for accessing block files don't count towards the fd_set size limit anyway.
 #define MIN_CORE_FILEDESCRIPTORS 0
 #else
 #define MIN_CORE_FILEDESCRIPTORS 150
@@ -196,6 +200,7 @@ void Interrupt(NodeContext &node) {
     InterruptHTTPRPC();
     InterruptRPC();
     InterruptREST();
+    InterruptAPI();
     InterruptTorControl();
     InterruptMapPort();
     StopMockBlockGenerator();
@@ -237,6 +242,7 @@ void Shutdown(NodeContext &node) {
 
     StopHTTPRPC();
     StopHTTPExplorer();
+    StopAPI();
     StopREST();
     StopRPC();
     StopHTTPServer();
@@ -369,6 +375,11 @@ void Shutdown(NodeContext &node) {
                 chainstate->ResetCoinsViews();
             }
         }
+        if (g_module_registry) {
+            g_module_registry->ShutdownAll();
+            g_module_registry.reset();
+        }
+        g_block_analytics.reset();
         pblocktree.reset();
     }
     for (const auto &client : node.chain_clients) {
@@ -1723,7 +1734,8 @@ static bool AppInitServers(Config &config,
     if (args.GetBoolArg("-rest", DEFAULT_REST_ENABLE)) {
         StartREST(httpRPCRequestProcessor.context);
     }
-    
+    StartAPI(httpRPCRequestProcessor.context);
+
     // Start block explorer if enabled
     const int explorerPort = args.GetArg("-explorerport", 0);
     if (explorerPort > 0 || args.IsArgSet("-explorerport")) {
@@ -2811,12 +2823,47 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
 
                 UnloadBlockIndex(node.mempool.get(), chainman);
 
-                // new CBlockTreeDB tries to delete the existing file, which
-                // fails if it's still open from the previous loop. Close it
-                // first:
+                // Close the previous block tree database before opening a new
+                // one (may fail if still open from previous loop iteration):
                 pblocktree.reset();
-                pblocktree.reset(
-                    new CBlockTreeDB(nBlockTreeDBCache, false, fReset));
+                {
+                    fs::path dbpath =
+                        GetDataDir() / "blocks" / "index.sqlite";
+                    LogPrintf("Using SQLite block index: %s\n",
+                              fs::PathToString(dbpath));
+                    pblocktree.reset(new CBlockTreeSqlite(
+                        dbpath, nBlockTreeDBCache, false, fReset));
+                }
+
+                // Initialize block analytics on the same DB
+                {
+                    auto *btree = dynamic_cast<CBlockTreeSqlite *>(
+                        pblocktree.get());
+                    if (btree) {
+                        g_block_analytics =
+                            std::make_unique<CBlockAnalytics>(btree->GetDb());
+                        LogPrintf("Block analytics index enabled\n");
+                    }
+                }
+
+                // Initialize pluggable module registry
+                {
+                    g_module_registry =
+                        std::make_unique<CModuleRegistry>();
+                    // Register built-in modules here:
+                    // (modules are registered before InitAll)
+                    extern void RegisterBuiltinModules(CModuleRegistry &);
+                    RegisterBuiltinModules(*g_module_registry);
+                    if (!g_module_registry->InitAll(
+                            gArgs.GetDataDirPath(), chainparams)) {
+                        return InitError(
+                            Untranslated("Failed to initialize chain modules"));
+                    }
+                    extern void AddModuleRoute(
+                        HTTPRequest::RequestMethod,
+                        const std::string &, ModuleRouteHandler);
+                    g_module_registry->RegisterAllRoutes(AddModuleRoute);
+                }
 
                 if (fReset) {
                     pblocktree->WriteReindexing(true);

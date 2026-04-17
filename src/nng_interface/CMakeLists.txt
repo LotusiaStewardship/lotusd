@@ -49,5 +49,4 @@ add_dependencies(nng_interface nng_files)
 # Add required libraries to nng_interface
 target_link_libraries(nng_interface
     nng::nng
-    util
-    leveldb)
+    util)
