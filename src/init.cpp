@@ -55,6 +55,7 @@
 #include <script/scriptcache.h>
 #include <script/sigcache.h>
 #include <script/standard.h>
+#include <sharechain/sharechain.h>
 #include <shutdown.h>
 #include <stratum/stratum.h>
 #include <stratum/stratumconfig.h>
@@ -270,6 +271,13 @@ void Shutdown(NodeContext &node) {
     // After the threads that potentially access these pointers have been
     // stopped, destruct and reset all to nullptr.
     node.peerman.reset();
+
+    // Destroy share chain
+    if (g_sharechain) {
+        UnregisterValidationInterface(g_sharechain);
+        delete g_sharechain;
+        g_sharechain = nullptr;
+    }
 
     // Destroy various global instances
     g_avalanche.reset();
@@ -3312,12 +3320,22 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
         }
     }
 
-    // Step 14: Stratum server
+    // Step 14: Stratum server + P2Pool share chain
     {
         stratum::StratumConfig stratumConfig;
         std::string stratumError;
         if (!stratum::ParseStratumConfig(args, stratumConfig, stratumError)) {
             return InitError(Untranslated(stratumError));
+        }
+
+        if (stratumConfig.sharechainEnabled) {
+            auto *sc = new sharechain::ShareChain(
+                stratumConfig.sharechainWindow,
+                stratumConfig.shareDifficulty);
+            RegisterValidationInterface(sc);
+            g_sharechain = sc;
+            LogPrintf("Share chain: initialized (window=%d)\n",
+                      stratumConfig.sharechainWindow);
         }
 
         if (stratumConfig.enabled) {
@@ -3327,6 +3345,15 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                 stratumConfig, config, chainstate,
                 node.mempool.get(), config.GetChainParams(),
                 *node.chainman);
+
+            if (g_sharechain) {
+                stratum::StratumServer *server =
+                    stratum::GetStratumServer();
+                if (server) {
+                    server->SetShareChain(g_sharechain);
+                }
+            }
+
             stratum::StartStratumServer();
         }
     }

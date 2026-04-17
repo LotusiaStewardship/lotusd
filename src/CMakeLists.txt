@@ -683,6 +683,9 @@ if(ENABLE_UPNP)
 	endif()
 endif()
 
+add_subdirectory(sharechain)
+target_link_libraries(server sharechain)
+
 # Test suites.
 add_subdirectory(test)
 add_subdirectory(avalanche/test)

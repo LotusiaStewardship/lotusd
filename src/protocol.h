@@ -296,6 +296,21 @@ extern const char *AVARESPONSE;
  * MSG_AVA_PROOF.
  */
 extern const char *AVAPROOF;
+/**
+ * Contains a sharechain::CShare.
+ * Sent in response to a "getdata" message with inventory type MSG_SHARE.
+ */
+extern const char *SHARE;
+/**
+ * Request share chain sync from a given share hash.
+ * Similar to "getheaders" but for the share chain.
+ */
+extern const char *GETSHARESYNC;
+/**
+ * Contains a batch of sharechain::CShare objects (up to 2000 per message).
+ * Sent in response to "getsharesync".
+ */
+extern const char *SHARESYNC;
 
 /**
  * Indicate if the message is used to transmit the content of a block.
@@ -482,6 +497,7 @@ enum GetDataMsg {
     //! Defined in BIP152
     MSG_CMPCT_BLOCK = 4,
     MSG_AVA_PROOF = 0x1f000001,
+    MSG_SHARE = 0x1f000002,
 };
 
 /**
@@ -527,6 +543,11 @@ public:
     bool IsMsgCmpctBlk() const {
         auto k = GetKind();
         return k == MSG_CMPCT_BLOCK;
+    }
+
+    bool IsMsgShare() const {
+        auto k = GetKind();
+        return k == MSG_SHARE;
     }
 
     bool IsGenBlkMsg() const {

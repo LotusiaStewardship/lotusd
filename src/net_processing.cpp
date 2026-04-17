@@ -33,6 +33,8 @@
 #include <random.h>
 #include <reverse_iterator.h>
 #include <scheduler.h>
+#include <sharechain/sharechain.h>
+#include <sharechain/sharevalidation.h>
 #include <streams.h>
 #include <tinyformat.h>
 #include <txmempool.h>
@@ -41,6 +43,9 @@
 #include <util/system.h>
 #include <validation.h>
 #include <versionfilter.h>
+
+// Global sharechain pointer, set from init.cpp when -sharechain is enabled
+sharechain::ShareChain *g_sharechain = nullptr;
 
 #include <algorithm>
 #include <memory>
@@ -2724,6 +2729,21 @@ static void ProcessGetData(const Config &config, CNode &pfrom, Peer &peer,
             continue;
         }
 
+        if (it->IsMsgShare()) {
+            if (g_sharechain) {
+                sharechain::CShare share;
+                if (g_sharechain->GetShare(inv.hash, share)) {
+                    connman.PushMessage(
+                        &pfrom,
+                        msgMaker.Make(NetMsgType::SHARE, share));
+                } else {
+                    vNotFound.push_back(inv);
+                }
+            }
+            ++it;
+            continue;
+        }
+
         if (it->IsMsgTx()) {
             if (pfrom.m_tx_relay == nullptr) {
                 // Ignore GETDATA requests for transactions from blocks-only
@@ -4044,6 +4064,21 @@ void PeerManagerImpl::ProcessMessage(
                     LOCK(cs_proofrequest);
                     AddProofAnnouncement(pfrom, proofid, current_time,
                                          preferred);
+                }
+                continue;
+            }
+
+            if (inv.IsMsgShare()) {
+                if (g_sharechain && !g_sharechain->HasShare(inv.hash)) {
+                    logInv(inv, false);
+                    std::vector<CInv> vGetData;
+                    vGetData.push_back(CInv(MSG_SHARE, inv.hash));
+                    const CNetMsgMaker msgMaker(pfrom.GetCommonVersion());
+                    m_connman.PushMessage(
+                        &pfrom,
+                        msgMaker.Make(NetMsgType::GETDATA, vGetData));
+                } else {
+                    logInv(inv, true);
                 }
                 continue;
             }
@@ -5465,6 +5500,95 @@ void PeerManagerImpl::ProcessMessage(
                         pfrom.GetId(), avalanche::ProofId(inv.hash));
                 }
             }
+        }
+        return;
+    }
+
+    // --- Share chain P2P messages ---
+
+    if (msg_type == NetMsgType::SHARE) {
+        if (g_sharechain) {
+            sharechain::CShare share;
+            vRecv >> share;
+
+            std::string error;
+            sharechain::ShareValidationResult result =
+                sharechain::ValidateShareForP2P(
+                    share, *g_sharechain,
+                    m_chainman.ActiveChainstate(),
+                    config.GetChainParams(), error);
+
+            if (result == sharechain::ShareValidationResult::VALID) {
+                std::string addError;
+                if (g_sharechain->AddShare(share, addError)) {
+                    uint256 shareHash = share.GetHash();
+                    CInv shareInv(MSG_SHARE, shareHash);
+                    m_connman.ForEachNode(
+                        [this, &pfrom, &shareInv](CNode *pnode) {
+                            if (pnode->GetId() != pfrom.GetId()) {
+                                const CNetMsgMaker msgMaker(
+                                    pnode->GetCommonVersion());
+                                std::vector<CInv> vInv{shareInv};
+                                m_connman.PushMessage(
+                                    pnode, msgMaker.Make(
+                                               NetMsgType::INV, vInv));
+                            }
+                        });
+                    LogPrint(BCLog::MINING,
+                             "Accepted share %s from peer=%d, height=%d\n",
+                             shareHash.ToString().substr(0, 12),
+                             pfrom.GetId(), share.nShareHeight);
+                }
+            } else {
+                int score =
+                    sharechain::GetShareMisbehaviorScore(result);
+                if (score > 0) {
+                    Misbehaving(pfrom, score, error);
+                }
+                LogPrint(BCLog::MINING,
+                         "Rejected share from peer=%d: %s\n",
+                         pfrom.GetId(), error);
+            }
+        }
+        return;
+    }
+
+    if (msg_type == NetMsgType::GETSHARESYNC) {
+        if (g_sharechain) {
+            uint256 afterHash;
+            vRecv >> afterHash;
+
+            auto shares =
+                g_sharechain->GetSharesForSync(afterHash, 2000);
+
+            const CNetMsgMaker msgMaker(pfrom.GetCommonVersion());
+            m_connman.PushMessage(
+                &pfrom,
+                msgMaker.Make(NetMsgType::SHARESYNC, shares));
+
+            LogPrint(BCLog::MINING,
+                     "Sent %d shares for sync to peer=%d\n",
+                     shares.size(), pfrom.GetId());
+        }
+        return;
+    }
+
+    if (msg_type == NetMsgType::SHARESYNC) {
+        if (g_sharechain) {
+            std::vector<sharechain::CShare> shares;
+            vRecv >> shares;
+
+            int accepted = 0;
+            for (const auto &share : shares) {
+                std::string error;
+                if (g_sharechain->AddShare(share, error)) {
+                    accepted++;
+                }
+            }
+
+            LogPrint(BCLog::MINING,
+                     "Share sync from peer=%d: %d/%d shares accepted\n",
+                     pfrom.GetId(), accepted, shares.size());
         }
         return;
     }
