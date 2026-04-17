@@ -56,7 +56,7 @@ enum LogFlags : uint32_t {
     LIBEVENT = (1 << 17),
     COINDB = (1 << 18),
     QT = (1 << 19),
-    LEVELDB = (1 << 20),
+    SQLITEDB = (1 << 20),
     VALIDATION = (1 << 21),
     AVALANCHE = (1 << 22),
     MINING = (1 << 23),

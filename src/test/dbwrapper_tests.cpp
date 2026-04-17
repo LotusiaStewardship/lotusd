@@ -226,7 +226,7 @@ BOOST_AUTO_TEST_CASE(existing_data_no_obfuscate) {
     BOOST_CHECK(dbw->Read(key, res));
     BOOST_CHECK_EQUAL(res.ToString(), in.ToString());
 
-    // Call the destructor to free leveldb LOCK
+    // Call the destructor to close the database
     dbw.reset();
 
     // Now, set up another wrapper that wants to obfuscate the same directory
@@ -269,7 +269,7 @@ BOOST_AUTO_TEST_CASE(existing_data_reindex) {
     BOOST_CHECK(dbw->Read(key, res));
     BOOST_CHECK_EQUAL(res.ToString(), in.ToString());
 
-    // Call the destructor to free leveldb LOCK
+    // Call the destructor to close the database
     dbw.reset();
 
     // Simulate a -reindex by wiping the existing data store
@@ -430,8 +430,9 @@ BOOST_AUTO_TEST_CASE(unicodepath) {
         m_args.GetDataDirPath() / "test_runner_₿_🏃_20191128_104644";
     CDBWrapper dbw(ph, (1 << 20));
 
-    fs::path lockPath = ph / "LOCK";
-    BOOST_CHECK(fs::exists(lockPath));
+    fs::path dbFile = ph;
+    dbFile += ".sqlite";
+    BOOST_CHECK(fs::exists(dbFile));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

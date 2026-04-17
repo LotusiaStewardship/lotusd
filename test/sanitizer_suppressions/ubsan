@@ -22,10 +22,6 @@ unsigned-integer-overflow:crypto/ripemd160.cpp
 unsigned-integer-overflow:crypto/sha256.cpp
 unsigned-integer-overflow:crypto/sha512.cpp
 unsigned-integer-overflow:hash.cpp
-unsigned-integer-overflow:leveldb/db/log_reader.cc
-unsigned-integer-overflow:leveldb/util/bloom.cc
-unsigned-integer-overflow:leveldb/util/crc32c.h
-unsigned-integer-overflow:leveldb/util/hash.cc
 unsigned-integer-overflow:policy/fees.cpp
 unsigned-integer-overflow:prevector.h
 unsigned-integer-overflow:script/interpreter.cpp

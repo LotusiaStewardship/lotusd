@@ -7,6 +7,7 @@
 
 #include <blockfileinfo.h>
 #include <primitives/block.h>
+#include <sqlite/block_tree_db.h>
 #include <sqlite/sqlite_wrapper.h>
 
 #include <functional>
@@ -24,10 +25,10 @@ struct Params;
 
 /**
  * Block tree database backed by SQLite.
- * Replaces CBlockTreeDB (LevelDB) with column-based storage for efficient
+ * Block tree database backed by SQLite with column-based storage for efficient
  * querying by height, hash, and status.
  */
-class CBlockTreeSqlite {
+class CBlockTreeSqlite : public IBlockTreeDB {
 public:
     explicit CBlockTreeSqlite(const fs::path &db_path,
                               size_t nCacheSize = 0,
@@ -36,20 +37,21 @@ public:
     bool WriteBatchSync(
         const std::vector<std::pair<int, const CBlockFileInfo *>> &fileInfo,
         int nLastFile,
-        const std::vector<const CBlockIndex *> &blockinfo);
+        const std::vector<const CBlockIndex *> &blockinfo) override;
 
-    bool ReadBlockFileInfo(int nFile, CBlockFileInfo &info);
-    bool ReadLastBlockFile(int &nFile);
-    bool WriteReindexing(bool fReindexing);
-    bool IsReindexing() const;
-    bool WriteFlag(const std::string &name, bool fValue);
-    bool ReadFlag(const std::string &name, bool &fValue);
+    bool ReadBlockFileInfo(int nFile, CBlockFileInfo &info) override;
+    bool ReadLastBlockFile(int &nFile) override;
+    bool WriteReindexing(bool fReindexing) override;
+    bool IsReindexing() const override;
+    bool WriteFlag(const std::string &name, bool fValue) override;
+    bool ReadFlag(const std::string &name, bool &fValue) override;
 
     bool LoadBlockIndexGuts(
         const Consensus::Params &params,
-        std::function<CBlockIndex *(const BlockHash &)> insertBlockIndex);
+        std::function<CBlockIndex *(const BlockHash &)> insertBlockIndex)
+        override;
 
-    bool Upgrade(const Consensus::Params &params);
+    bool Upgrade(const Consensus::Params &params) override;
 
     bool IsEmpty();
     CSqliteWrapper &GetDb() { return *m_db; }

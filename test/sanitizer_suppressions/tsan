@@ -27,7 +27,6 @@ race:WalletBatch::WriteHDChain
 race:CZMQAbstractPublishNotifier::SendMessage
 race:BerkeleyBatch
 race:BerkeleyDatabase
-race:leveldb::DBImpl::DeleteObsoleteFiles
 race:lotus-qt
 
 # deadlock (TODO fix)
@@ -54,7 +53,6 @@ deadlock:src/qt/test/*
 
 # External libraries
 deadlock:libdb
-thread:src/leveldb/*
 race:epoll_ctl
 
 # Intermittent issues

@@ -262,8 +262,6 @@ endif()
 add_subdirectory(config)
 
 # Enable LFS (Large File Support) on targets that don't have it natively.
-# This should be defined before the libraries are included as leveldb need the
-# definition to be set.
 if(NOT HAVE_LARGE_FILE_SUPPORT)
 	add_compile_definitions(_FILE_OFFSET_BITS=64)
 	add_linker_flags(-Wl,--large-address-aware)
@@ -298,7 +296,7 @@ endif()
 
 # libraries
 add_subdirectory(crypto)
-add_subdirectory(leveldb)
+
 add_subdirectory(secp256k1)
 add_subdirectory(univalue)
 
@@ -635,7 +633,6 @@ add_library(server
 	shutdown.cpp
 	timedata.cpp
 	torcontrol.cpp
-	txdb.cpp
 	txmempool.cpp
 	validation.cpp
 	validationinterface.cpp
@@ -644,14 +641,16 @@ add_library(server
 # Server depends on generated explorer resources
 add_dependencies(server explorer_resources)
 
-target_include_directories(server PRIVATE leveldb/helpers/memenv)
 # Add build directory for generated headers
 target_include_directories(server PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
+if(NOT TARGET SQLite::SQLite3)
+	find_package(SQLite3 3.7.17 REQUIRED)
+endif()
+
 target_link_libraries(server
 	bitcoinconsensus
-	leveldb
-	memenv
+	SQLite::SQLite3
 )
 
 link_event(server event)

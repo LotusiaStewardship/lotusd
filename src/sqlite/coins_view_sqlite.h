@@ -15,11 +15,11 @@ struct sqlite3_stmt;
 /**
  * CCoinsView backed by SQLite.
  *
- * Drop-in replacement for CCoinsViewDB (LevelDB). All prepared statements
- * are cached for the lifetime of the object. BatchWrite uses a single
- * IMMEDIATE transaction for crash-consistent atomic updates.
+ * All prepared statements are cached for the lifetime of the object.
+ * BatchWrite uses a single IMMEDIATE transaction for crash-consistent
+ * atomic updates.
  *
- * Performance characteristics vs LevelDB:
+ * Performance characteristics:
  * - GetCoin: single indexed lookup via prepared statement (~2-5us)
  * - HaveCoin: EXISTS query, avoids full row read (~1-3us)
  * - BatchWrite: all changes in one transaction, WAL-mode append

@@ -37,9 +37,10 @@
 #include <utility>
 #include <vector>
 
+class ArgsManager;
 class BlockValidationState;
 class CBlockIndex;
-class CBlockTreeDB;
+class IBlockTreeDB;
 class CBlockUndo;
 class CChainParams;
 class CChain;
@@ -641,7 +642,7 @@ public:
      * for which we've downloaded all transactions.
      */
     bool LoadBlockIndex(const Consensus::Params &consensus_params,
-                        CBlockTreeDB &blocktree,
+                        IBlockTreeDB &blocktree,
                         std::set<CBlockIndex *, CBlockIndexWorkComparator>
                             &block_index_candidates)
         EXCLUSIVE_LOCKS_REQUIRED(cs_main);
@@ -683,7 +684,7 @@ public:
 class CoinsViews {
 public:
     //! The lowest level of the CoinsViews cache hierarchy sits in a database
-    //! on disk (LevelDB or SQLite). All unspent coins reside in this store.
+    //! on disk (SQLite). All unspent coins reside in this store.
     std::unique_ptr<CCoinsView> m_dbview GUARDED_BY(cs_main);
 
     //! This view wraps access to the database and handles read errors
@@ -695,7 +696,7 @@ public:
     std::unique_ptr<CCoinsViewCache> m_cacheview GUARDED_BY(cs_main);
 
     //! This constructor initializes the coins database and
-    //! CCoinsViewErrorCatcher. Uses -dbengine to select LevelDB or SQLite.
+    //! CCoinsViewErrorCatcher.
     //! It does *not* create a CCoinsViewCache by default.
     CoinsViews(std::string db_name, size_t cache_size_bytes, bool in_memory,
                bool should_wipe);
@@ -783,7 +784,7 @@ public:
      * All parameters forwarded to CoinsViews.
      */
     void InitCoinsDB(size_t cache_size_bytes, bool in_memory, bool should_wipe,
-                     std::string leveldb_name = "chainstate");
+                     std::string db_name = "chainstate");
 
     //! Initialize the in-memory coins cache (to be done after the health of the
     //! on-disk database is verified).
@@ -1144,7 +1145,7 @@ public:
     //! coins caches. This will be split somehow across chainstates.
     int64_t m_total_coinstip_cache{0};
     //
-    //! The total number of bytes available for us to use across all leveldb
+    //! The total number of bytes available for us to use across all
     //! coins databases. This will be split somehow across chainstates.
     int64_t m_total_coinsdb_cache{0};
 
@@ -1272,7 +1273,7 @@ CChain &ChainActive();
 /**
  * Global variable that points to the active block tree (protected by cs_main)
  */
-extern std::unique_ptr<CBlockTreeDB> pblocktree;
+extern std::unique_ptr<IBlockTreeDB> pblocktree;
 
 /**
  * Return the spend height, which is one more than the inputs.GetBestBlock().

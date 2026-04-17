@@ -354,7 +354,7 @@ void AddCoins(CCoinsViewCache &cache, const CTransaction &tx, int nHeight,
 const Coin &AccessByTxid(const CCoinsViewCache &cache, const TxId &txid);
 
 /**
- * This is a minimally invasive approach to shutdown on LevelDB read errors from
+ * This is a minimally invasive approach to shutdown on database read errors from
  * the chainstate, while keeping user interface out of the common library, which
  * is shared between lotusd, and lotus-qt and non-server tools.
  *
@@ -374,7 +374,7 @@ public:
 
 private:
     /**
-     * A list of callbacks to execute upon leveldb read error.
+     * A list of callbacks to execute upon database read error.
      */
     std::vector<std::function<void()>> m_err_callbacks;
 };

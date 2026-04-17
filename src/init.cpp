@@ -10,6 +10,7 @@
 #include <init.h>
 
 #include <addrman.h>
+#include <sqlite/block_tree_sqlite.h>
 #include <amount.h>
 #include <avalanche/avalanche.h>
 #include <avalanche/processor.h>
@@ -99,8 +100,8 @@ static const bool DEFAULT_REST_ENABLE = false;
 static const bool DEFAULT_STOPAFTERBLOCKIMPORT = false;
 
 #ifdef WIN32
-// Win32 LevelDB doesn't use filedescriptors, and the ones used for accessing
-// block files don't count towards the fd_set size limit anyway.
+// Win32 doesn't use filedescriptors for database access, and the ones used
+// for accessing block files don't count towards the fd_set size limit anyway.
 #define MIN_CORE_FILEDESCRIPTORS 0
 #else
 #define MIN_CORE_FILEDESCRIPTORS 150
@@ -500,12 +501,6 @@ void SetupServerArgs(NodeContext &node) {
         "-dbcache=<n>",
         strprintf("Set database cache size in MiB (%d to %d, default: %d)",
                   MIN_DB_CACHE_MB, MAX_DB_CACHE_MB, DEFAULT_DB_CACHE_MB),
-        ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg(
-        "-dbengine=<engine>",
-        "Select database engine for chainstate storage. Options: leveldb "
-        "(default), sqlite. SQLite provides SQL queryability and built-in "
-        "address indexing at comparable performance.",
         ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg(
         "-debuglogfile=<file>",
@@ -2730,12 +2725,17 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
 
                 UnloadBlockIndex(node.mempool.get(), chainman);
 
-                // new CBlockTreeDB tries to delete the existing file, which
-                // fails if it's still open from the previous loop. Close it
-                // first:
+                // Close the previous block tree database before opening a new
+                // one (may fail if still open from previous loop iteration):
                 pblocktree.reset();
-                pblocktree.reset(
-                    new CBlockTreeDB(nBlockTreeDBCache, false, fReset));
+                {
+                    fs::path dbpath =
+                        GetDataDir() / "blocks" / "index.sqlite";
+                    LogPrintf("Using SQLite block index: %s\n",
+                              fs::PathToString(dbpath));
+                    pblocktree.reset(new CBlockTreeSqlite(
+                        dbpath, nBlockTreeDBCache, false, fReset));
+                }
 
                 if (fReset) {
                     pblocktree->WriteReindexing(true);

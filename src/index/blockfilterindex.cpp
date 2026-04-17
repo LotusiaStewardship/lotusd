@@ -18,8 +18,8 @@
  * block hash. This ensures that filter data for any block that becomes part of
  * the active chain can always be retrieved, alleviating timing concerns.
  *
- * The filters themselves are stored in flat files and referenced by the LevelDB
- * entries. This minimizes the amount of data written to LevelDB and keeps the
+ * The filters themselves are stored in flat files and referenced by database
+ * entries. This minimizes the amount of data written to the database and keeps the
  * database values constant size. The disk location of the next block filter to
  * be written (represented as a FlatFilePos) is stored under the DB_FILTER_POS
  * key.

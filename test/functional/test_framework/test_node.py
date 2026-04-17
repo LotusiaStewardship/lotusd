@@ -111,7 +111,7 @@ class TestNode():
             "-logsourcelocations",
             "-debug",
             "-debugexclude=libevent",
-            "-debugexclude=leveldb",
+            "-debugexclude=sqlitedb",
             "-uacomment=" + self.name,
             "-noprinttoconsole",
             "-useecashprefix",

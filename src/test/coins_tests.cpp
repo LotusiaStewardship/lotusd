@@ -7,6 +7,7 @@
 #include <attributes.h>
 #include <clientversion.h>
 #include <script/standard.h>
+#include <sqlite/coins_view_sqlite.h>
 #include <streams.h>
 #include <txdb.h>
 #include <undo.h>
@@ -288,8 +289,9 @@ BOOST_AUTO_TEST_CASE(coins_cache_simulation_test) {
     CCoinsViewTest base;
     SimulationTest(&base, false);
 
-    CCoinsViewDB db_base{"test", /*nCacheSize*/ 1 << 23, /*fMemory*/ true,
-                         /*fWipe*/ false};
+    CCoinsViewSqlite db_base{GetDataDir() / "test_coins.sqlite",
+                             /*nCacheSize*/ 1 << 23, /*fMemory*/ true,
+                             /*fWipe*/ false};
     SimulationTest(&db_base, true);
 }
 

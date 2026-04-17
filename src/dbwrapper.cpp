@@ -1,171 +1,100 @@
 // Copyright (c) 2012-2016 The Bitcoin Core developers
+// Copyright (c) 2024 The Logos Foundation
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <dbwrapper.h>
 
+#include <logging.h>
 #include <random.h>
-
-#include <leveldb/cache.h>
-#include <leveldb/env.h>
-#include <leveldb/filter_policy.h>
-#include <memenv.h>
 
 #include <algorithm>
 #include <cstdint>
-#include <memory>
 
-class CBitcoinLevelDBLogger : public leveldb::Logger {
-public:
-    // This code is adapted from posix_logger.h, which is why it is using
-    // vsprintf.
-    // Please do not do this in normal code
-    void Logv(const char *format, va_list ap) override {
-        if (!LogAcceptCategory(BCLog::LEVELDB)) {
-            return;
-        }
-        char buffer[500];
-        for (int iter = 0; iter < 2; iter++) {
-            char *base;
-            int bufsize;
-            if (iter == 0) {
-                bufsize = sizeof(buffer);
-                base = buffer;
-            } else {
-                bufsize = 30000;
-                base = new char[bufsize];
-            }
-            char *p = base;
-            char *limit = base + bufsize;
-
-            // Print the message
-            if (p < limit) {
-                va_list backup_ap;
-                va_copy(backup_ap, ap);
-                // Do not use vsnprintf elsewhere in bitcoin source code, see
-                // above.
-                p += vsnprintf(p, limit - p, format, backup_ap);
-                va_end(backup_ap);
-            }
-
-            // Truncate to available space if necessary
-            if (p >= limit) {
-                if (iter == 0) {
-                    continue; // Try again with larger buffer
-                } else {
-                    p = limit - 1;
-                }
-            }
-
-            // Add newline if necessary
-            if (p == base || p[-1] != '\n') {
-                *p++ = '\n';
-            }
-
-            assert(p <= limit);
-            base[std::min(bufsize - 1, (int)(p - base))] = '\0';
-            LogPrintfToBeContinued("leveldb: %s", base);
-            if (base != buffer) {
-                delete[] base;
-            }
-            break;
-        }
+static void ExecSQL(sqlite3 *db, const char *sql) {
+    char *err = nullptr;
+    int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
+    if (rc != SQLITE_OK) {
+        std::string msg = err ? err : "unknown error";
+        sqlite3_free(err);
+        throw dbwrapper_error("SQLite exec failed: " + msg);
     }
-};
-
-static void SetMaxOpenFiles(leveldb::Options *options) {
-    // On most platforms the default setting of max_open_files (which is 1000)
-    // is optimal. On Windows using a large file count is OK because the handles
-    // do not interfere with select() loops. On 64-bit Unix hosts this value is
-    // also OK, because up to that amount LevelDB will use an mmap
-    // implementation that does not use extra file descriptors (the fds are
-    // closed after being mmaped).
-    //
-    // Increasing the value beyond the default is dangerous because LevelDB will
-    // fall back to a non-mmap implementation when the file count is too large.
-    // On 32-bit Unix host we should decrease the value because the handles use
-    // up real fds, and we want to avoid fd exhaustion issues.
-    //
-    // See PR #12495 for further discussion.
-
-    int default_open_files = options->max_open_files;
-#ifndef WIN32
-    if (sizeof(void *) < 8) {
-        options->max_open_files = 64;
-    }
-#endif
-    LogPrint(BCLog::LEVELDB, "LevelDB using max_open_files=%d (default=%d)\n",
-             options->max_open_files, default_open_files);
-}
-
-static leveldb::Options GetOptions(size_t nCacheSize) {
-    leveldb::Options options;
-    options.block_cache = leveldb::NewLRUCache(nCacheSize / 2);
-    // up to two write buffers may be held in memory simultaneously
-    options.write_buffer_size = nCacheSize / 4;
-    options.filter_policy = leveldb::NewBloomFilterPolicy(10);
-    options.compression = leveldb::kNoCompression;
-    options.info_log = new CBitcoinLevelDBLogger();
-    if (leveldb::kMajorVersion > 1 ||
-        (leveldb::kMajorVersion == 1 && leveldb::kMinorVersion >= 16)) {
-        // LevelDB versions before 1.16 consider short writes to be corruption.
-        // Only trigger error on corruption in later versions.
-        options.paranoid_checks = true;
-    }
-    SetMaxOpenFiles(&options);
-    return options;
 }
 
 CDBWrapper::CDBWrapper(const fs::path &path, size_t nCacheSize, bool fMemory,
                        bool fWipe, bool obfuscate)
-    : m_name{fs::PathToString(path.stem())} {
-    penv = nullptr;
-    readoptions.verify_checksums = true;
-    iteroptions.verify_checksums = true;
-    iteroptions.fill_cache = false;
-    syncoptions.sync = true;
-    options = GetOptions(nCacheSize);
-    options.create_if_missing = true;
+    : m_db(nullptr), m_name{fs::PathToString(path.stem())},
+      m_read_stmt(nullptr), m_exists_stmt(nullptr), m_write_stmt(nullptr),
+      m_erase_stmt(nullptr) {
+
+    std::string dbpath;
     if (fMemory) {
-        penv = leveldb::NewMemEnv(leveldb::Env::Default());
-        options.env = penv;
+        dbpath = ":memory:";
     } else {
         if (fWipe) {
-            LogPrintf("Wiping LevelDB in %s\n", fs::PathToString(path));
-            leveldb::Status result =
-                leveldb::DestroyDB(fs::PathToString(path), options);
-            dbwrapper_private::HandleError(result);
+            LogPrintf("Wiping SQLite DB in %s\n", fs::PathToString(path));
+            fs::path sqlitePath = path;
+            sqlitePath += ".sqlite";
+            fs::remove(sqlitePath);
+            fs::path walPath = sqlitePath;
+            walPath += "-wal";
+            fs::path shmPath = sqlitePath;
+            shmPath += "-shm";
+            fs::remove(walPath);
+            fs::remove(shmPath);
+            // Remove old database directory if it exists
+            if (fs::exists(path) && fs::is_directory(path)) {
+                fs::remove_all(path);
+            }
         }
-        TryCreateDirectories(path);
-        LogPrintf("Opening LevelDB in %s\n", fs::PathToString(path));
-    }
-    leveldb::Status status =
-        leveldb::DB::Open(options, fs::PathToString(path), &pdb);
-    dbwrapper_private::HandleError(status);
-    LogPrintf("Opened LevelDB successfully\n");
 
-    if (gArgs.GetBoolArg("-forcecompactdb", false)) {
-        LogPrintf("Starting database compaction of %s\n",
-                  fs::PathToString(path));
-        pdb->CompactRange(nullptr, nullptr);
-        LogPrintf("Finished database compaction of %s\n",
-                  fs::PathToString(path));
+        // Use .sqlite extension for files (path was originally a directory
+        // The path becomes a .sqlite file.
+        fs::path parentDir = path.parent_path();
+        if (!parentDir.empty()) {
+            TryCreateDirectories(parentDir);
+        }
+        fs::path sqlitePath = path;
+        sqlitePath += ".sqlite";
+        dbpath = fs::PathToString(sqlitePath);
+        LogPrintf("Opening SQLite DB in %s\n", dbpath);
     }
 
-    // The base-case obfuscation key, which is a noop.
+    int rc = sqlite3_open(dbpath.c_str(), &m_db);
+    if (rc != SQLITE_OK) {
+        throw dbwrapper_error("Failed to open SQLite DB: " +
+                              std::string(sqlite3_errmsg(m_db)));
+    }
+
+    // Performance pragmas
+    int cachePages = std::max((int)(nCacheSize / 4096), 256);
+    std::string cachePragma =
+        "PRAGMA cache_size = -" + std::to_string(cachePages) + ";";
+    ExecSQL(m_db, "PRAGMA journal_mode = WAL;");
+    ExecSQL(m_db, "PRAGMA synchronous = NORMAL;");
+    ExecSQL(m_db, cachePragma.c_str());
+    ExecSQL(m_db, "PRAGMA mmap_size = 268435456;");
+    ExecSQL(m_db, "PRAGMA temp_store = MEMORY;");
+    ExecSQL(m_db, "PRAGMA busy_timeout = 5000;");
+
+    ExecSQL(m_db,
+            "CREATE TABLE IF NOT EXISTS kv ("
+            "  key BLOB PRIMARY KEY NOT NULL,"
+            "  value BLOB NOT NULL"
+            ") WITHOUT ROWID;");
+
+    InitStatements();
+
+    LogPrintf("Opened SQLite DB successfully\n");
+
     obfuscate_key = std::vector<uint8_t>(OBFUSCATE_KEY_NUM_BYTES, '\000');
 
     bool key_exists = Read(OBFUSCATE_KEY_KEY, obfuscate_key);
 
     if (!key_exists && obfuscate && IsEmpty()) {
-        // Initialize non-degenerate obfuscation if it won't upset existing,
-        // non-obfuscated data.
         std::vector<uint8_t> new_key = CreateObfuscateKey();
-
-        // Write `new_key` so we don't obfuscate the key with itself
         Write(OBFUSCATE_KEY_KEY, new_key);
         obfuscate_key = new_key;
-
         LogPrintf("Wrote new obfuscate key for %s: %s\n",
                   fs::PathToString(path), HexStr(obfuscate_key));
     }
@@ -174,60 +103,77 @@ CDBWrapper::CDBWrapper(const fs::path &path, size_t nCacheSize, bool fMemory,
               HexStr(obfuscate_key));
 }
 
+void CDBWrapper::InitStatements() {
+    sqlite3_prepare_v2(m_db, "SELECT value FROM kv WHERE key = ?", -1,
+                       &m_read_stmt, nullptr);
+    sqlite3_prepare_v2(m_db, "SELECT 1 FROM kv WHERE key = ?", -1,
+                       &m_exists_stmt, nullptr);
+    sqlite3_prepare_v2(
+        m_db, "INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", -1,
+        &m_write_stmt, nullptr);
+    sqlite3_prepare_v2(m_db, "DELETE FROM kv WHERE key = ?", -1,
+                       &m_erase_stmt, nullptr);
+}
+
 CDBWrapper::~CDBWrapper() {
-    delete pdb;
-    pdb = nullptr;
-    delete options.filter_policy;
-    options.filter_policy = nullptr;
-    delete options.info_log;
-    options.info_log = nullptr;
-    delete options.block_cache;
-    options.block_cache = nullptr;
-    delete penv;
-    options.env = nullptr;
+    if (m_read_stmt) sqlite3_finalize(m_read_stmt);
+    if (m_exists_stmt) sqlite3_finalize(m_exists_stmt);
+    if (m_write_stmt) sqlite3_finalize(m_write_stmt);
+    if (m_erase_stmt) sqlite3_finalize(m_erase_stmt);
+    if (m_db) {
+        sqlite3_close(m_db);
+        m_db = nullptr;
+    }
 }
 
 bool CDBWrapper::WriteBatch(CDBBatch &batch, bool fSync) {
-    const bool log_memory = LogAcceptCategory(BCLog::LEVELDB);
-    double mem_before = 0;
-    if (log_memory) {
-        mem_before = DynamicMemoryUsage() / 1024.0 / 1024;
+    ExecSQL(m_db, "BEGIN IMMEDIATE;");
+
+    for (const auto &op : batch.ops) {
+        if (op.is_erase) {
+            sqlite3_reset(m_erase_stmt);
+            sqlite3_bind_blob(m_erase_stmt, 1, op.key.data(), op.key.size(),
+                              SQLITE_STATIC);
+            int rc = sqlite3_step(m_erase_stmt);
+            if (rc != SQLITE_DONE) {
+                ExecSQL(m_db, "ROLLBACK;");
+                dbwrapper_private::HandleError(rc, m_db);
+                return false;
+            }
+        } else {
+            sqlite3_reset(m_write_stmt);
+            sqlite3_bind_blob(m_write_stmt, 1, op.key.data(), op.key.size(),
+                              SQLITE_STATIC);
+            sqlite3_bind_blob(m_write_stmt, 2, op.value.data(),
+                              op.value.size(), SQLITE_STATIC);
+            int rc = sqlite3_step(m_write_stmt);
+            if (rc != SQLITE_DONE) {
+                ExecSQL(m_db, "ROLLBACK;");
+                dbwrapper_private::HandleError(rc, m_db);
+                return false;
+            }
+        }
     }
-    leveldb::Status status =
-        pdb->Write(fSync ? syncoptions : writeoptions, &batch.batch);
-    dbwrapper_private::HandleError(status);
-    if (log_memory) {
-        double mem_after = DynamicMemoryUsage() / 1024.0 / 1024;
-        LogPrint(
-            BCLog::LEVELDB,
-            "WriteBatch memory usage: db=%s, before=%.1fMiB, after=%.1fMiB\n",
-            m_name, mem_before, mem_after);
+
+    if (fSync) {
+        ExecSQL(m_db, "COMMIT;");
+        ExecSQL(m_db, "PRAGMA wal_checkpoint(PASSIVE);");
+    } else {
+        ExecSQL(m_db, "COMMIT;");
     }
     return true;
 }
 
 size_t CDBWrapper::DynamicMemoryUsage() const {
-    std::string memory;
-    if (!pdb->GetProperty("leveldb.approximate-memory-usage", &memory)) {
-        LogPrint(BCLog::LEVELDB,
-                 "Failed to get approximate-memory-usage property\n");
-        return 0;
-    }
-    return stoul(memory);
+    sqlite3_int64 highwater = 0;
+    sqlite3_db_status(m_db, SQLITE_DBSTATUS_CACHE_USED, nullptr,
+                      (int *)&highwater, 0);
+    return (size_t)highwater;
 }
 
-// Prefixed with null character to avoid collisions with other keys
-//
-// We must use a string constructor which specifies length so that we copy past
-// the null-terminator.
 const std::string CDBWrapper::OBFUSCATE_KEY_KEY("\000obfuscate_key", 14);
-
 const unsigned int CDBWrapper::OBFUSCATE_KEY_NUM_BYTES = 8;
 
-/**
- * Returns a string (consisting of 8 random bytes) suitable for use as an
- * obfuscating XOR key.
- */
 std::vector<uint8_t> CDBWrapper::CreateObfuscateKey() const {
     uint8_t buff[OBFUSCATE_KEY_NUM_BYTES];
     GetRandBytes(buff, OBFUSCATE_KEY_NUM_BYTES);
@@ -240,29 +186,51 @@ bool CDBWrapper::IsEmpty() {
     return !(it->Valid());
 }
 
+CDBIterator *CDBWrapper::NewIterator() {
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(m_db,
+                       "SELECT key, value FROM kv WHERE key >= ? ORDER BY key",
+                       -1, &stmt, nullptr);
+    return new CDBIterator(*this, stmt);
+}
+
+CDBIterator::CDBIterator(const CDBWrapper &_parent, sqlite3_stmt *_pStmt)
+    : parent(_parent), pStmt(_pStmt), m_valid(false) {}
+
 CDBIterator::~CDBIterator() {
-    delete piter;
+    if (pStmt) {
+        sqlite3_finalize(pStmt);
+    }
 }
+
 bool CDBIterator::Valid() const {
-    return piter->Valid();
+    return m_valid;
 }
+
 void CDBIterator::SeekToFirst() {
-    piter->SeekToFirst();
+    sqlite3_reset(pStmt);
+    // Bind empty blob so key >= '' matches everything
+    sqlite3_bind_blob(pStmt, 1, "", 0, SQLITE_STATIC);
+    int rc = sqlite3_step(pStmt);
+    m_valid = (rc == SQLITE_ROW);
 }
+
 void CDBIterator::Next() {
-    piter->Next();
+    int rc = sqlite3_step(pStmt);
+    m_valid = (rc == SQLITE_ROW);
 }
 
 namespace dbwrapper_private {
 
-void HandleError(const leveldb::Status &status) {
-    if (status.ok()) {
+void HandleError(int rc, sqlite3 *db) {
+    if (rc == SQLITE_OK || rc == SQLITE_DONE || rc == SQLITE_ROW) {
         return;
     }
-    const std::string errmsg = "Fatal LevelDB error: " + status.ToString();
+    std::string errmsg = "Fatal SQLite error (code " + std::to_string(rc) + ")";
+    if (db) {
+        errmsg += ": " + std::string(sqlite3_errmsg(db));
+    }
     LogPrintf("%s\n", errmsg);
-    LogPrintf("You can use -debug=leveldb to get more complete diagnostic "
-              "messages\n");
     throw dbwrapper_error(errmsg);
 }
 
