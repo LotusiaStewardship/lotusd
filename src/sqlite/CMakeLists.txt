@@ -1,4 +1,4 @@
-# Copyright (c) 2024 The Logos Foundation
+# Copyright (c) 2023-2026 Lotusia / Alexandre Guillioud, Matthew Urgero
 
 project(sqlite-chain)
 
@@ -13,7 +13,8 @@ add_library(sqlite-chain
     coins_view_sqlite.cpp
     block_tree_sqlite.cpp
     address_index.cpp
+    block_analytics.cpp
 )
 
 target_include_directories(sqlite-chain PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(sqlite-chain bitcoinconsensus SQLite::SQLite3)
+target_link_libraries(sqlite-chain common bitcoinconsensus SQLite::SQLite3)

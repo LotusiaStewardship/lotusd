@@ -10,6 +10,8 @@
 #include <init.h>
 
 #include <addrman.h>
+#include <modules/module_registry.h>
+#include <sqlite/block_analytics.h>
 #include <sqlite/block_tree_sqlite.h>
 #include <amount.h>
 #include <avalanche/avalanche.h>
@@ -29,6 +31,7 @@
 #include <flatfile.h>
 #include <fs.h>
 #include <hash.h>
+#include <api/api_server.h>
 #include <httprpc.h>
 #include <httpserver.h>
 #include <index/blockfilterindex.h>
@@ -171,6 +174,7 @@ void Interrupt(NodeContext &node) {
     InterruptHTTPRPC();
     InterruptRPC();
     InterruptREST();
+    InterruptAPI();
     InterruptTorControl();
     InterruptMapPort();
     StopMockBlockGenerator();
@@ -208,6 +212,7 @@ void Shutdown(NodeContext &node) {
 
     StopHTTPRPC();
     StopHTTPExplorer();
+    StopAPI();
     StopREST();
     StopRPC();
     StopHTTPServer();
@@ -315,6 +320,11 @@ void Shutdown(NodeContext &node) {
                 chainstate->ResetCoinsViews();
             }
         }
+        if (g_module_registry) {
+            g_module_registry->ShutdownAll();
+            g_module_registry.reset();
+        }
+        g_block_analytics.reset();
         pblocktree.reset();
     }
     for (const auto &client : node.chain_clients) {
@@ -1637,7 +1647,8 @@ static bool AppInitServers(Config &config,
     if (args.GetBoolArg("-rest", DEFAULT_REST_ENABLE)) {
         StartREST(httpRPCRequestProcessor.context);
     }
-    
+    StartAPI(httpRPCRequestProcessor.context);
+
     // Start block explorer if enabled
     const int explorerPort = args.GetArg("-explorerport", 0);
     if (explorerPort > 0 || args.IsArgSet("-explorerport")) {
@@ -2735,6 +2746,36 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                               fs::PathToString(dbpath));
                     pblocktree.reset(new CBlockTreeSqlite(
                         dbpath, nBlockTreeDBCache, false, fReset));
+                }
+
+                // Initialize block analytics on the same DB
+                {
+                    auto *btree = dynamic_cast<CBlockTreeSqlite *>(
+                        pblocktree.get());
+                    if (btree) {
+                        g_block_analytics =
+                            std::make_unique<CBlockAnalytics>(btree->GetDb());
+                        LogPrintf("Block analytics index enabled\n");
+                    }
+                }
+
+                // Initialize pluggable module registry
+                {
+                    g_module_registry =
+                        std::make_unique<CModuleRegistry>();
+                    // Register built-in modules here:
+                    // (modules are registered before InitAll)
+                    extern void RegisterBuiltinModules(CModuleRegistry &);
+                    RegisterBuiltinModules(*g_module_registry);
+                    if (!g_module_registry->InitAll(
+                            gArgs.GetDataDirPath(), chainparams)) {
+                        return InitError(
+                            Untranslated("Failed to initialize chain modules"));
+                    }
+                    extern void AddModuleRoute(
+                        HTTPRequest::RequestMethod,
+                        const std::string &, ModuleRouteHandler);
+                    g_module_registry->RegisterAllRoutes(AddModuleRoute);
                 }
 
                 if (fReset) {

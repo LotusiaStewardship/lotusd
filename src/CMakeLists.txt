@@ -685,6 +685,14 @@ add_subdirectory(bench)
 add_subdirectory(sqlite)
 target_link_libraries(server sqlite-chain)
 
+# REST API v1
+add_subdirectory(api)
+target_link_libraries(server api)
+
+# Pluggable chain modules
+add_subdirectory(modules)
+target_link_libraries(server modules)
+
 include(BinaryTest)
 include(WindowsVersionInfo)
 

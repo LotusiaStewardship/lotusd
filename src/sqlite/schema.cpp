@@ -1,4 +1,4 @@
-// Copyright (c) 2024 The Logos Foundation
+// Copyright (c) 2023-2026 Lotusia / Alexandre Guillioud, Matthew Urgero
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -121,14 +121,20 @@ CREATE TABLE IF NOT EXISTS meta (
 
 const char *ALL_INDEXES = R"(
 CREATE INDEX IF NOT EXISTS idx_block_height ON block_index(n_height);
+CREATE INDEX IF NOT EXISTS idx_block_time ON block_index(n_time);
+CREATE INDEX IF NOT EXISTS idx_block_prev ON block_index(prev_hash);
 CREATE INDEX IF NOT EXISTS idx_utxo_height ON utxos(height);
-CREATE INDEX IF NOT EXISTS idx_tx_block ON transactions(block_height);
+CREATE INDEX IF NOT EXISTS idx_tx_block ON transactions(block_height, block_pos);
 CREATE INDEX IF NOT EXISTS idx_txout_addr_unspent ON tx_outputs(address)
     WHERE spent = 0 AND address IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_txout_address ON tx_outputs(address, value_sats DESC)
     WHERE address IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_txout_spent_txid ON tx_outputs(spent_txid)
+    WHERE spent_txid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_txin_prevout ON tx_inputs(prev_txid, prev_vout)
     WHERE prev_txid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_txin_address ON tx_inputs(address)
+    WHERE address IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_addr_bal_rank ON address_balances(balance_sats DESC);
 CREATE INDEX IF NOT EXISTS idx_addr_hist ON address_history(address, block_height DESC);
 CREATE INDEX IF NOT EXISTS idx_addr_hist_txid ON address_history(txid);

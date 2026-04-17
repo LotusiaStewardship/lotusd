@@ -7,6 +7,8 @@
 #include <validation.h>
 
 #include <arith_uint256.h>
+#include <modules/module_registry.h>
+#include <sqlite/block_analytics.h>
 #include <sqlite/coins_view_sqlite.h>
 #include <avalanche/avalanche.h>
 #include <avalanche/processor.h>
@@ -1524,6 +1526,14 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
         }
     }
 
+    if (g_module_registry) {
+        g_module_registry->DisconnectBlock(block, pindex, Params());
+    }
+
+    if (g_block_analytics) {
+        g_block_analytics->DisconnectBlock(block, pindex, Params());
+    }
+
     // Move best block pointer to previous block.
     view.SetBestBlock(block.hashPrevBlock);
 
@@ -2000,6 +2010,14 @@ MinerFundSuccess:
     assert(pindex->phashBlock);
     // add this block to the view's block chain
     view.SetBestBlock(pindex->GetBlockHash());
+
+    if (!fJustCheck && g_block_analytics) {
+        g_block_analytics->ConnectBlock(block, pindex, params);
+    }
+
+    if (!fJustCheck && g_module_registry) {
+        g_module_registry->ConnectBlock(block, pindex, params);
+    }
 
     int64_t nTime5 = GetTimeMicros();
     nTimeIndex += nTime5 - nTime4;

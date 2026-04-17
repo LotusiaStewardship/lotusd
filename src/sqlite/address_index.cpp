@@ -1,4 +1,4 @@
-// Copyright (c) 2024 The Logos Foundation
+// Copyright (c) 2023-2026 Lotusia / Alexandre Guillioud, Matthew Urgero
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -48,6 +48,45 @@ void CAddressIndex::UpdateForTx(const std::string &address, int height,
     sqlite3_bind_int64(hist, 4, delta);
     sqlite3_step(hist);
     sqlite3_reset(hist);
+}
+
+void CAddressIndex::UndoForTx(const std::string &address, int height,
+                              const uint8_t *txid_data, int64_t received,
+                              int64_t sent, int utxo_delta) {
+    int64_t delta = received - sent;
+
+    sqlite3_stmt *stmt = m_db.Prepare(
+        "UPDATE address_balances SET "
+        "balance_sats = balance_sats - ?2, "
+        "received_sats = received_sats - ?3, "
+        "sent_sats = sent_sats - ?4, "
+        "tx_count = tx_count - 1, "
+        "utxo_count = utxo_count - ?5 "
+        "WHERE address = ?1");
+
+    sqlite3_bind_text(stmt, 1, address.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 2, delta);
+    sqlite3_bind_int64(stmt, 3, received);
+    sqlite3_bind_int64(stmt, 4, sent);
+    sqlite3_bind_int(stmt, 5, utxo_delta);
+    sqlite3_step(stmt);
+    sqlite3_reset(stmt);
+
+    sqlite3_stmt *hist = m_db.Prepare(
+        "DELETE FROM address_history "
+        "WHERE address = ?1 AND block_height = ?2 AND txid = ?3");
+
+    sqlite3_bind_text(hist, 1, address.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(hist, 2, height);
+    sqlite3_bind_blob(hist, 3, txid_data, 32, SQLITE_STATIC);
+    sqlite3_step(hist);
+    sqlite3_reset(hist);
+
+    sqlite3_stmt *cleanup = m_db.Prepare(
+        "DELETE FROM address_balances WHERE address = ?1 AND tx_count <= 0");
+    sqlite3_bind_text(cleanup, 1, address.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(cleanup);
+    sqlite3_reset(cleanup);
 }
 
 int64_t CAddressIndex::GetBalance(const std::string &address) const {

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 The Logos Foundation
+// Copyright (c) 2023-2026 Lotusia / Alexandre Guillioud, Matthew Urgero
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -45,6 +45,14 @@ public:
     void UpdateForTx(const std::string &address, int height,
                      const uint8_t *txid_data, int64_t received,
                      int64_t sent, int utxo_delta);
+
+    /**
+     * Reverse the effects of UpdateForTx during block disconnect.
+     * Same parameters as the original call for this address+tx.
+     */
+    void UndoForTx(const std::string &address, int height,
+                   const uint8_t *txid_data, int64_t received,
+                   int64_t sent, int utxo_delta);
 
     int64_t GetBalance(const std::string &address) const;
     int64_t GetReceived(const std::string &address) const;
