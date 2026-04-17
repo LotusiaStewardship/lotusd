@@ -682,11 +682,11 @@ public:
  */
 class CoinsViews {
 public:
-    //! The lowest level of the CoinsViews cache hierarchy sits in a leveldb
-    //! database on disk. All unspent coins reside in this store.
-    CCoinsViewDB m_dbview GUARDED_BY(cs_main);
+    //! The lowest level of the CoinsViews cache hierarchy sits in a database
+    //! on disk (LevelDB or SQLite). All unspent coins reside in this store.
+    std::unique_ptr<CCoinsView> m_dbview GUARDED_BY(cs_main);
 
-    //! This view wraps access to the leveldb instance and handles read errors
+    //! This view wraps access to the database and handles read errors
     //! gracefully.
     CCoinsViewErrorCatcher m_catcherview GUARDED_BY(cs_main);
 
@@ -694,15 +694,10 @@ public:
     //! memory as can fit per the dbcache setting.
     std::unique_ptr<CCoinsViewCache> m_cacheview GUARDED_BY(cs_main);
 
-    //! This constructor initializes CCoinsViewDB and CCoinsViewErrorCatcher
-    //! instances, but it *does not* create a CCoinsViewCache instance by
-    //! default. This is done separately because the presence of the cache has
-    //! implications on whether or not we're allowed to flush the cache's state
-    //! to disk, which should not be done until the health of the database is
-    //! verified.
-    //!
-    //! All arguments forwarded onto CCoinsViewDB.
-    CoinsViews(std::string ldb_name, size_t cache_size_bytes, bool in_memory,
+    //! This constructor initializes the coins database and
+    //! CCoinsViewErrorCatcher. Uses -dbengine to select LevelDB or SQLite.
+    //! It does *not* create a CCoinsViewCache by default.
+    CoinsViews(std::string db_name, size_t cache_size_bytes, bool in_memory,
                bool should_wipe);
 
     //! Initialize the CCoinsViewCache member.
@@ -829,7 +824,7 @@ public:
     }
 
     //! @returns A reference to the on-disk UTXO set database.
-    CCoinsViewDB &CoinsDB() { return m_coins_views->m_dbview; }
+    CCoinsView &CoinsDB() { return *m_coins_views->m_dbview; }
 
     //! @returns A reference to a wrapped view of the in-memory UTXO set that
     //!     handles disk read errors gracefully.

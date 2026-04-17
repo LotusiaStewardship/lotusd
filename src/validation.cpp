@@ -7,6 +7,7 @@
 #include <validation.h>
 
 #include <arith_uint256.h>
+#include <sqlite/coins_view_sqlite.h>
 #include <avalanche/avalanche.h>
 #include <avalanche/processor.h>
 #include <blockdb.h>
@@ -938,11 +939,26 @@ Amount GetBlockSubsidy(uint32_t nBits,
     return blockSubsidy * SATOSHI;
 }
 
-CoinsViews::CoinsViews(std::string ldb_name, size_t cache_size_bytes,
+static std::unique_ptr<CCoinsView> MakeCoinsDB(const std::string &db_name,
+                                               size_t cache_size_bytes,
+                                               bool in_memory,
+                                               bool should_wipe) {
+    std::string engine = gArgs.GetArg("-dbengine", "leveldb");
+    if (engine == "sqlite") {
+        fs::path dbpath = GetDataDir() / db_name / "chainstate.sqlite";
+        TryCreateDirectories(dbpath.parent_path());
+        LogPrintf("Using SQLite chainstate database: %s\n", dbpath.string());
+        return std::make_unique<CCoinsViewSqlite>(dbpath, cache_size_bytes,
+                                                  in_memory, should_wipe);
+    }
+    return std::make_unique<CCoinsViewDB>(
+        GetDataDir() / db_name, cache_size_bytes, in_memory, should_wipe);
+}
+
+CoinsViews::CoinsViews(std::string db_name, size_t cache_size_bytes,
                        bool in_memory, bool should_wipe)
-    : m_dbview(GetDataDir() / ldb_name, cache_size_bytes, in_memory,
-               should_wipe),
-      m_catcherview(&m_dbview) {}
+    : m_dbview(MakeCoinsDB(db_name, cache_size_bytes, in_memory, should_wipe)),
+      m_catcherview(m_dbview.get()) {}
 
 void CoinsViews::InitCache() {
     m_cacheview = std::make_unique<CCoinsViewCache>(&m_catcherview);

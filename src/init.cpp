@@ -502,6 +502,12 @@ void SetupServerArgs(NodeContext &node) {
                   MIN_DB_CACHE_MB, MAX_DB_CACHE_MB, DEFAULT_DB_CACHE_MB),
         ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg(
+        "-dbengine=<engine>",
+        "Select database engine for chainstate storage. Options: leveldb "
+        "(default), sqlite. SQLite provides SQL queryability and built-in "
+        "address indexing at comparable performance.",
+        ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg(
         "-debuglogfile=<file>",
         strprintf("Specify location of debug log file. Relative paths "
                   "will be prefixed by a net-specific datadir "

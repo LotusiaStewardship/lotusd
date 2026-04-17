@@ -73,11 +73,12 @@ public:
 
     //! Attempt to update from an older database format.
     //! Returns whether an error occurred.
-    bool Upgrade();
+    bool Upgrade() override;
     size_t EstimateSize() const override;
 
     //! Dynamically alter the underlying leveldb cache size.
-    void ResizeCache(size_t new_cache_size) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    void ResizeCache(size_t new_cache_size) override
+        EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 };
 
 /** Specialization of CCoinsViewCursor to iterate over a CCoinsViewDB */

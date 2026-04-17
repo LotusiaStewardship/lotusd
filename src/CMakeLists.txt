@@ -682,6 +682,10 @@ add_subdirectory(pow/test)
 # Benchmark suite.
 add_subdirectory(bench)
 
+# SQLite chain storage (always available as alternative backend)
+add_subdirectory(sqlite)
+target_link_libraries(server sqlite-chain)
+
 include(BinaryTest)
 include(WindowsVersionInfo)
 

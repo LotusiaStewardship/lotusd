@@ -206,6 +206,12 @@ public:
 
     //! Estimate database size (0 if not implemented)
     virtual size_t EstimateSize() const { return 0; }
+
+    //! Attempt to update from an older database format. Default: no-op.
+    virtual bool Upgrade() { return true; }
+
+    //! Dynamically alter the underlying database cache size. Default: no-op.
+    virtual void ResizeCache(size_t /* new_cache_size */) {}
 };
 
 /** CCoinsView backed by another CCoinsView */
