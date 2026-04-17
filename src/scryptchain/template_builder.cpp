@@ -61,7 +61,7 @@ ScryptTemplateBuilder::ComputeMerkleRoot(const CMutableTransaction &coinbase,
         }
         std::vector<uint256> next;
         for (size_t i = 0; i < leaves.size(); i += 2) {
-            next.push_back(Hash(Span(leaves[i]), Span(leaves[i + 1])));
+            next.push_back(Hash(MakeSpan(leaves[i]), MakeSpan(leaves[i + 1])));
         }
         leaves = next;
     }
@@ -224,7 +224,7 @@ ScryptTemplateBuilder::CreateLtcTemplate(ScryptHeaderChain &ltcChain,
         uint256 witnessRoot;
         uint256 witnessReserved;
         uint256 witnessCommitment =
-            Hash(Span(witnessRoot), Span(witnessReserved));
+            Hash(MakeSpan(witnessRoot), MakeSpan(witnessReserved));
 
         CScript commitScript;
         commitScript << OP_RETURN;

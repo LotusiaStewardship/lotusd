@@ -9,6 +9,7 @@
 #include <logging.h>
 #include <sqlite/sqlite_wrapper.h>
 #include <util/strencodings.h>
+#include <util/time.h>
 
 #include <sqlite3.h>
 

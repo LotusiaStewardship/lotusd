@@ -148,7 +148,16 @@ void CSqliteWrapper::Cleanup() noexcept {
     }
 
     if (m_db) {
-        int rc = sqlite3_close(m_db);
+        // Flush WAL to main database file before closing
+        int nLog = 0, nCkpt = 0;
+        int rc = sqlite3_wal_checkpoint_v2(
+            m_db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, &nLog, &nCkpt);
+        if (rc != SQLITE_OK) {
+            LogPrintf("SQLite WAL checkpoint warning: %s\n",
+                      sqlite3_errstr(rc));
+        }
+
+        rc = sqlite3_close(m_db);
         if (rc != SQLITE_OK) {
             LogPrintf("SQLite close error: %s\n", sqlite3_errstr(rc));
         }

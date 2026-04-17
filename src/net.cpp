@@ -1986,7 +1986,7 @@ void CConnman::ThreadDNSAddressSeed() {
             seeds_right_now += DNSSEEDS_TO_QUERY_AT_ONCE;
 
             if (addrman.size() > 0) {
-                LogPrintf("Waiting %d seconds before querying DNS seeds.\n",
+                LogPrintf("🌍 DNS seed query in %ds\n",
                           seeds_wait_time.count());
                 std::chrono::seconds to_wait = seeds_wait_time;
                 while (to_wait.count() > 0) {
@@ -2012,7 +2012,7 @@ void CConnman::ThreadDNSAddressSeed() {
                     }
                     if (nRelevant >= 2) {
                         if (found > 0) {
-                            LogPrintf("%d addresses found from DNS seeds\n",
+                            LogPrintf("🌍 DNS seeds: %d peers discovered\n",
                                       found);
                             LogPrintf(
                                 "P2P peers available. Finished DNS seeding.\n");
@@ -2041,7 +2041,7 @@ void CConnman::ThreadDNSAddressSeed() {
             } while (!fNetworkActive);
         }
 
-        LogPrintf("Loading addresses from DNS seed %s\n", seed);
+        LogPrintf("🌍 Querying DNS seed %s\n", seed);
         if (HaveNameProxy()) {
             AddAddrFetch(seed);
         } else {
@@ -2079,7 +2079,7 @@ void CConnman::ThreadDNSAddressSeed() {
         }
         --seeds_right_now;
     }
-    LogPrintf("%d addresses found from DNS seeds\n", found);
+    LogPrintf("🌍 DNS seeds: %d peers discovered\n", found);
 }
 
 void CConnman::DumpAddresses() {
@@ -2722,7 +2722,7 @@ bool CConnman::BindListenPort(const CService &addrBind, bilingual_str &strError,
         CloseSocket(hListenSocket);
         return false;
     }
-    LogPrintf("Bound to %s\n", addrBind.ToString());
+    m_listen_addrs.push_back(addrBind.ToString());
 
     // Listen for incoming connections
     if (listen(hListenSocket, SOMAXCONN) == SOCKET_ERROR) {
@@ -2792,13 +2792,14 @@ void Discover() {
 }
 
 void CConnman::SetNetworkActive(bool active) {
-    LogPrintf("%s: %s\n", __func__, active);
-
     if (fNetworkActive == active) {
         return;
     }
 
     fNetworkActive = active;
+    if (!active) {
+        LogPrintf("⚠️  Network disabled\n");
+    }
     uiInterface.NotifyNetworkActiveChanged(fNetworkActive);
 }
 
@@ -2866,6 +2867,16 @@ bool CConnman::InitBinds(const std::vector<CService> &binds,
                        NetPermissionFlags::PF_NONE);
     }
 
+    if (!m_listen_addrs.empty()) {
+        std::string all;
+        for (const auto &a : m_listen_addrs) {
+            if (!all.empty()) all += ", ";
+            all += a;
+        }
+        LogPrintf("🔌 Listening: %s\n", all);
+        m_listen_addrs.clear();
+    }
+
     return fBound;
 }
 
@@ -2895,7 +2906,7 @@ bool CConnman::Start(CScheduler &scheduler, const Options &connOptions) {
     {
         CAddrDB adb(config->GetChainParams());
         if (adb.Read(addrman)) {
-            LogPrintf("Loaded %i addresses from peers.dat  %dms\n",
+            LogPrintf("🔗 Loaded %i peers (%dms)\n",
                       addrman.size(), GetTimeMillis() - nStart);
         } else {
             // Addrman can be in an inconsistent state after failure, reset it
@@ -2912,9 +2923,9 @@ bool CConnman::Start(CScheduler &scheduler, const Options &connOptions) {
         if (m_anchors.size() > MAX_BLOCK_RELAY_ONLY_ANCHORS) {
             m_anchors.resize(MAX_BLOCK_RELAY_ONLY_ANCHORS);
         }
-        LogPrintf(
-            "%i block-relay-only anchors will be tried for connections.\n",
-            m_anchors.size());
+        if (!m_anchors.empty()) {
+            LogPrintf("🔗 %i anchor peers queued\n", m_anchors.size());
+        }
     }
 
     uiInterface.InitMessage(_("Starting network threads...").translated);

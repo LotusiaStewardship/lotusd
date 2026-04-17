@@ -6,16 +6,26 @@
 
 #include <api/api_util.h>
 #include <amount.h>
+#include <blockdb.h>
 #include <chain.h>
+#include <chainparams.h>
 #include <logging.h>
+#include <node/context.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <rpc/protocol.h>
 #include <script/script.h>
 #include <sqlite3.h>
+#include <sync.h>
 #include <util/time.h>
+#include <validation.h>
 
+#include <algorithm>
+#include <atomic>
 #include <ctime>
+#include <future>
+#include <map>
+#include <thread>
 
 static const uint8_t RANK_LOKAD[4] = {0x52, 0x41, 0x4e, 0x4b}; // "RANK"
 
@@ -48,9 +58,146 @@ struct RankVote {
 };
 
 /**
+ * Decode Format A (RankService / multi-push):
+ *   OP_RETURN
+ *   push4  "RANK"           (04 52414e4b)
+ *   OP_0 | OP_1             (sentiment: 00=negative, 51=positive)
+ *   push1  <platform>       (01 xx)
+ *   push16 <profile_id>     (10 + 16 bytes, zero-padded UTF-8)
+ *   [push8 <post_id>]       (08 + 8 bytes, big-endian uint64, optional)
+ */
+struct ScriptElement {
+    opcodetype opcode;
+    std::vector<uint8_t> data;
+};
+
+static bool DecodeRankFormatA(const std::vector<ScriptElement> &elems,
+                              RankVote &vote) {
+    if (elems.size() < 4) return false;
+
+    // [0] LOKAD "RANK" (exactly 4 bytes)
+    if (elems[0].data.size() != 4 ||
+        memcmp(elems[0].data.data(), RANK_LOKAD, 4) != 0) {
+        return false;
+    }
+
+    // [1] Sentiment via opcode: OP_0 = negative, OP_1 = positive
+    if (elems[1].opcode == OP_0) {
+        vote.sentiment = 0x00;
+    } else if (elems[1].opcode == OP_1) {
+        vote.sentiment = 0x01;
+    } else {
+        return false;
+    }
+
+    // [2] Platform (1-byte data push)
+    if (elems[2].data.size() != 1) return false;
+    vote.platform = elems[2].data[0];
+
+    // [3] Profile ID (zero-padded UTF-8, typically 16 bytes)
+    if (elems[3].data.empty()) return false;
+    std::string rawProfile(elems[3].data.begin(), elems[3].data.end());
+    rawProfile.erase(
+        std::remove(rawProfile.begin(), rawProfile.end(), '\0'),
+        rawProfile.end());
+    if (rawProfile.empty()) return false;
+    vote.profileId = std::move(rawProfile);
+
+    // [4] Optional post ID (8-byte big-endian uint64)
+    if (elems.size() >= 5 && !elems[4].data.empty()) {
+        if (elems[4].data.size() == 8) {
+            uint64_t postIdNum = 0;
+            for (int i = 0; i < 8; i++) {
+                postIdNum = (postIdNum << 8) | elems[4].data[i];
+            }
+            vote.postId = std::to_string(postIdNum);
+        } else {
+            vote.postId = std::string(elems[4].data.begin(),
+                                      elems[4].data.end());
+        }
+    } else {
+        vote.postId.clear();
+    }
+
+    vote.version = 0x01;
+    return true;
+}
+
+/**
+ * Decode Format B (SimplifiedVotingService / single-push):
+ *   OP_RETURN
+ *   pushN <entire payload as one blob>
+ *
+ * Payload layout:
+ *   bytes 0-3:  "RANK" (52 41 4e 4b)
+ *   byte  4:    version (0x01)
+ *   byte  5:    sentiment (0x00=negative, 0x01=positive)
+ *   byte  6:    platform_length
+ *   bytes 7..:  platform string (UTF-8)
+ *   next byte:  profile_length
+ *   next bytes: profile string (UTF-8)
+ *   next byte:  post_length (0x00 = no post)
+ *   next bytes: post string (UTF-8, if length > 0)
+ */
+static bool DecodeRankFormatB(const std::vector<ScriptElement> &elems,
+                              RankVote &vote) {
+    if (elems.size() < 1) return false;
+
+    const auto &blob = elems[0].data;
+    if (blob.size() < 8) return false;  // minimum: RANK(4) + ver + sent + plen + prlen
+    if (memcmp(blob.data(), RANK_LOKAD, 4) != 0) return false;
+
+    // Must be a single-push (data > 4 bytes), not the 4-byte LOKAD of Format A
+    if (blob.size() == 4) return false;
+
+    size_t off = 4;
+    uint8_t version = blob[off++];
+    if (version != 0x01) return false;
+    vote.version = version;
+
+    uint8_t sentimentByte = blob[off++];
+    if (sentimentByte != 0x00 && sentimentByte != 0x01) return false;
+    vote.sentiment = sentimentByte;
+
+    // Platform (length-prefixed string)
+    if (off >= blob.size()) return false;
+    uint8_t platformLen = blob[off++];
+    if (off + platformLen > blob.size()) return false;
+    std::string platformStr(blob.begin() + off, blob.begin() + off + platformLen);
+    off += platformLen;
+
+    vote.platform = 0;
+    for (int i = 0; i < NUM_PLATFORMS; i++) {
+        if (platformStr == PLATFORM_NAMES[i]) {
+            vote.platform = static_cast<uint8_t>(i);
+            break;
+        }
+    }
+
+    // Profile ID (length-prefixed string)
+    if (off >= blob.size()) return false;
+    uint8_t profileLen = blob[off++];
+    if (off + profileLen > blob.size()) return false;
+    vote.profileId = std::string(blob.begin() + off, blob.begin() + off + profileLen);
+    off += profileLen;
+    if (vote.profileId.empty()) return false;
+
+    // Post ID (length-prefixed string, 0x00 = no post)
+    vote.postId.clear();
+    if (off < blob.size()) {
+        uint8_t postLen = blob[off++];
+        if (postLen > 0 && off + postLen <= blob.size()) {
+            vote.postId = std::string(blob.begin() + off, blob.begin() + off + postLen);
+            off += postLen;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Try to decode a RANK vote from an OP_RETURN scriptPubKey.
- * Format: OP_RETURN <push LOKAD "RANK"> <push VERSION> <push PLATFORM>
- *         <push PROFILE_ID> [<push POST_ID>] <push SENTIMENT>
+ * Supports both Format A (multi-push) and Format B (single-push).
  */
 static bool DecodeRankOutput(const CScript &script, RankVote &vote) {
     if (script.size() < 2 || script[0] != OP_RETURN) {
@@ -58,7 +205,7 @@ static bool DecodeRankOutput(const CScript &script, RankVote &vote) {
     }
 
     CScript::const_iterator it = script.begin() + 1;
-    std::vector<std::vector<uint8_t>> pushes;
+    std::vector<ScriptElement> elems;
 
     while (it < script.end()) {
         opcodetype opcode;
@@ -66,58 +213,25 @@ static bool DecodeRankOutput(const CScript &script, RankVote &vote) {
         if (!script.GetOp(it, opcode, data)) {
             break;
         }
-        pushes.push_back(std::move(data));
+        elems.push_back({opcode, std::move(data)});
     }
 
-    // Need at least: LOKAD(4) + VERSION(1) + PLATFORM(1) + PROFILE + SENTIMENT
-    if (pushes.size() < 4) {
-        return false;
+    if (elems.empty()) return false;
+
+    // Format A: first push is exactly 4 bytes "RANK", followed by opcode-based
+    // sentiment and separate pushes for platform / profile / post.
+    if (elems[0].data.size() == 4 &&
+        memcmp(elems[0].data.data(), RANK_LOKAD, 4) == 0) {
+        return DecodeRankFormatA(elems, vote);
     }
 
-    // Check LOKAD ID
-    if (pushes[0].size() != 4 ||
-        memcmp(pushes[0].data(), RANK_LOKAD, 4) != 0) {
-        return false;
+    // Format B: entire payload in one push, starts with "RANK" + version.
+    if (elems[0].data.size() > 4 &&
+        memcmp(elems[0].data.data(), RANK_LOKAD, 4) == 0) {
+        return DecodeRankFormatB(elems, vote);
     }
 
-    // Version
-    if (pushes[1].size() != 1) return false;
-    vote.version = pushes[1][0];
-    if (vote.version != 0x01) return false;
-
-    // Platform
-    if (pushes[2].size() != 1) return false;
-    vote.platform = pushes[2][0];
-
-    if (pushes.size() == 4) {
-        // LOKAD + VERSION + PLATFORM + PROFILE_AND_SENTIMENT: not enough
-        // Need at least LOKAD + VERSION + PLATFORM + PROFILE + SENTIMENT = 5
-        return false;
-    }
-
-    // Profile ID (UTF-8)
-    vote.profileId = std::string(pushes[3].begin(), pushes[3].end());
-    if (vote.profileId.empty()) return false;
-
-    if (pushes.size() == 5) {
-        // No post ID: LOKAD + VERSION + PLATFORM + PROFILE + SENTIMENT
-        vote.postId.clear();
-        if (pushes[4].size() != 1) return false;
-        vote.sentiment = pushes[4][0];
-    } else if (pushes.size() >= 6) {
-        // With post ID: LOKAD + VERSION + PLATFORM + PROFILE + POST + SENTIMENT
-        vote.postId = std::string(pushes[4].begin(), pushes[4].end());
-        if (pushes[5].size() != 1) return false;
-        vote.sentiment = pushes[5][0];
-    } else {
-        return false;
-    }
-
-    if (vote.sentiment != 0x00 && vote.sentiment != 0x01) {
-        return false;
-    }
-
-    return true;
+    return false;
 }
 
 static std::string DateFromTimestamp(int64_t ts) {
@@ -129,6 +243,47 @@ static std::string DateFromTimestamp(int64_t ts) {
     return std::string(buf);
 }
 
+struct ExtractedVote {
+    std::string txid;
+    int vout;
+    int height;
+    int64_t blockTime;
+    uint8_t platform;
+    std::string profileId;
+    std::string postId;
+    uint8_t sentiment;
+    int64_t sats;
+};
+
+static std::vector<ExtractedVote>
+ExtractVotesFromBlock(const CBlock &block, const CBlockIndex *pindex) {
+    std::vector<ExtractedVote> out;
+    const int height = pindex->nHeight;
+    const int64_t blockTime = pindex->GetBlockTime();
+
+    for (const auto &tx : block.vtx) {
+        for (size_t o = 0; o < tx->vout.size(); o++) {
+            const CTxOut &txout = tx->vout[o];
+            RankVote vote;
+            if (!DecodeRankOutput(txout.scriptPubKey, vote)) {
+                continue;
+            }
+            ExtractedVote ev;
+            ev.txid = tx->GetId().GetHex();
+            ev.vout = static_cast<int>(o);
+            ev.height = height;
+            ev.blockTime = blockTime;
+            ev.platform = vote.platform;
+            ev.profileId = std::move(vote.profileId);
+            ev.postId = std::move(vote.postId);
+            ev.sentiment = vote.sentiment;
+            ev.sats = txout.nValue / SATOSHI;
+            out.push_back(std::move(ev));
+        }
+    }
+    return out;
+}
+
 // ─── IChainModule implementation ───────────────────────────────────────────────
 
 std::string CRankModule::Name() const {
@@ -137,7 +292,7 @@ std::string CRankModule::Name() const {
 
 bool CRankModule::Init(const fs::path &datadir, const CChainParams &) {
     fs::path dbpath = datadir / "rank.sqlite";
-    LogPrintf("RANK module: opening database %s\n",
+    LogPrintf("🗳️  RANK database: %s\n",
               fs::PathToString(dbpath));
     m_db = std::make_unique<CSqliteWrapper>(dbpath, false, false);
     CreateSchema();
@@ -214,11 +369,285 @@ void CRankModule::CreateSchema() {
         "  PRIMARY KEY (date, platform, profile_id)"
         ");"
     );
+
+    m_db->ExecSQL(
+        "CREATE TABLE IF NOT EXISTS rank_meta ("
+        "  key   TEXT PRIMARY KEY,"
+        "  value TEXT NOT NULL"
+        ");"
+    );
+}
+
+void CRankModule::SetMeta(const std::string &key,
+                          const std::string &value) {
+    sqlite3_stmt *stmt = m_db->Prepare(
+        "INSERT INTO rank_meta(key, value) VALUES(?1, ?2) "
+        "ON CONFLICT(key) DO UPDATE SET value = ?2");
+    sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, value.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_reset(stmt);
+}
+
+std::string CRankModule::GetMeta(const std::string &key,
+                                 const std::string &fallback) {
+    sqlite3_stmt *stmt = m_db->Prepare(
+        "SELECT value FROM rank_meta WHERE key = ?1");
+    sqlite3_bind_text(stmt, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+    std::string result = fallback;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *val = reinterpret_cast<const char *>(
+            sqlite3_column_text(stmt, 0));
+        if (val) result = val;
+    }
+    sqlite3_reset(stmt);
+    return result;
+}
+
+int CRankModule::GetLastIndexedHeight() {
+    std::string val = GetMeta("last_indexed_height", "-1");
+    int h = atoi(val.c_str());
+    if (h < 0) {
+        sqlite3_stmt *q = m_db->Prepare(
+            "SELECT MAX(block_height) FROM rank_votes");
+        if (sqlite3_step(q) == SQLITE_ROW &&
+            sqlite3_column_type(q, 0) != SQLITE_NULL) {
+            h = sqlite3_column_int(q, 0);
+        }
+        sqlite3_reset(q);
+    }
+    return h;
+}
+
+void CRankModule::InsertExtractedVotes(
+        const std::vector<ExtractedVote> &votes) {
+    if (votes.empty()) return;
+
+    m_db->BeginTransaction();
+
+    sqlite3_stmt *ins = m_db->Prepare(
+        "INSERT OR IGNORE INTO rank_votes"
+        "(txid, vout, block_height, block_time, platform, profile_id, "
+        "post_id, sentiment, sats) "
+        "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+
+    sqlite3_stmt *ups_profile = m_db->Prepare(
+        "INSERT INTO rank_profiles(platform, profile_id, ranking, "
+        "votes_positive, votes_negative, last_vote_height) "
+        "VALUES(?1, ?2, ?3, ?4, ?5, ?6) "
+        "ON CONFLICT(platform, profile_id) DO UPDATE SET "
+        "ranking = ranking + ?3, "
+        "votes_positive = votes_positive + ?4, "
+        "votes_negative = votes_negative + ?5, "
+        "last_vote_height = MAX(last_vote_height, ?6)");
+
+    sqlite3_stmt *ups_post = m_db->Prepare(
+        "INSERT INTO rank_posts(platform, profile_id, post_id, ranking, "
+        "votes_positive, votes_negative) "
+        "VALUES(?1, ?2, ?3, ?4, ?5, ?6) "
+        "ON CONFLICT(platform, profile_id, post_id) DO UPDATE SET "
+        "ranking = ranking + ?4, "
+        "votes_positive = votes_positive + ?5, "
+        "votes_negative = votes_negative + ?6");
+
+    sqlite3_stmt *ups_daily = m_db->Prepare(
+        "INSERT INTO rank_daily_stats(date, platform, profile_id, delta) "
+        "VALUES(?1, ?2, ?3, ?4) "
+        "ON CONFLICT(date, platform, profile_id) DO UPDATE SET "
+        "delta = delta + ?4");
+
+    for (const auto &ev : votes) {
+        int64_t signedSats =
+            (ev.sentiment == 0x01) ? ev.sats : -ev.sats;
+        int posVotes = (ev.sentiment == 0x01) ? 1 : 0;
+        int negVotes = (ev.sentiment == 0x00) ? 1 : 0;
+        std::string date = DateFromTimestamp(ev.blockTime);
+
+        sqlite3_bind_text(ins, 1, ev.txid.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(ins, 2, ev.vout);
+        sqlite3_bind_int(ins, 3, ev.height);
+        sqlite3_bind_int64(ins, 4, ev.blockTime);
+        sqlite3_bind_int(ins, 5, ev.platform);
+        sqlite3_bind_text(ins, 6, ev.profileId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(ins, 7, ev.postId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(ins, 8, ev.sentiment);
+        sqlite3_bind_int64(ins, 9, ev.sats);
+        sqlite3_step(ins);
+        sqlite3_reset(ins);
+
+        sqlite3_bind_int(ups_profile, 1, ev.platform);
+        sqlite3_bind_text(ups_profile, 2, ev.profileId.c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int64(ups_profile, 3, signedSats);
+        sqlite3_bind_int(ups_profile, 4, posVotes);
+        sqlite3_bind_int(ups_profile, 5, negVotes);
+        sqlite3_bind_int(ups_profile, 6, ev.height);
+        sqlite3_step(ups_profile);
+        sqlite3_reset(ups_profile);
+
+        if (!ev.postId.empty()) {
+            sqlite3_bind_int(ups_post, 1, ev.platform);
+            sqlite3_bind_text(ups_post, 2, ev.profileId.c_str(), -1,
+                              SQLITE_TRANSIENT);
+            sqlite3_bind_text(ups_post, 3, ev.postId.c_str(), -1,
+                              SQLITE_TRANSIENT);
+            sqlite3_bind_int64(ups_post, 4, signedSats);
+            sqlite3_bind_int(ups_post, 5, posVotes);
+            sqlite3_bind_int(ups_post, 6, negVotes);
+            sqlite3_step(ups_post);
+            sqlite3_reset(ups_post);
+        }
+
+        sqlite3_bind_text(ups_daily, 1, date.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(ups_daily, 2, ev.platform);
+        sqlite3_bind_text(ups_daily, 3, ev.profileId.c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int64(ups_daily, 4, signedSats);
+        sqlite3_step(ups_daily);
+        sqlite3_reset(ups_daily);
+    }
+
+    m_db->CommitTransaction();
+}
+
+int CRankModule::RescanRange(int startHeight, int endHeight,
+                             const CChainParams &params) {
+    const int totalRange = endHeight - startHeight + 1;
+    const int64_t tStart = GetTimeMicros();
+    const unsigned int nWorkers = std::max(1u,
+        std::min(std::thread::hardware_concurrency(), 16u));
+    const int CHUNK_SIZE = 5000;
+
+    LogPrintf("🗳️  RANK rescan: %d blocks (%d → %d) | %u threads\n",
+              totalRange, startHeight, endHeight, nWorkers);
+
+    // Collect block index pointers under cs_main once.
+    int actualEnd;
+    std::vector<const CBlockIndex *> indices;
+    {
+        LOCK(cs_main);
+        actualEnd = std::min(endHeight, ::ChainActive().Height());
+        indices.resize(actualEnd - startHeight + 1, nullptr);
+        for (int h = startHeight; h <= actualEnd; h++) {
+            indices[h - startHeight] = ::ChainActive()[h];
+        }
+    }
+
+    if (actualEnd < endHeight) {
+        LogPrintf("🗳️  RANK rescan: chain tip %d < requested %d, "
+                  "capping at %d\n", actualEnd, endHeight, actualEnd);
+    }
+
+    std::atomic<int> totalVotes{0};
+    std::atomic<int> blocksProcessed{0};
+    int64_t tLastLog = tStart;
+    const Consensus::Params &consensus = params.GetConsensus();
+
+    // Process in chunks: parallel read+decode, serial DB write
+    for (int chunkStart = 0; chunkStart < (int)indices.size();
+         chunkStart += CHUNK_SIZE) {
+
+        int chunkEnd = std::min(chunkStart + CHUNK_SIZE,
+                                (int)indices.size());
+        int chunkLen = chunkEnd - chunkStart;
+
+        // Parallel extraction: each worker processes a slice of the chunk
+        int perWorker = (chunkLen + nWorkers - 1) / nWorkers;
+        std::vector<std::future<std::vector<ExtractedVote>>> futures;
+
+        for (unsigned int w = 0; w < nWorkers; w++) {
+            int wStart = chunkStart + w * perWorker;
+            int wEnd = std::min(wStart + perWorker, chunkEnd);
+            if (wStart >= chunkEnd) break;
+
+            futures.push_back(std::async(std::launch::async,
+                [&indices, &consensus, wStart, wEnd, startHeight]()
+                    -> std::vector<ExtractedVote> {
+                std::vector<ExtractedVote> workerVotes;
+                for (int i = wStart; i < wEnd; i++) {
+                    const CBlockIndex *pindex = indices[i];
+                    if (!pindex) continue;
+
+                    CBlock block;
+                    if (!ReadBlockFromDisk(block, pindex, consensus)) {
+                        continue;
+                    }
+                    auto votes = ExtractVotesFromBlock(block, pindex);
+                    if (!votes.empty()) {
+                        workerVotes.insert(workerVotes.end(),
+                            std::make_move_iterator(votes.begin()),
+                            std::make_move_iterator(votes.end()));
+                    }
+                }
+                return workerVotes;
+            }));
+        }
+
+        // Collect results from all workers
+        std::vector<ExtractedVote> chunkVotes;
+        for (auto &f : futures) {
+            auto workerResult = f.get();
+            if (!workerResult.empty()) {
+                chunkVotes.insert(chunkVotes.end(),
+                    std::make_move_iterator(workerResult.begin()),
+                    std::make_move_iterator(workerResult.end()));
+            }
+        }
+
+        // Serial DB write for this chunk
+        if (!chunkVotes.empty()) {
+            std::lock_guard<std::recursive_mutex> lock(m_db_mutex);
+            InsertExtractedVotes(chunkVotes);
+        }
+
+        int newVotes = static_cast<int>(chunkVotes.size());
+        totalVotes += newVotes;
+        blocksProcessed += chunkLen;
+
+        // Progress log every 5 seconds
+        int64_t tNow = GetTimeMicros();
+        bool isFinal = blocksProcessed.load() == (int)indices.size();
+        if (tNow - tLastLog >= 5'000'000 || isFinal) {
+            double elapsed = (tNow - tStart) / 1e6;
+            int done = blocksProcessed.load();
+            double pct = indices.size() > 0
+                ? 100.0 * done / indices.size() : 100.0;
+            double bps = elapsed > 0 ? done / elapsed : 0;
+            int remaining = (int)indices.size() - done;
+            int etaSec = bps > 0 ? static_cast<int>(remaining / bps) : 0;
+            LogPrintf("🗳️  RANK rescan: %d/%d (%.1f%%) | "
+                      "%.0f blk/s | %d votes | ETA %dm%02ds\n",
+                      done, (int)indices.size(), pct,
+                      bps, totalVotes.load(),
+                      etaSec / 60, etaSec % 60);
+            tLastLog = tNow;
+        }
+
+        // Checkpoint progress periodically
+        if (blocksProcessed.load() % 50000 < CHUNK_SIZE) {
+            std::lock_guard<std::recursive_mutex> lock(m_db_mutex);
+            SetMeta("last_indexed_height",
+                    std::to_string(startHeight + chunkEnd - 1));
+        }
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_db_mutex);
+        SetMeta("last_indexed_height", std::to_string(actualEnd));
+    }
+
+    double elapsed = (GetTimeMicros() - tStart) / 1e6;
+    LogPrintf("🗳️  RANK rescan complete: %d blocks | %d votes | "
+              "%.1fs (%.0f blk/s)\n",
+              (int)indices.size(), totalVotes.load(),
+              elapsed, elapsed > 0 ? indices.size() / elapsed : 0);
+    return totalVotes;
 }
 
 void CRankModule::ConnectBlock(const CBlock &block,
                                const CBlockIndex *pindex,
                                const CChainParams &) {
+    std::lock_guard<std::recursive_mutex> lock(m_db_mutex);
     const int height = pindex->nHeight;
     const int64_t blockTime = pindex->GetBlockTime();
     const std::string date = DateFromTimestamp(blockTime);
@@ -277,6 +706,11 @@ void CRankModule::ConnectBlock(const CBlock &block,
         "ON CONFLICT(date, platform, profile_id) DO UPDATE SET "
         "delta = delta + ?4");
 
+    int voteCount = 0;
+    int posCount = 0;
+    int negCount = 0;
+    std::map<std::string, int> profileHits;
+
     for (const auto &tx : block.vtx) {
         const std::string txidHex = tx->GetId().GetHex();
 
@@ -287,11 +721,16 @@ void CRankModule::ConnectBlock(const CBlock &block,
                 continue;
             }
 
+            voteCount++;
             int64_t sats = out.nValue / SATOSHI;
             int64_t signedSats =
                 (vote.sentiment == 0x01) ? sats : -sats;
+            int posVotes = (vote.sentiment == 0x01) ? 1 : 0;
+            int negVotes = (vote.sentiment == 0x00) ? 1 : 0;
+            posCount += posVotes;
+            negCount += negVotes;
+            profileHits[vote.profileId]++;
 
-            // Insert vote
             sqlite3_bind_text(ins_vote, 1, txidHex.c_str(), -1,
                               SQLITE_TRANSIENT);
             sqlite3_bind_int(ins_vote, 2, static_cast<int>(o));
@@ -307,10 +746,6 @@ void CRankModule::ConnectBlock(const CBlock &block,
             sqlite3_step(ins_vote);
             sqlite3_reset(ins_vote);
 
-            // Upsert profile
-            int posVotes = (vote.sentiment == 0x01) ? 1 : 0;
-            int negVotes = (vote.sentiment == 0x00) ? 1 : 0;
-
             sqlite3_bind_int(ups_profile, 1, vote.platform);
             sqlite3_bind_text(ups_profile, 2, vote.profileId.c_str(), -1,
                               SQLITE_TRANSIENT);
@@ -321,7 +756,6 @@ void CRankModule::ConnectBlock(const CBlock &block,
             sqlite3_step(ups_profile);
             sqlite3_reset(ups_profile);
 
-            // Upsert post (if post_id present)
             if (!vote.postId.empty()) {
                 sqlite3_bind_int(ups_post, 1, vote.platform);
                 sqlite3_bind_text(ups_post, 2, vote.profileId.c_str(), -1,
@@ -335,7 +769,6 @@ void CRankModule::ConnectBlock(const CBlock &block,
                 sqlite3_reset(ups_post);
             }
 
-            // Upsert daily stats
             sqlite3_bind_text(ups_daily, 1, date.c_str(), -1,
                               SQLITE_TRANSIENT);
             sqlite3_bind_int(ups_daily, 2, vote.platform);
@@ -348,11 +781,67 @@ void CRankModule::ConnectBlock(const CBlock &block,
     }
 
     m_db->CommitTransaction();
+
+    if (voteCount == 0) return;
+
+    bool isIBD = ::ChainstateActive().IsInitialBlockDownload();
+
+    if (!isIBD) {
+        // At chain tip: log every block individually
+        std::string summary;
+        std::vector<std::pair<int, std::string>> sorted;
+        for (const auto &p : profileHits) {
+            sorted.push_back({p.second, p.first});
+        }
+        std::sort(sorted.rbegin(), sorted.rend());
+        int shown = 0;
+        for (const auto &s : sorted) {
+            if (shown >= 3) {
+                int remaining = static_cast<int>(sorted.size()) - shown;
+                if (remaining > 0)
+                    summary += " +" + std::to_string(remaining) + " more";
+                break;
+            }
+            if (!summary.empty()) summary += ", ";
+            summary += s.second;
+            if (s.first > 1) summary += " x" + std::to_string(s.first);
+            shown++;
+        }
+        LogPrintf("🗳️  Block %d | %d votes (+%d/-%d) | %s\n",
+                  height, voteCount, posCount, negCount, summary);
+    } else {
+        // During IBD: accumulate and log a summary every 10 seconds
+        if (m_ibd_blocks_with_votes == 0) {
+            m_ibd_first_height = height;
+        }
+        m_ibd_votes_accum += voteCount;
+        m_ibd_pos_accum += posCount;
+        m_ibd_neg_accum += negCount;
+        m_ibd_blocks_with_votes++;
+        m_ibd_last_height = height;
+
+        int64_t now = GetTimeMicros();
+        if (m_ibd_log_last == 0) m_ibd_log_last = now;
+
+        if (now - m_ibd_log_last >= 10'000'000) {
+            LogPrintf("🗳️  RANK IBD: blocks %d→%d | %d blocks with votes | "
+                      "%d votes (+%d/-%d)\n",
+                      m_ibd_first_height, m_ibd_last_height,
+                      m_ibd_blocks_with_votes,
+                      m_ibd_votes_accum, m_ibd_pos_accum, m_ibd_neg_accum);
+            m_ibd_votes_accum = 0;
+            m_ibd_pos_accum = 0;
+            m_ibd_neg_accum = 0;
+            m_ibd_blocks_with_votes = 0;
+            m_ibd_log_last = now;
+        }
+    }
 }
 
 void CRankModule::DisconnectBlock(const CBlock &block,
                                   const CBlockIndex *pindex,
                                   const CChainParams &) {
+    std::lock_guard<std::recursive_mutex> lock(m_db_mutex);
     const int height = pindex->nHeight;
 
     if (!m_db->BeginTransaction()) {
@@ -456,8 +945,40 @@ void CRankModule::DisconnectBlock(const CBlock &block,
 }
 
 void CRankModule::Shutdown() {
-    LogPrintf("RANK module: closing database\n");
+    // Flush any pending IBD log accumulator
+    if (m_ibd_votes_accum > 0) {
+        LogPrintf("🗳️  RANK IBD (final): blocks %d→%d | %d blocks with votes | "
+                  "%d votes (+%d/-%d)\n",
+                  m_ibd_first_height, m_ibd_last_height,
+                  m_ibd_blocks_with_votes,
+                  m_ibd_votes_accum, m_ibd_pos_accum, m_ibd_neg_accum);
+        m_ibd_votes_accum = 0;
+    }
+
+    // Log total stats before closing
+    if (m_db) {
+        int totalVotes = 0, totalProfiles = 0;
+        sqlite3_stmt *q = m_db->Prepare(
+            "SELECT COUNT(*) FROM rank_votes");
+        if (sqlite3_step(q) == SQLITE_ROW) {
+            totalVotes = sqlite3_column_int(q, 0);
+        }
+        sqlite3_reset(q);
+
+        q = m_db->Prepare("SELECT COUNT(*) FROM rank_profiles");
+        if (sqlite3_step(q) == SQLITE_ROW) {
+            totalProfiles = sqlite3_column_int(q, 0);
+        }
+        sqlite3_reset(q);
+
+        int lastHeight = GetLastIndexedHeight();
+        LogPrintf("🗳️  RANK shutdown: %d votes | %d profiles | "
+                  "last height %d | flushing WAL...\n",
+                  totalVotes, totalProfiles, lastHeight);
+    }
+
     m_db.reset();
+    LogPrintf("🗳️  RANK module: closed\n");
 }
 
 // ─── API Handlers ──────────────────────────────────────────────────────────────
@@ -470,7 +991,10 @@ void CRankModule::RegisterRoutes(RouteAdder addRoute) {
              std::bind(&CRankModule::HandleProfiles, this, _1, _2, _3, _4));
     addRoute(HTTPRequest::GET, "social/stats",
              std::bind(&CRankModule::HandleStats, this, _1, _2, _3, _4));
-    // Profile detail & sub-routes (profiles/{platform}/{id}[/posts|/votes])
+    addRoute(HTTPRequest::GET, "social/rescan",
+             std::bind(&CRankModule::HandleRescan, this, _1, _2, _3, _4));
+    addRoute(HTTPRequest::POST, "social/rescan",
+             std::bind(&CRankModule::HandleRescan, this, _1, _2, _3, _4));
     addRoute(HTTPRequest::GET, "social",
              std::bind(&CRankModule::HandleProfileDetail, this, _1, _2, _3, _4));
 }
@@ -814,5 +1338,49 @@ bool CRankModule::HandleStats(const util::Ref &, HTTPRequest *req,
 
     api::WriteError(req, HTTP_NOT_FOUND, "not_found",
                     "Stats type must be 'profiles' or 'posts'");
+    return true;
+}
+
+bool CRankModule::HandleRescan(const util::Ref &ctx, HTTPRequest *req,
+                               const std::vector<std::string> &,
+                               const api::QueryParams &qp) {
+    int start = qp.GetInt("start", -1);
+    int end = qp.GetInt("end", -1);
+
+    int chainHeight;
+    {
+        LOCK(cs_main);
+        chainHeight = ::ChainActive().Height();
+    }
+
+    if (start < 0) {
+        int lastIndexed = GetLastIndexedHeight();
+        start = (lastIndexed >= 0) ? lastIndexed + 1 : 0;
+    }
+    if (end < 0 || end > chainHeight) {
+        end = chainHeight;
+    }
+    if (start > end) {
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("status", "up_to_date");
+        result.pushKV("lastIndexedHeight", GetLastIndexedHeight());
+        result.pushKV("chainHeight", chainHeight);
+        result.pushKV("votesFound", 0);
+        api::WriteJSON(req, HTTP_OK, result);
+        return true;
+    }
+
+    const CChainParams &params = Params();
+    int votes = RescanRange(start, end, params);
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("status", "complete");
+    result.pushKV("startHeight", start);
+    result.pushKV("endHeight", end);
+    result.pushKV("blocksScanned", end - start + 1);
+    result.pushKV("votesFound", votes);
+    result.pushKV("lastIndexedHeight", GetLastIndexedHeight());
+    result.pushKV("chainHeight", chainHeight);
+    api::WriteJSON(req, HTTP_OK, result);
     return true;
 }

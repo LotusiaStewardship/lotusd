@@ -52,8 +52,7 @@ bool noui_ThreadSafeQuestion(
     return noui_ThreadSafeMessageBox(Untranslated(message), caption, style);
 }
 
-void noui_InitMessage(const std::string &message) {
-    LogPrintf("init message: %s\n", message);
+void noui_InitMessage(const std::string &) {
 }
 
 void noui_connect() {
@@ -79,8 +78,7 @@ bool noui_ThreadSafeQuestionRedirect(
     return false;
 }
 
-void noui_InitMessageRedirect(const std::string &message) {
-    LogPrintf("init message: %s\n", message);
+void noui_InitMessageRedirect(const std::string &) {
 }
 
 void noui_test_redirect() {

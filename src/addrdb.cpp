@@ -161,20 +161,18 @@ bool CAddrDB::Read(CAddrMan &addr, CDataStream &ssPeers) {
 void DumpAnchors(const CChainParams &chainParams,
                  const fs::path &anchors_db_path,
                  const std::vector<CAddress> &anchors) {
-    LOG_TIME_SECONDS(strprintf(
-        "Flush %d outbound block-relay-only peer addresses to anchors.dat",
-        anchors.size()));
     SerializeFileDB(chainParams, "anchors", anchors_db_path, anchors);
 }
 
 std::vector<CAddress> ReadAnchors(const CChainParams &chainParams,
                                   const fs::path &anchors_db_path) {
     std::vector<CAddress> anchors;
-    if (DeserializeFileDB(chainParams, anchors_db_path, anchors)) {
-        LogPrintf("Loaded %i addresses from %s\n", anchors.size(),
-                  fs::quoted(fs::PathToString(anchors_db_path.filename())));
-    } else {
-        anchors.clear();
+    if (fs::exists(anchors_db_path)) {
+        if (DeserializeFileDB(chainParams, anchors_db_path, anchors)) {
+            LogPrintf("🔗 Loaded %i anchors\n", anchors.size());
+        } else {
+            anchors.clear();
+        }
     }
 
     fs::remove(anchors_db_path);

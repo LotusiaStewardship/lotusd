@@ -5,6 +5,7 @@
 #include <scryptchain/solution_handler.h>
 
 #include <arith_uint256.h>
+#include <chainparams.h>
 #include <config.h>
 #include <hash.h>
 #include <logging.h>
@@ -83,7 +84,7 @@ ComputeCoinbaseMerkleBranch(const CMutableTransaction &coinbase,
         }
         std::vector<uint256> next;
         for (size_t i = 0; i < leaves.size(); i += 2) {
-            next.push_back(Hash(Span(leaves[i]), Span(leaves[i + 1])));
+            next.push_back(Hash(MakeSpan(leaves[i]), MakeSpan(leaves[i + 1])));
         }
         leaves = next;
         idx /= 2;

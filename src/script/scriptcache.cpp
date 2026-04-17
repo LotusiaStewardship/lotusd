@@ -90,9 +90,8 @@ void InitScriptExecutionCache() {
             MAX_MAX_SCRIPT_CACHE_SIZE) *
         (size_t(1) << 20);
     size_t nElems = g_scriptExecutionCache.setup_bytes(nMaxCacheSize);
-    LogPrintf("Using %zu MiB out of %zu requested for script execution cache, "
-              "able to store %zu elements\n",
-              (nElems * sizeof(uint256)) >> 20, nMaxCacheSize >> 20, nElems);
+    LogPrintf("💾 Script cache: %zu MiB (%zu entries)\n",
+              (nElems * sizeof(uint256)) >> 20, nElems);
 }
 
 ScriptCacheKey::ScriptCacheKey(const CTransaction &tx, uint32_t flags) {

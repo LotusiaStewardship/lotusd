@@ -1373,6 +1373,8 @@ private:
      */
     std::vector<CService> m_onion_binds;
 
+    std::vector<std::string> m_listen_addrs;
+
     friend struct ::CConnmanTest;
     friend struct ConnmanTestMsg;
 };

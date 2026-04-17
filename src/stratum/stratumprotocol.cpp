@@ -50,6 +50,20 @@ void StratumLineBuffer::Clear() {
     m_overflow = false;
 }
 
+static bool ParseStratumId(const UniValue &idVal, int64_t &idOut) {
+    if (idVal.isNum()) {
+        idOut = idVal.get_int64();
+        return true;
+    }
+    if (idVal.isStr()) {
+        try {
+            idOut = std::stoll(idVal.get_str());
+            return true;
+        } catch (...) {}
+    }
+    return false;
+}
+
 bool ParseStratumLine(const std::string &line, StratumMessage &msgOut) {
     UniValue val;
     if (!val.read(line)) {
@@ -66,7 +80,9 @@ bool ParseStratumLine(const std::string &line, StratumMessage &msgOut) {
 
     if (hasMethod && hasId) {
         StratumRequest req;
-        req.id = val["id"].get_int64();
+        if (!ParseStratumId(val["id"], req.id)) {
+            return false;
+        }
         req.method = val["method"].get_str();
         req.params = val.exists("params") ? val["params"]
                                           : UniValue(UniValue::VARR);
@@ -85,7 +101,9 @@ bool ParseStratumLine(const std::string &line, StratumMessage &msgOut) {
 
     if (hasId && (hasResult || hasError)) {
         StratumResponse resp;
-        resp.id = val["id"].get_int64();
+        if (!ParseStratumId(val["id"], resp.id)) {
+            return false;
+        }
         resp.result = val.exists("result") ? val["result"]
                                            : UniValue(UniValue::VNULL);
         resp.error =

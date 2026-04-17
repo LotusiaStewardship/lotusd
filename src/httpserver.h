@@ -1,5 +1,6 @@
 // Copyright (c) 2015-2016 The Bitcoin Core developers
 // Copyright (c) 2018-2019 The Bitcoin developers
+// Copyright (c) 2026 Lotusia — cpp-httplib rewrite
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,14 +8,13 @@
 #define BITCOIN_HTTPSERVER_H
 
 #include <functional>
+#include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
-static const int DEFAULT_HTTP_THREADS = 4;
-static const int DEFAULT_HTTP_WORKQUEUE = 16;
+static const int DEFAULT_HTTP_THREADS = 16;
 static const int DEFAULT_HTTP_SERVER_TIMEOUT = 30;
-
-struct evhttp_request;
-struct event_base;
 
 class Config;
 class CService;
@@ -22,7 +22,7 @@ class HTTPRequest;
 
 /**
  * Initialize HTTP server.
- * Call this before RegisterHTTPHandler or EventBase().
+ * Call this before RegisterHTTPHandler.
  */
 bool InitHTTPServer(Config &config);
 
@@ -40,8 +40,8 @@ void InterruptHTTPServer();
 void StopHTTPServer();
 
 /**
- * Change logging level for libevent. Removes BCLog::LIBEVENT from
- * log categories if libevent doesn't support debug logging.
+ * Change logging level for HTTP server.
+ * Returns true (kept for API compat).
  */
 bool UpdateHTTPServerLogging(bool enable);
 
@@ -62,22 +62,14 @@ void RegisterHTTPHandler(const std::string &prefix, bool exactMatch,
 void UnregisterHTTPHandler(const std::string &prefix, bool exactMatch);
 
 /**
- * Return evhttp event base. This can be used by submodules to
- * queue timers or custom events.
- */
-struct event_base *EventBase();
-
-/**
  * In-flight HTTP request.
- * Thin C++ wrapper around evhttp_request.
+ * Wraps cpp-httplib request/response pair.
  */
 class HTTPRequest {
-private:
-    struct evhttp_request *req;
-    bool replySent;
-
 public:
-    explicit HTTPRequest(struct evhttp_request *req, bool replySent = false);
+    struct Impl;
+
+    explicit HTTPRequest(std::unique_ptr<Impl> impl);
     ~HTTPRequest();
 
     enum RequestMethod { UNKNOWN, GET, POST, HEAD, PUT, OPTIONS };
@@ -118,47 +110,20 @@ public:
      * strReply is the body of the reply. Keep it empty to send a standard
      * message.
      *
-     * @note Can be called only once. As this will give the request back to the
-     * main thread, do not call any other HTTPRequest methods after calling
-     * this.
+     * @note Can be called only once.
      */
     void WriteReply(int nStatus, const std::string &strReply = "");
+
+private:
+    std::unique_ptr<Impl> m_impl;
+    bool replySent{false};
 };
 
-/** Event handler closure */
+/** Event handler closure (kept for API compat, no longer used internally) */
 class HTTPClosure {
 public:
     virtual void operator()() = 0;
     virtual ~HTTPClosure() {}
-};
-
-/**
- * Event class. This can be used either as a cross-thread trigger or as a
- * timer.
- */
-class HTTPEvent {
-public:
-    /**
-     * Create a new event.
-     * deleteWhenTriggered deletes this event object after the event is
-     * triggered (and the handler called)
-     * handler is the handler to call when the event is triggered.
-     */
-    HTTPEvent(struct event_base *base, bool deleteWhenTriggered,
-              const std::function<void()> &handler);
-    ~HTTPEvent();
-
-    /**
-     * Trigger the event. If tv is 0, trigger it immediately. Otherwise trigger
-     * it after the given time has elapsed.
-     */
-    void trigger(struct timeval *tv);
-
-    bool deleteWhenTriggered;
-    std::function<void()> handler;
-
-private:
-    struct event *ev;
 };
 
 #endif // BITCOIN_HTTPSERVER_H

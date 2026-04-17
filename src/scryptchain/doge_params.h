@@ -11,7 +11,7 @@ namespace scryptchain {
 
 inline const ScryptChainParams &DogecoinMainnetParams() {
     static const ScryptChainParams params = [] {
-        ScryptChainParams p{};
+        ScryptChainParams p;
         p.name = "dogecoin";
         p.netMagic[0] = 0xc0;
         p.netMagic[1] = 0xc0;
@@ -83,7 +83,7 @@ inline const ScryptChainParams &DogecoinMainnetParams() {
 
 inline const ScryptChainParams &DogecoinTestnetParams() {
     static const ScryptChainParams params = [] {
-        ScryptChainParams p{};
+        ScryptChainParams p;
         p.name = "dogecoin-testnet";
         p.netMagic[0] = 0xfc;
         p.netMagic[1] = 0xc1;

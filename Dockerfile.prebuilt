@@ -1,0 +1,27 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3t64 libzmq5 libboost-filesystem1.83.0 libboost-thread1.83.0 \
+    libevent-2.1-7t64 libevent-pthreads-2.1-7t64 \
+    libdb5.3++ libminiupnpc17 libjemalloc2 libsqlite3-0 \
+    libprotobuf-lite32t64 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r lotus && useradd -rmg lotus lotus
+
+COPY _docker_bin/lotusd     /usr/local/bin/lotusd
+COPY _docker_bin/lotus-cli  /usr/local/bin/lotus-cli
+RUN chmod +x /usr/local/bin/lotusd /usr/local/bin/lotus-cli
+
+ENV LOTUS_DATA=/data
+RUN mkdir -p "$LOTUS_DATA" && chown lotus:lotus "$LOTUS_DATA"
+VOLUME ["$LOTUS_DATA"]
+
+EXPOSE 10605 10604 11605 11604
+
+USER lotus
+ENTRYPOINT ["lotusd"]
+CMD ["-datadir=/data", "-printtoconsole", \
+     "-listen=1", "-dnsseed=1", \
+     "-addnode=seed.lotusia.org"]

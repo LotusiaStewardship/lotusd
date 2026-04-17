@@ -191,10 +191,14 @@ bool HandleGetTx(const util::Ref &ctx, HTTPRequest *req,
     }
     sqlite3_reset(qout);
 
-    int64_t inVal = result["input_value_sats"].get_int64();
-    int64_t outVal = result["output_value_sats"].get_int64();
-    if (inVal > 0) {
-        result.pushKV("fee_sats", inVal - outVal);
+    const UniValue &inValUV = result["input_value_sats"];
+    const UniValue &outValUV = result["output_value_sats"];
+    if (inValUV.isNum() && outValUV.isNum()) {
+        int64_t inVal = inValUV.get_int64();
+        int64_t outVal = outValUV.get_int64();
+        if (inVal > 0) {
+            result.pushKV("fee_sats", inVal - outVal);
+        }
     }
 
     WriteSuccess(req, result);

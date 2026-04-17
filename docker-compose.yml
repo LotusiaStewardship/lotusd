@@ -3,6 +3,7 @@ services:
     image: boblepointu/lotused:latest
     container_name: lotusd
     restart: unless-stopped
+    stop_grace_period: 120s
 
     ports:
       # P2P mainnet — other nodes connect here to sync the blockchain

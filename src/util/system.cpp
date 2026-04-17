@@ -1095,16 +1095,20 @@ void ArgsManager::logArgsPrefix(
     const std::string &prefix, const std::string &section,
     const std::map<std::string, std::vector<util::SettingsValue>> &args) const {
     std::string section_str = section.empty() ? "" : "[" + section + "] ";
+    std::string line;
     for (const auto &arg : args) {
         for (const auto &value : arg.second) {
             std::optional<unsigned int> flags = GetArgFlags('-' + arg.first);
             if (flags) {
                 std::string value_str =
                     (*flags & SENSITIVE) ? "****" : value.write();
-                LogPrintf("%s %s%s=%s\n", prefix, section_str, arg.first,
-                          value_str);
+                if (!line.empty()) line += " ";
+                line += arg.first + "=" + value_str;
             }
         }
+    }
+    if (!line.empty()) {
+        LogPrintf("⚙️  %s %s%s\n", prefix, section_str, line);
     }
 }
 

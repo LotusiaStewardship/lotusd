@@ -949,8 +949,7 @@ static std::unique_ptr<CCoinsView> MakeCoinsDB(const std::string &db_name,
                                                bool should_wipe) {
     fs::path dbpath = GetDataDir() / db_name / "chainstate.sqlite";
     TryCreateDirectories(dbpath.parent_path());
-    LogPrintf("Using SQLite chainstate database: %s\n",
-              fs::PathToString(dbpath));
+    // chainstate db at dbpath
     return std::make_unique<CCoinsViewSqlite>(dbpath, cache_size_bytes,
                                               in_memory, should_wipe);
 }
@@ -1011,7 +1010,7 @@ bool CChainState::IsInitialBlockDownload() const {
     if (m_chain.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge)) {
         return true;
     }
-    LogPrintf("Leaving InitialBlockDownload (latching to false)\n");
+    LogPrintf("⛓️  IBD complete — chain synced\n");
     m_cached_finished_ibd.store(true, std::memory_order_relaxed);
     return false;
 }
@@ -2195,9 +2194,8 @@ bool CChainState::FlushStateToDisk(const CChainParams &chainparams,
             // Flush best chain related state. This can only be done if the
             // blocks / block index write was also done.
             if (fDoFullFlush && !CoinsTip().GetBestBlock().IsNull()) {
-                LOG_TIME_SECONDS(
-                    strprintf("write coins cache to disk (%d coins, %.2fkB)",
-                              coins_count, coins_mem_usage / 1000));
+                LogPrintf("💾 Flushing %d coins (%.1f MB)...\n",
+                          coins_count, coins_mem_usage / 1000000.0);
 
                 // Typical Coin structures on disk are around 48 bytes in size.
                 // Pushing a new one to the database can cause it to be written
@@ -5001,12 +4999,10 @@ static bool LoadBlockIndexDB(ChainstateManager &chainman,
     // Load block file info
     pblocktree->ReadLastBlockFile(nLastBlockFile);
     vinfoBlockFile.resize(nLastBlockFile + 1);
-    LogPrintf("%s: last block file = %i\n", __func__, nLastBlockFile);
+    // nLastBlockFile + 1 block files
     for (int nFile = 0; nFile <= nLastBlockFile; nFile++) {
         pblocktree->ReadBlockFileInfo(nFile, vinfoBlockFile[nFile]);
     }
-    LogPrintf("%s: last block file info: %s\n", __func__,
-              vinfoBlockFile[nLastBlockFile].ToString());
     for (int nFile = nLastBlockFile + 1; true; nFile++) {
         CBlockFileInfo info;
         if (pblocktree->ReadBlockFileInfo(nFile, info)) {
@@ -5017,7 +5013,7 @@ static bool LoadBlockIndexDB(ChainstateManager &chainman,
     }
 
     // Check presence of blk files
-    LogPrintf("Checking all blk files are present...\n");
+    // verify blk file presence
     std::set<int> setBlkDataFiles;
     for (const std::pair<const BlockHash, CBlockIndex *> &item :
          chainman.BlockIndex()) {
@@ -5078,10 +5074,10 @@ bool CChainState::LoadChainTip(const CChainParams &chainparams) {
 
     tip = m_chain.Tip();
     LogPrintf(
-        "Loaded best chain: hashBestChain=%s height=%d date=%s progress=%f\n",
-        tip->GetBlockHash().ToString(), m_chain.Height(),
+        "⛓️  Best chain: height=%d | %s | %.1f%%\n",
+        m_chain.Height(),
         FormatISO8601DateTime(tip->GetBlockTime()),
-        GuessVerificationProgress(chainparams.TxData(), tip));
+        GuessVerificationProgress(chainparams.TxData(), tip) * 100.0);
     return true;
 }
 
@@ -5111,8 +5107,7 @@ bool CVerifyDB::VerifyDB(const Config &config, CCoinsView *coinsview,
     }
 
     nCheckLevel = std::max(0, std::min(4, nCheckLevel));
-    LogPrintf("Verifying last %i blocks at level %i\n", nCheckDepth,
-              nCheckLevel);
+    LogPrintf("🔍 Verifying last %i blocks...\n", nCheckDepth);
 
     CCoinsViewCache coins(coinsview);
     CBlockIndex *pindex;
@@ -5120,7 +5115,6 @@ bool CVerifyDB::VerifyDB(const Config &config, CCoinsView *coinsview,
     int nGoodTransactions = 0;
     BlockValidationState state;
     int reportDone = 0;
-    LogPrintfToBeContinued("[0%%]...");
     for (pindex = ::ChainActive().Tip(); pindex && pindex->pprev;
          pindex = pindex->pprev) {
         const int percentageDone =
@@ -5129,8 +5123,6 @@ bool CVerifyDB::VerifyDB(const Config &config, CCoinsView *coinsview,
                                            (double)nCheckDepth *
                                            (nCheckLevel >= 4 ? 50 : 100))));
         if (reportDone < percentageDone / 10) {
-            // report every 10% step
-            LogPrintfToBeContinued("[%d%%]...", percentageDone);
             reportDone = percentageDone / 10;
         }
 
@@ -5223,8 +5215,6 @@ bool CVerifyDB::VerifyDB(const Config &config, CCoinsView *coinsview,
                                                  pindex->nHeight) /
                                           double(nCheckDepth) * 50)));
             if (reportDone < percentageDone / 10) {
-                // report every 10% step
-                LogPrintfToBeContinued("[%d%%]...", percentageDone);
                 reportDone = percentageDone / 10;
             }
             uiInterface.ShowProgress(_("Verifying blocks...").translated,
@@ -5250,9 +5240,7 @@ bool CVerifyDB::VerifyDB(const Config &config, CCoinsView *coinsview,
         }
     }
 
-    LogPrintf("[DONE].\n");
-    LogPrintf("No coin database inconsistencies in last %i blocks (%i "
-              "transactions)\n",
+    LogPrintf("🔍 Verified %i blocks (%i tx) — no inconsistencies\n",
               block_count, nGoodTransactions);
 
     return true;
@@ -6106,10 +6094,9 @@ bool LoadMempool(const Config &config, CTxMemPool &pool) {
         return false;
     }
 
-    LogPrintf("Imported mempool transactions from disk: %i succeeded, %i "
-              "failed, %i expired, %i already there, %i waiting for initial "
-              "broadcast\n",
-              count, failed, expired, already_there, unbroadcast);
+    if (count > 0 || failed > 0) {
+        LogPrintf("💾 Mempool: loaded %i tx (%i failed)\n", count, failed);
+    }
     return true;
 }
 
@@ -6156,8 +6143,7 @@ bool DumpMempool(const CTxMemPool &pool) {
 
         file << mapDeltas;
 
-        LogPrintf("Writing %d unbroadcast transactions to disk.\n",
-                  unbroadcast_txids.size());
+        // write unbroadcast txids
         file << unbroadcast_txids;
 
         if (!FileCommit(file.Get())) {
@@ -6169,8 +6155,7 @@ bool DumpMempool(const CTxMemPool &pool) {
             throw std::runtime_error("Rename failed");
         }
         int64_t last = GetTimeMicros();
-        LogPrintf("Dumped mempool: %gs to copy, %gs to dump\n",
-                  (mid - start) * MICRO, (last - mid) * MICRO);
+        // mempool dumped
     } catch (const std::exception &e) {
         LogPrintf("Failed to dump mempool: %s. Continuing anyway.\n", e.what());
         return false;
@@ -6183,16 +6168,20 @@ bool IsBlockPruned(const CBlockIndex *pblockindex) {
             pblockindex->nTx > 0);
 }
 
-//! Guess how far we are in the verification process at the given block index
-//! require cs_main if pindex has not been validated yet (because the chain's
-//! transaction count might be unset) This conditional lock requirement might be
-//! confusing, see: https://github.com/bitcoin/bitcoin/issues/15994
 double GuessVerificationProgress(const ChainTxData &data,
                                  const CBlockIndex *pindex) {
     if (pindex == nullptr) {
         return 0.0;
     }
 
+    // Use best known header height when available for an accurate ratio.
+    if (pindexBestHeader != nullptr && pindexBestHeader->nHeight > 0) {
+        return std::min<double>(
+            static_cast<double>(pindex->nHeight) / pindexBestHeader->nHeight,
+            1.0);
+    }
+
+    // Fallback: tx-rate extrapolation when headers aren't loaded yet.
     int64_t nNow = time(nullptr);
 
     double fTxTotal;
@@ -6242,7 +6231,9 @@ ChainstateManager::InitializeChainstate(CTxMemPool &mempool,
 
     // Snapshot chainstates and initial IBD chaintates always become active.
     if (is_snapshot || (!is_snapshot && !m_active_chainstate)) {
-        LogPrintf("Switching active chainstate to %s\n", to_modify->ToString());
+        if (is_snapshot) {
+            LogPrintf("⛓️  Activating snapshot chainstate: %s\n", to_modify->ToString());
+        }
         m_active_chainstate = to_modify.get();
     } else {
         throw std::logic_error("unexpected chainstate activation");

@@ -159,7 +159,7 @@ bool NngRpcServer::Listen(const std::string &rpc_url) {
     for (NngRpcWorker &worker : m_workers) {
         worker.Init(m_sock, this);
     }
-    LogPrintf("NNG interface: RPC server listening at %s\n", rpc_url);
+    LogPrintf("🔌 NNG RPC: %s\n", rpc_url);
     return true;
 }
 
@@ -556,7 +556,7 @@ public:
             strprintf("Failed listening on -nngpub=%s: %%s", pub_url);
         NNG_TRY_ERROR(nng_listen(m_sock, pub_url.c_str(), NULL, 0),
                       listen_failure_msg.c_str());
-        LogPrintf("NNG interface: pubsub server listening at %s\n", pub_url);
+        LogPrintf("🔌 NNG PubSub: %s\n", pub_url);
         RegisterValidationInterface(this);
         return true;
     }

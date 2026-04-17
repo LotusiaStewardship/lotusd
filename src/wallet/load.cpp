@@ -46,7 +46,7 @@ bool VerifyWallets(interfaces::Chain &chain) {
         gArgs.ForceSetArg("-walletdir", fs::PathToString(canonical_wallet_dir));
     }
 
-    LogPrintf("Using wallet directory %s\n", fs::PathToString(GetWalletDir()));
+    // wallet dir is same as data dir
 
     chain.initMessage(_("Verifying wallet(s)...").translated);
 

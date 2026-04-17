@@ -468,9 +468,7 @@ int GetNumCores();
 template <typename Callable> void TraceThread(const char *name, Callable func) {
     util::ThreadRename(name);
     try {
-        LogPrintf("%s thread start\n", name);
         func();
-        LogPrintf("%s thread exit\n", name);
     } catch (const boost::thread_interrupted &) {
         LogPrintf("%s thread interrupt\n", name);
         throw;

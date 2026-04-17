@@ -77,12 +77,12 @@ public:
 
 private:
     struct MempoolEntry {
-        CTransaction tx;
-        int64_t firstSeen;
+        CTransactionRef tx;
+        int64_t firstSeen{0};
         std::set<int> peersSeen;
-        bool confirmed;
-        int64_t feeRate; // satoshis per byte (estimated)
-        size_t txSize;
+        bool confirmed{false};
+        int64_t feeRate{0};
+        size_t txSize{0};
     };
 
     int m_minPeerConfirmations;

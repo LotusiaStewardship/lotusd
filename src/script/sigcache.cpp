@@ -83,9 +83,8 @@ void InitSignatureCache() {
                  MAX_MAX_SIG_CACHE_SIZE) *
         (size_t(1) << 20);
     size_t nElems = signatureCache.setup_bytes(nMaxCacheSize);
-    LogPrintf("Using %zu MiB out of %zu requested for signature cache, able to "
-              "store %zu elements\n",
-              (nElems * sizeof(uint256)) >> 20, nMaxCacheSize >> 20, nElems);
+    LogPrintf("💾 Sig cache: %zu MiB (%zu entries)\n",
+              (nElems * sizeof(uint256)) >> 20, nElems);
 }
 
 template <typename F>

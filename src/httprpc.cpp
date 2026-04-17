@@ -17,12 +17,14 @@
 #include <boost/algorithm/string.hpp> // boost::trim
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <iterator>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 
 /** WWW-Authenticate to present with 401 Unauthorized response */
 static const char *WWW_AUTH_HEADER_DATA = "Basic realm=\"jsonrpc\"";
@@ -36,32 +38,33 @@ static const int64_t RPC_AUTH_BRUTE_FORCE_DELAY = 250;
  */
 class HTTPRPCTimer : public RPCTimerBase {
 public:
-    HTTPRPCTimer(struct event_base *eventBase, std::function<void()> &func,
-                 int64_t millis)
-        : ev(eventBase, false, func) {
-        struct timeval tv;
-        tv.tv_sec = millis / 1000;
-        tv.tv_usec = (millis % 1000) * 1000;
-        ev.trigger(&tv);
+    HTTPRPCTimer(std::function<void()> &func, int64_t millis) {
+        m_thread = std::thread([func, millis] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(millis));
+            func();
+        });
+    }
+
+    ~HTTPRPCTimer() override {
+        if (m_thread.joinable()) {
+            m_thread.join();
+        }
     }
 
 private:
-    HTTPEvent ev;
+    std::thread m_thread;
 };
 
 class HTTPRPCTimerInterface : public RPCTimerInterface {
 public:
-    explicit HTTPRPCTimerInterface(struct event_base *_base) : base(_base) {}
+    HTTPRPCTimerInterface() = default;
 
     const char *Name() override { return "HTTP"; }
 
     RPCTimerBase *NewTimer(std::function<void()> &func,
                            int64_t millis) override {
-        return new HTTPRPCTimer(base, func, millis);
+        return new HTTPRPCTimer(func, millis);
     }
-
-private:
-    struct event_base *base;
 };
 
 /* Pre-base64-encoded authentication token */
@@ -405,10 +408,7 @@ static bool InitRPCAuthentication() {
             return false;
         }
     } else {
-        LogPrintf("Config options rpcuser and rpcpassword will soon be "
-                  "deprecated. Locally-run instances may remove rpcuser to use "
-                  "cookie-based auth, or may be replaced with rpcauth. Please "
-                  "see share/rpcauth for rpcauth auth generation.\n");
+        // rpcuser/rpcpassword auth active
         strRPCUserColonPass = gArgs.GetArg("-rpcuser", "") + ":" +
                               gArgs.GetArg("-rpcpassword", "");
     }
@@ -459,9 +459,7 @@ bool StartHTTPRPC(HTTPRPCRequestProcessor &httpRPCRequestProcessor) {
     if (g_wallet_init_interface.HasWalletSupport()) {
         RegisterHTTPHandler("/wallet/", false, rpcFunction);
     }
-    struct event_base *eventBase = EventBase();
-    assert(eventBase);
-    httpRPCTimerInterface = std::make_unique<HTTPRPCTimerInterface>(eventBase);
+    httpRPCTimerInterface = std::make_unique<HTTPRPCTimerInterface>();
     RPCSetTimerInterface(httpRPCTimerInterface.get());
     return true;
 }

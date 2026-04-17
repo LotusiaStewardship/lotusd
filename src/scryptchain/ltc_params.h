@@ -11,7 +11,7 @@ namespace scryptchain {
 
 inline const ScryptChainParams &LitecoinMainnetParams() {
     static const ScryptChainParams params = [] {
-        ScryptChainParams p{};
+        ScryptChainParams p;
         p.name = "litecoin";
         p.netMagic[0] = 0xfb;
         p.netMagic[1] = 0xc0;
@@ -76,7 +76,7 @@ inline const ScryptChainParams &LitecoinMainnetParams() {
 
 inline const ScryptChainParams &LitecoinTestnetParams() {
     static const ScryptChainParams params = [] {
-        ScryptChainParams p{};
+        ScryptChainParams p;
         p.name = "litecoin-testnet";
         p.netMagic[0] = 0xfd;
         p.netMagic[1] = 0xd2;

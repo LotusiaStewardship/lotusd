@@ -7,6 +7,7 @@
 #include <logging.h>
 #include <serialize.h>
 #include <util/time.h>
+#include <version.h>
 
 #include <algorithm>
 
@@ -40,10 +41,7 @@ void ScryptMemPool::OnTxInv(const uint256 &txid, int peerId) {
     MempoolEntry entry;
     entry.firstSeen = GetTime();
     entry.peersSeen.insert(peerId);
-    entry.confirmed = false;
-    entry.feeRate = 0;
-    entry.txSize = 0;
-    m_pool[txid] = entry;
+    m_pool.emplace(txid, std::move(entry));
 }
 
 bool ScryptMemPool::AcceptTransaction(const CTransaction &tx, int peerId,
@@ -73,23 +71,20 @@ bool ScryptMemPool::AcceptTransaction(const CTransaction &tx, int peerId,
     size_t txBytes = GetSerializeSize(tx, PROTOCOL_VERSION);
 
     if (it != m_pool.end()) {
-        // We had a stub entry from OnTxInv, fill it in
-        it->second.tx = tx;
+        it->second.tx = MakeTransactionRef(tx);
         it->second.txSize = txBytes;
         it->second.peersSeen.insert(peerId);
-        // Rough fee rate estimate (we can't compute actual fees without UTXOs)
         it->second.feeRate = 1;
         m_currentMemory += txBytes;
         CheckConfirmation(it->second);
     } else {
         MempoolEntry entry;
-        entry.tx = tx;
+        entry.tx = MakeTransactionRef(tx);
         entry.firstSeen = GetTime();
         entry.peersSeen.insert(peerId);
-        entry.confirmed = false;
         entry.feeRate = 1;
         entry.txSize = txBytes;
-        m_pool[txid] = entry;
+        m_pool.emplace(txid, std::move(entry));
         m_currentMemory += txBytes;
     }
 
@@ -144,8 +139,8 @@ ScryptMemPool::GetForTemplate(int maxWeight) const {
     std::vector<SortEntry> candidates;
 
     for (const auto &[_, entry] : m_pool) {
-        if (entry.confirmed && entry.txSize > 0) {
-            candidates.push_back({&entry.tx, entry.feeRate, entry.txSize});
+        if (entry.confirmed && entry.txSize > 0 && entry.tx) {
+            candidates.push_back({entry.tx.get(), entry.feeRate, entry.txSize});
         }
     }
 

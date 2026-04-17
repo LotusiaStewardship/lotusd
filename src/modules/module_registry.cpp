@@ -9,7 +9,6 @@
 std::unique_ptr<CModuleRegistry> g_module_registry;
 
 void CModuleRegistry::Register(std::unique_ptr<IChainModule> module) {
-    LogPrintf("Module registry: registered '%s'\n", module->Name());
     m_modules.push_back(std::move(module));
 }
 
@@ -18,14 +17,18 @@ bool CModuleRegistry::InitAll(const fs::path &datadir,
     fs::path modulesDir = datadir / "modules";
     fs::create_directories(modulesDir);
 
+    std::string names;
     for (auto &mod : m_modules) {
-        LogPrintf("Module '%s': initializing\n", mod->Name());
         if (!mod->Init(modulesDir, params)) {
-            LogPrintf("ERROR: Module '%s' failed to initialize\n",
+            LogPrintf("❌ Module %s: failed to initialize\n",
                       mod->Name());
             return false;
         }
-        LogPrintf("Module '%s': initialized successfully\n", mod->Name());
+        if (!names.empty()) names += ", ";
+        names += mod->Name();
+    }
+    if (!names.empty()) {
+        LogPrintf("🧩 Modules: %s\n", names);
     }
     return true;
 }
@@ -54,7 +57,6 @@ void CModuleRegistry::RegisterAllRoutes(RouteAdder addRoute) {
 
 void CModuleRegistry::ShutdownAll() {
     for (auto it = m_modules.rbegin(); it != m_modules.rend(); ++it) {
-        LogPrintf("Module '%s': shutting down\n", (*it)->Name());
         (*it)->Shutdown();
     }
     m_modules.clear();

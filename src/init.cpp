@@ -224,7 +224,7 @@ void Shutdown(NodeContext &node) {
     if (!lock_shutdown) {
         return;
     }
-    LogPrintf("%s: In progress...\n", __func__);
+    LogPrintf("🛑 Shutting down...\n");
     Assert(node.args);
 
     /// Note: Shutdown() must be able to handle cases in which initialization
@@ -355,6 +355,7 @@ void Shutdown(NodeContext &node) {
 
     // Stop and delete all indexes only after flushing background callbacks.
     if (g_txindex) {
+        // stop txindex
         g_txindex->Stop();
         g_txindex.reset();
     }
@@ -414,7 +415,7 @@ void Shutdown(NodeContext &node) {
     }
 
     node.args = nullptr;
-    LogPrintf("%s: done\n", __func__);
+    LogPrintf("🛑 Shutdown complete\n");
 }
 
 /**
@@ -1402,9 +1403,7 @@ void SetupServerArgs(NodeContext &node) {
         ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
 
     argsman.AddArg("-rpcworkqueue=<n>",
-                   strprintf("Set the depth of the work queue to service RPC "
-                             "calls (default: %d)",
-                             DEFAULT_HTTP_WORKQUEUE),
+                   "Ignored (kept for backward compatibility).",
                    ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY,
                    OptionsCategory::RPC);
     argsman.AddArg("-rpcservertimeout=<n>",
@@ -1551,8 +1550,7 @@ static void CleanupBlockRevFiles() {
     // Glob all blk?????.dat and rev?????.dat files from the blocks directory.
     // Remove the rev files immediately and insert the blk file paths into an
     // ordered map keyed by block file index.
-    LogPrintf("Removing unusable blk?????.dat and rev?????.dat files for "
-              "-reindex with -prune\n");
+    LogPrintf("✂️  Cleaning block files for reindex+prune\n");
     for (const auto &file : fs::directory_iterator{gArgs.GetBlocksDirPath()}) {
         const std::string path = fs::PathToString(file.path().filename());
         if (fs::is_regular_file(file) && path.length() == 12 &&
@@ -1614,7 +1612,7 @@ static void ThreadImport(const Config &config, ChainstateManager &chainman,
                     // This error is logged in OpenBlockFile
                     break;
                 }
-                LogPrintf("Reindexing block file blk%05u.dat...\n",
+                LogPrintf("📦 Reindexing blk%05u.dat...\n",
                           (unsigned int)nFile);
                 LoadExternalBlockFile(config, file, &pos);
                 if (ShutdownRequested()) {
@@ -1625,7 +1623,7 @@ static void ThreadImport(const Config &config, ChainstateManager &chainman,
             }
             pblocktree->WriteReindexing(false);
             fReindex = false;
-            LogPrintf("Reindexing finished\n");
+            LogPrintf("📦 Reindexing complete\n");
             // To avoid ending up in a situation without genesis block, re-try
             // initializing (no-op if reindexing worked):
             LoadGenesisBlock(chainParams);
@@ -1635,7 +1633,7 @@ static void ThreadImport(const Config &config, ChainstateManager &chainman,
         for (const fs::path &path : vImportFiles) {
             FILE *file = fsbridge::fopen(path, "rb");
             if (file) {
-                LogPrintf("Importing blocks file %s...\n",
+                LogPrintf("📦 Importing %s...\n",
                           fs::PathToString(path));
                 LoadExternalBlockFile(config, file);
                 if (ShutdownRequested()) {
@@ -1889,7 +1887,7 @@ void InitLogging(const ArgsManager &args) {
 #else
     version_string += " (release build)";
 #endif
-    LogPrintf("%s version %s\n", CLIENT_NAME, version_string);
+    LogPrintf("🌸 %s %s\n", CLIENT_NAME, version_string);
 }
 
 namespace { // Variables internal to initialization process only
@@ -2079,8 +2077,7 @@ bool AppInitParameterInteraction(Config &config, const ArgsManager &args) {
         // Not categorizing as "Warning" because this is the normal behavior for
         // platforms using the select() interface for which FD_SETSIZE is
         // usually 1024.
-        LogPrintf("Reducing -maxconnections from %d to %d, because of system "
-                  "limitations.\n",
+        LogPrintf("⚠️  Max connections reduced: %d → %d (fd limit)\n",
                   nUserMaxConnections, nMaxConnections);
     }
 
@@ -2114,20 +2111,15 @@ bool AppInitParameterInteraction(Config &config, const ArgsManager &args) {
                                        chainparams.DefaultConsistencyChecks());
     fCheckpointsEnabled =
         args.GetBoolArg("-checkpoints", DEFAULT_CHECKPOINTS_ENABLED);
-    if (fCheckpointsEnabled) {
-        LogPrintf("Checkpoints will be verified.\n");
-    } else {
-        LogPrintf("Skipping checkpoint verification.\n");
+    if (!fCheckpointsEnabled) {
+        LogPrintf("⚠️  Checkpoints disabled\n");
     }
 
     hashAssumeValid = BlockHash::fromHex(
         args.GetArg("-assumevalid",
                     chainparams.GetConsensus().defaultAssumeValid.GetHex()));
-    if (!hashAssumeValid.IsNull()) {
-        LogPrintf("Assuming ancestors of block %s have valid signatures.\n",
-                  hashAssumeValid.GetHex());
-    } else {
-        LogPrintf("Validating signatures for all blocks.\n");
+    if (hashAssumeValid.IsNull()) {
+        LogPrintf("⚠️  No assumevalid — validating all signatures\n");
     }
 
     if (args.IsArgSet("-minimumchainwork")) {
@@ -2152,8 +2144,6 @@ bool AppInitParameterInteraction(Config &config, const ArgsManager &args) {
         nMinimumChainWork = 0;
         LogPrintf("Fork height testing: Disabled nMinimumChainWork requirement "
                   "(syncing to height %d)\n", forkHeight);
-    } else {
-        LogPrintf("Setting nMinimumChainWork=%s\n", nMinimumChainWork.GetHex());
     }
     
     if (nMinimumChainWork <
@@ -2205,9 +2195,7 @@ bool AppInitParameterInteraction(Config &config, const ArgsManager &args) {
     nPruneTarget = (uint64_t)nPruneArg * 1024 * 1024;
     if (nPruneArg == 1) {
         // manual pruning: -prune=1
-        LogPrintf("Block pruning enabled.  Use RPC call "
-                  "pruneblockchain(height) to manually prune block and undo "
-                  "files.\n");
+        LogPrintf("✂️  Pruning: manual mode (use pruneblockchain RPC)\n");
         nPruneTarget = std::numeric_limits<uint64_t>::max();
         fPruneMode = true;
     } else if (nPruneTarget) {
@@ -2217,8 +2205,7 @@ bool AppInitParameterInteraction(Config &config, const ArgsManager &args) {
                             "Please use a higher number."),
                           MIN_DISK_SPACE_FOR_BLOCK_FILES / 1024 / 1024));
         }
-        LogPrintf("Prune configured to target %u MiB on disk for block and "
-                  "undo files.\n",
+        LogPrintf("✂️  Pruning: target %u MiB\n",
                   nPruneTarget / 1024 / 1024);
         fPruneMode = true;
     }
@@ -2346,7 +2333,7 @@ bool AppInitSanityChecks() {
 
     // Initialize elliptic curve code
     std::string sha256_algo = SHA256AutoDetect();
-    LogPrintf("Using the '%s' SHA256 implementation\n", sha256_algo);
+    LogPrintf("⚡ SHA256: %s\n", sha256_algo);
     RandomInit();
     ECC_Start();
     globalVerifyHandle.reset(new ECCVerifyHandle());
@@ -2417,45 +2404,31 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     }
 
     if (!logger.m_log_timestamps) {
-        LogPrintf("Startup time: %s\n", FormatISO8601DateTime(GetTime()));
+        LogPrintf("🕐 Startup: %s\n", FormatISO8601DateTime(GetTime()));
     }
-    LogPrintf("Default data directory %s\n",
-              fs::PathToString(GetDefaultDataDir()));
-    LogPrintf("Using data directory %s\n", fs::PathToString(GetDataDir()));
+    LogPrintf("📂 Data directory: %s\n", fs::PathToString(GetDataDir()));
 
     // Only log conf file usage message if conf file actually exists.
     fs::path config_file_path =
         GetConfigFile(args.GetArg("-conf", BITCOIN_CONF_FILENAME));
     if (fs::exists(config_file_path)) {
-        LogPrintf("Config file: %s\n", fs::PathToString(config_file_path));
+        LogPrintf("📄 Config: %s\n", fs::PathToString(config_file_path));
     } else if (args.IsArgSet("-conf")) {
-        // Warn if no conf file exists at path provided by user
         InitWarning(
             strprintf(_("The specified config file %s does not exist\n"),
                       fs::PathToString(config_file_path)));
-    } else {
-        // Not categorizing as "Warning" because it's the default behavior
-        LogPrintf("Config file: %s (not found, skipping)\n",
-                  fs::PathToString(config_file_path));
     }
 
     // Log the config arguments to debug.log
     args.LogArgs();
 
-    LogPrintf("Using at most %i automatic connections (%i file descriptors "
-              "available)\n",
+    LogPrintf("🔌 Max connections: %i (fd limit: %i)\n",
               nMaxConnections, nFD);
 
     // Warn about relative -datadir path.
     if (args.IsArgSet("-datadir") &&
         !fs::PathFromString(args.GetArg("-datadir", "")).is_absolute()) {
-        LogPrintf("Warning: relative datadir option '%s' specified, which will "
-                  "be interpreted relative to the current working directory "
-                  "'%s'. This is fragile, because if bitcoin is started in the "
-                  "future from a different location, it will be unable to "
-                  "locate the current data files. There could also be data "
-                  "loss if bitcoin is started while in a temporary "
-                  "directory.\n",
+        LogPrintf("⚠️  Relative datadir '%s' (cwd: %s) — use absolute path\n",
                   args.GetArg("-datadir", ""),
                   fs::PathToString(fs::current_path()));
     }
@@ -2477,8 +2450,7 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     // Number of script-checking threads <= MAX_SCRIPTCHECK_THREADS
     script_threads = std::min(script_threads, MAX_SCRIPTCHECK_THREADS);
 
-    LogPrintf("Script verification uses %d additional threads\n",
-              script_threads);
+    LogPrintf("⚡ Script verification: %d threads\n", script_threads);
     if (script_threads >= 1) {
         for (int i = 0; i < script_threads; ++i) {
             threadGroup.create_thread([i]() { return ThreadScriptCheck(i); });
@@ -2717,10 +2689,9 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
         }
         const uint256 asmap_version = SerializeHash(asmap);
         node.connman->SetAsmap(std::move(asmap));
-        LogPrintf("Using asmap version %s for IP bucketing\n",
-                  asmap_version.ToString());
+        LogPrintf("🌍 ASMap: %s\n", asmap_version.ToString().substr(0, 12));
     } else {
-        LogPrintf("Using /16 prefix for IP bucketing\n");
+        // IP bucketing with /16 prefix (default)
     }
 
 #if ENABLE_ZMQ
@@ -2782,22 +2753,19 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     int64_t nCoinCacheUsage = nTotalCache;
     int64_t nMempoolSizeMax =
         args.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
-    LogPrintf("Cache configuration:\n");
-    LogPrintf("* Using %.1f MiB for block index database\n",
+    LogPrintf("💾 Cache: block index %.0f MiB",
               nBlockTreeDBCache * (1.0 / 1024 / 1024));
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
-        LogPrintf("* Using %.1f MiB for transaction index database\n",
+        LogPrintf(" | txindex %.0f MiB",
                   nTxIndexCache * (1.0 / 1024 / 1024));
     }
     for (BlockFilterType filter_type : g_enabled_filter_types) {
-        LogPrintf("* Using %.1f MiB for %s block filter index database\n",
-                  filter_index_cache * (1.0 / 1024 / 1024),
-                  BlockFilterTypeName(filter_type));
+        LogPrintf(" | %s filter %.0f MiB",
+                  BlockFilterTypeName(filter_type),
+                  filter_index_cache * (1.0 / 1024 / 1024));
     }
-    LogPrintf("* Using %.1f MiB for chain state database\n",
-              nCoinDBCache * (1.0 / 1024 / 1024));
-    LogPrintf("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of "
-              "unused mempool space)\n",
+    LogPrintf(" | chainstate %.0f MiB | UTXO %.0f MiB | mempool %.0f MiB\n",
+              nCoinDBCache * (1.0 / 1024 / 1024),
               nCoinCacheUsage * (1.0 / 1024 / 1024),
               nMempoolSizeMax * (1.0 / 1024 / 1024));
 
@@ -2829,8 +2797,7 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                 {
                     fs::path dbpath =
                         GetDataDir() / "blocks" / "index.sqlite";
-                    LogPrintf("Using SQLite block index: %s\n",
-                              fs::PathToString(dbpath));
+                    // block index db at dbpath
                     pblocktree.reset(new CBlockTreeSqlite(
                         dbpath, nBlockTreeDBCache, false, fReset));
                 }
@@ -2842,7 +2809,7 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                     if (btree) {
                         g_block_analytics =
                             std::make_unique<CBlockAnalytics>(btree->GetDb());
-                        LogPrintf("Block analytics index enabled\n");
+                        // block analytics enabled
                     }
                 }
 
@@ -3046,8 +3013,8 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
 
             if (!failed_verification) {
                 fLoaded = true;
-                LogPrintf(" block index %15dms\n",
-                          GetTimeMillis() - load_block_index_start_time);
+                LogPrintf("📦 Block index loaded in %.1fs\n",
+                          (GetTimeMillis() - load_block_index_start_time) / 1000.0);
             }
         } while (false);
 
@@ -3213,7 +3180,7 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     // if pruning, unset the service bit and perform the initial blockstore
     // prune after any wallet rescanning has taken place.
     if (fPruneMode) {
-        LogPrintf("Unsetting NODE_NETWORK on prune mode\n");
+        LogPrintf("✂️  Pruned node — NODE_NETWORK disabled\n");
         nLocalServices = ServiceFlags(nLocalServices & ~NODE_NETWORK);
         if (!fReindex) {
             LOCK(cs_main);
@@ -3302,7 +3269,7 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     //// debug print
     {
         LOCK(cs_main);
-        LogPrintf("block tree size = %u\n", chainman.BlockIndex().size());
+        LogPrintf("📦 Block index: %u entries\n", chainman.BlockIndex().size());
         chain_active_height = chainman.ActiveChain().Height();
         if (tip_info) {
             tip_info->block_height = chain_active_height;
@@ -3318,7 +3285,7 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
             tip_info->header_time = ::pindexBestHeader->GetBlockTime();
         }
     }
-    LogPrintf("nBestHeight = %d\n", chain_active_height);
+    LogPrintf("⛓️  Chain height: %d\n", chain_active_height);
     if (node.peerman) {
         node.peerman->SetBestHeight(chain_active_height);
     }
@@ -3454,7 +3421,7 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                 stratumConfig.shareDifficulty);
             RegisterValidationInterface(sc);
             g_sharechain = sc;
-            LogPrintf("Share chain: initialized (window=%d)\n",
+            LogPrintf("⛏️  Share chain: window=%d\n",
                       stratumConfig.sharechainWindow);
         }
 
@@ -3602,12 +3569,16 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
             scGlobals.dogeNetMgr = g_dogeNetMgr;
             scGlobals.ltcMempool = g_ltcMempool;
             scGlobals.dogeMempool = g_dogeMempool;
+            LogPrintf("Multi-chain Scrypt: LTC=%s DOGE=%s\n",
+                      enableLtc ? "on" : "off",
+                      enableDoge ? "on" : "off");
         }
     }
 
     // Step 15: finished
 
     SetRPCWarmupFinished();
+    LogPrintf("✅ Ready\n");
     uiInterface.InitMessage(_("Done loading").translated);
 
     for (const auto &client : node.chain_clients) {

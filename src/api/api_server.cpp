@@ -21,6 +21,7 @@
 #include <util/ref.h>
 
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -88,7 +89,14 @@ static bool DispatchRequest(const util::Ref &context, Config &config,
     }
 
     if (bestMatch) {
-        return bestMatch->handler(context, req, parts, qp);
+        try {
+            return bestMatch->handler(context, req, parts, qp);
+        } catch (const std::exception &e) {
+            LogPrintf("ERROR: API handler exception: %s\n", e.what());
+            api::WriteError(req, HTTP_INTERNAL_SERVER_ERROR,
+                            "internal_error", e.what());
+            return true;
+        }
     }
 
     api::WriteError(req, HTTP_NOT_FOUND, "not_found",
@@ -102,7 +110,7 @@ void AddModuleRoute(HTTPRequest::RequestMethod method,
 }
 
 void StartAPI(const util::Ref &context) {
-    LogPrintf("Starting REST API v1\n");
+    // REST API v1 init
 
     g_routes.clear();
 
@@ -162,7 +170,7 @@ void StartAPI(const util::Ref &context) {
 void InterruptAPI() {}
 
 void StopAPI() {
-    LogPrintf("Stopping REST API v1\n");
+    // REST API v1 shutdown
     api::StopEvents();
     UnregisterHTTPHandler("/dashboard", true);
     UnregisterHTTPHandler(API_PREFIX, false);

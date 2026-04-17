@@ -92,7 +92,7 @@ static std::shared_ptr<EventsSubscriber> g_subscriber;
 void StartEvents() {
     g_subscriber = std::make_shared<EventsSubscriber>();
     RegisterSharedValidationInterface(g_subscriber);
-    LogPrintf("SSE events subscriber registered\n");
+    // SSE handler registered
 }
 
 void StopEvents() {

@@ -51,7 +51,7 @@ static void ExtractMerkleBranch(const std::vector<uint256> &leaves,
             const uint256 &left = level[i];
             const uint256 &right =
                 (i + 1 < level.size()) ? level[i + 1] : left;
-            nextLevel.push_back(Hash(Span(left), Span(right)));
+            nextLevel.push_back(Hash(MakeSpan(left), MakeSpan(right)));
         }
         level = nextLevel;
         idx /= 2;

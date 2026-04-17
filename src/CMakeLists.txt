@@ -656,8 +656,11 @@ add_library(server
 # Server depends on generated explorer resources
 add_dependencies(server explorer_resources)
 
-# Add build directory for generated headers
-target_include_directories(server PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+# Add build directory for generated headers and vendored httplib
+target_include_directories(server PRIVATE
+	${CMAKE_CURRENT_BINARY_DIR}
+	${CMAKE_CURRENT_SOURCE_DIR}
+)
 
 if(NOT TARGET SQLite::SQLite3)
 	find_package(SQLite3 3.7.17 REQUIRED)
