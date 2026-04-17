@@ -65,6 +65,9 @@ public:
 
     void SetShareChain(sharechain::ShareChain *sc) { m_shareChain = sc; }
 
+    /** Trigger new job broadcast when external chain work updates. */
+    void OnExternalWorkUpdate();
+
     void SetMultiChainComponents(
         scryptchain::ScryptTemplateBuilder *templateBuilder,
         scryptchain::ScryptSolutionHandler *solutionHandler,

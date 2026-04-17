@@ -67,7 +67,9 @@
 #include <scryptchain/template_builder.h>
 #include <sharechain/sharechain.h>
 #include <shutdown.h>
+#include <stratum/mergemine.h>
 #include <stratum/stratum.h>
+#include <stratum/stratumaux.h>
 #include <stratum/stratumconfig.h>
 #include <httpexplorer.h>
 #include <mockblockgen.h>
@@ -229,7 +231,9 @@ void Shutdown(NodeContext &node) {
         node.mempool->AddTransactionsUpdated(1);
     }
 
+    stratum::StopMergeMineManager();
     stratum::StopStratumServer();
+    stratum::StopGlobalAuxManager();
 
     StopHTTPRPC();
     StopHTTPExplorer();
@@ -3424,6 +3428,45 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
             }
 
             stratum::StartStratumServer();
+        }
+
+        // Initialize global aux manager for createauxblock/submitauxblock RPCs
+        {
+            CChainState &chainstate = node.chainman->ActiveChainstate();
+            stratum::InitGlobalAuxManager(chainstate,
+                                          node.mempool.get(),
+                                          config.GetChainParams());
+        }
+
+        // Initialize merge-mine manager for external chains
+        if (!stratumConfig.mergeMineChains.empty()) {
+            stratum::InitMergeMineManager();
+            auto *mm = stratum::GetMergeMineManager();
+            for (const auto &entry : stratumConfig.mergeMineChains) {
+                stratum::ExternalChainConfig cfg;
+                cfg.name = entry.name;
+                cfg.rpcHost = entry.rpcHost;
+                cfg.rpcPort = entry.rpcPort;
+                cfg.rpcUser = entry.rpcUser;
+                cfg.rpcPassword = entry.rpcPassword;
+                cfg.chainId = entry.chainId;
+                cfg.pollIntervalMs = entry.pollIntervalMs;
+                mm->AddChain(cfg);
+            }
+
+            mm->SetWorkCallback(
+                [](const std::string &,
+                   const stratum::ExternalAuxWork &) {
+                    stratum::StratumServer *server =
+                        stratum::GetStratumServer();
+                    if (server) {
+                        server->OnExternalWorkUpdate();
+                    }
+                });
+
+            std::string coinbaseAddr =
+                args.GetArg("-coinbaseaddr", "");
+            mm->Start(coinbaseAddr);
         }
     }
 
