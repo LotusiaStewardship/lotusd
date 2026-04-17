@@ -633,6 +633,15 @@ add_library(server
 	script/scriptcache.cpp
 	script/sigcache.cpp
 	shutdown.cpp
+	stratum/stratum.cpp
+	stratum/stratumconfig.cpp
+	stratum/stratumjob.cpp
+	stratum/stratumprotocol.cpp
+	stratum/stratumproxy.cpp
+	stratum/stratumrouter.cpp
+	stratum/stratumstats.cpp
+	stratum/stratumsubmit.cpp
+	stratum/stratumworker.cpp
 	timedata.cpp
 	torcontrol.cpp
 	txdb.cpp

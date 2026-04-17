@@ -56,6 +56,8 @@
 #include <script/sigcache.h>
 #include <script/standard.h>
 #include <shutdown.h>
+#include <stratum/stratum.h>
+#include <stratum/stratumconfig.h>
 #include <httpexplorer.h>
 #include <mockblockgen.h>
 #include <sync.h>
@@ -204,6 +206,8 @@ void Shutdown(NodeContext &node) {
     if (node.mempool) {
         node.mempool->AddTransactionsUpdated(1);
     }
+
+    stratum::StopStratumServer();
 
     StopHTTPRPC();
     StopHTTPExplorer();
@@ -1223,6 +1227,8 @@ void SetupServerArgs(NodeContext &node) {
                    "a positive integer lower than 255)",
                    ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY,
                    OptionsCategory::BLOCK_CREATION);
+
+    stratum::RegisterStratumArgs(argsman);
 
     argsman.AddArg("-server", "Accept command line and JSON-RPC commands",
                    ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
@@ -3306,7 +3312,26 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
         }
     }
 
-    // Step 14: finished
+    // Step 14: Stratum server
+    {
+        stratum::StratumConfig stratumConfig;
+        std::string stratumError;
+        if (!stratum::ParseStratumConfig(args, stratumConfig, stratumError)) {
+            return InitError(Untranslated(stratumError));
+        }
+
+        if (stratumConfig.enabled) {
+            CChainState &chainstate =
+                node.chainman->ActiveChainstate();
+            stratum::InitStratumServer(
+                stratumConfig, config, chainstate,
+                node.mempool.get(), config.GetChainParams(),
+                *node.chainman);
+            stratum::StartStratumServer();
+        }
+    }
+
+    // Step 15: finished
 
     SetRPCWarmupFinished();
     uiInterface.InitMessage(_("Done loading").translated);

@@ -60,6 +60,8 @@ enum LogFlags : uint32_t {
     VALIDATION = (1 << 21),
     AVALANCHE = (1 << 22),
     MINING = (1 << 23),
+    STRATUM = (1 << 24),
+    MERGEMINE = (1 << 25),
     ALL = ~uint32_t(0),
 };
 
