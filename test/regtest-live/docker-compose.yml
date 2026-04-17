@@ -1,0 +1,90 @@
+services:
+  lotusd-node1:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - -regtest
+      - -datadir=/data
+      - -printtoconsole
+      - -rpcuser=test
+      - -rpcpassword=test
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -listen=1
+      - -dnsseed=0
+      - -fixedseeds=0
+    expose:
+      - "12604"
+      - "12605"
+    networks:
+      - regtest
+
+  lotusd-node2:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - -regtest
+      - -datadir=/data
+      - -printtoconsole
+      - -rpcuser=test
+      - -rpcpassword=test
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -listen=1
+      - -dnsseed=0
+      - -fixedseeds=0
+      - -connect=lotusd-node1
+    depends_on:
+      - lotusd-node1
+    networks:
+      - regtest
+
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile.miner
+    command: ["./bootstrap.sh"]
+    depends_on:
+      - lotusd-node1
+      - lotusd-node2
+    networks:
+      - regtest
+
+  native-miner:
+    build:
+      context: .
+      dockerfile: Dockerfile.miner
+    command: ["python3", "native_miner.py"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - regtest
+
+  scrypt-miner:
+    build:
+      context: .
+      dockerfile: Dockerfile.miner
+    command: ["python3", "scrypt_miner.py"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - regtest
+
+  monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.miner
+    command: ["python3", "-u", "monitor.py"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - regtest
+
+networks:
+  regtest:
+    driver: bridge

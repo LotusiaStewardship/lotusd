@@ -6,16 +6,23 @@
 #ifndef BITCOIN_PRIMITIVES_BLOCK_H
 #define BITCOIN_PRIMITIVES_BLOCK_H
 
+#include <algorithm>
 #include <array>
+#include <primitives/auxpow.h>
 #include <primitives/blockhash.h>
 #include <primitives/transaction.h>
 #include <serialize.h>
+#include <streams.h>
 #include <uint256.h>
+#include <version.h>
 
 typedef std::array<uint8_t, 6> block_time_t;
 typedef std::array<uint8_t, 7> block_size_t;
 
 constexpr int32_t EPOCH_NUM_BLOCKS = 5040; // one week
+
+/** Metadata field ID for AuxPoW merged mining data. */
+static constexpr uint32_t METADATA_FIELD_AUXPOW = 1;
 
 /**
  * Nodes collect new transactions into a block, hash them into a hash tree, and
@@ -175,6 +182,53 @@ public:
         vtx.clear();
         vMetadata.clear();
         fChecked = false;
+    }
+
+    /** Check if block carries AuxPoW data in its metadata. */
+    bool HasAuxPow() const {
+        for (const auto &field : vMetadata) {
+            if (field.nFieldId == METADATA_FIELD_AUXPOW) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Deserialize and return the AuxPoW from metadata. Caller must check
+     *  HasAuxPow() first. Returns true on success. */
+    bool GetAuxPow(CAuxPow &auxpow) const {
+        for (const auto &field : vMetadata) {
+            if (field.nFieldId == METADATA_FIELD_AUXPOW) {
+                CDataStream ss(field.vData, SER_NETWORK, PROTOCOL_VERSION);
+                try {
+                    ss >> auxpow;
+                    return true;
+                } catch (const std::exception &) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Store a CAuxPow into the block's metadata, replacing any existing
+     *  AuxPoW field. Also updates hashExtendedMetadata. */
+    void SetAuxPow(const CAuxPow &auxpow) {
+        // Remove any existing AuxPoW field
+        vMetadata.erase(
+            std::remove_if(vMetadata.begin(), vMetadata.end(),
+                           [](const CBlockMetadataField &f) {
+                               return f.nFieldId == METADATA_FIELD_AUXPOW;
+                           }),
+            vMetadata.end());
+
+        CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+        ss << auxpow;
+
+        CBlockMetadataField field;
+        field.nFieldId = METADATA_FIELD_AUXPOW;
+        field.vData.assign(ss.begin(), ss.end());
+        vMetadata.push_back(std::move(field));
     }
 
     CBlockHeader GetBlockHeader() const {

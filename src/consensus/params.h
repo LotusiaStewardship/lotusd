@@ -90,6 +90,15 @@ struct Params {
     }
     uint256 nMinimumChainWork;
     BlockHash defaultAssumeValid;
+
+    /** AuxPoW merged mining parameters */
+    int auxpowActivationHeight{std::numeric_limits<int>::max()};
+    uint32_t nAuxPowChainId{0x4C};
+    /** Scrypt difficulty ceiling for the AuxPoW track (~10x harder than native
+     *  powLimit). */
+    uint256 auxpowPowLimit;
+    /** ASERT half-life for the AuxPoW difficulty track. */
+    int64_t nAuxPowDAAHalfLife{0};
 };
 } // namespace Consensus
 

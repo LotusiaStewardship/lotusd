@@ -21,7 +21,9 @@
 #include <net.h>
 #include <node/context.h>
 #include <policy/policy.h>
+#include <pow/auxpow.h>
 #include <pow/pow.h>
+#include <primitives/auxpow.h>
 #include <rpc/blockchain.h>
 #include <rpc/mining.h>
 #include <rpc/server.h>
@@ -29,6 +31,7 @@
 #include <script/descriptor.h>
 #include <script/script.h>
 #include <shutdown.h>
+#include <sync.h>
 #include <txmempool.h>
 #include <univalue.h>
 #include <util/strencodings.h>
@@ -40,6 +43,7 @@
 #include <warnings.h>
 
 #include <cstdint>
+#include <map>
 
 /**
  * Return average network hashes per second based on the last 'lookup' blocks,
@@ -1267,6 +1271,199 @@ static RPCHelpMan submitheader() {
     };
 }
 
+// Cache for pending AuxPoW block templates, keyed by aux block hash.
+static std::map<uint256, std::shared_ptr<CBlock>> g_auxwork_templates;
+static Mutex g_auxwork_mutex;
+
+static RPCHelpMan createauxblock() {
+    return RPCHelpMan{
+        "createauxblock",
+        "Create an auxiliary block for merged mining.\n"
+        "Returns the block hash and target for a Dogecoin (or other Scrypt) "
+        "parent chain to commit to.\n",
+        {
+            {"address", RPCArg::Type::STR, RPCArg::Optional::NO,
+             "The address to send the newly generated coins to."},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ,
+            "",
+            "",
+            {
+                {RPCResult::Type::STR_HEX, "hash",
+                 "Hash of the aux block (to embed in parent coinbase)"},
+                {RPCResult::Type::NUM, "chainid", "Lotus chain ID"},
+                {RPCResult::Type::STR_HEX, "previousblockhash",
+                 "Hash of the previous block"},
+                {RPCResult::Type::NUM, "coinbasevalue",
+                 "Value of the coinbase in satoshis"},
+                {RPCResult::Type::STR_HEX, "bits",
+                 "Compressed AuxPoW target"},
+                {RPCResult::Type::NUM, "height", "Height of the aux block"},
+                {RPCResult::Type::STR_HEX, "target",
+                 "AuxPoW target as a 256-bit hash"},
+            },
+        },
+        RPCExamples{HelpExampleCli("createauxblock", "\"myaddress\"")},
+        [&](const RPCHelpMan &self, const Config &config,
+            const JSONRPCRequest &request) -> UniValue {
+            CTxDestination destination = DecodeDestination(
+                request.params[0].get_str(), config.GetChainParams());
+            if (!IsValidDestination(destination)) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
+                                   "Error: Invalid address");
+            }
+
+            const CChainParams &chainparams = config.GetChainParams();
+            const Consensus::Params &consensusParams =
+                chainparams.GetConsensus();
+
+            NodeContext &node = EnsureNodeContext(request.context);
+            if (!node.connman) {
+                throw JSONRPCError(
+                    RPC_CLIENT_P2P_DISABLED,
+                    "Error: Peer-to-peer functionality missing or disabled");
+            }
+
+            if (::ChainstateActive().IsInitialBlockDownload()) {
+                throw JSONRPCError(
+                    RPC_CLIENT_IN_INITIAL_DOWNLOAD,
+                    PACKAGE_NAME
+                    " is in initial sync and waiting for blocks...");
+            }
+
+            LOCK(cs_main);
+            const CTxMemPool &mempool = EnsureMemPool(request.context);
+            CBlockIndex *pindexPrev = ::ChainActive().Tip();
+            CHECK_NONFATAL(pindexPrev);
+
+            int nHeight = pindexPrev->nHeight + 1;
+            if (nHeight < consensusParams.auxpowActivationHeight) {
+                throw JSONRPCError(RPC_MISC_ERROR,
+                                   "AuxPoW not yet activated");
+            }
+
+            CScript coinbaseScript = GetScriptForDestination(destination);
+            std::unique_ptr<CBlockTemplate> pblocktemplate =
+                BlockAssembler(config, mempool)
+                    .CreateNewBlock(coinbaseScript);
+            if (!pblocktemplate) {
+                throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
+            }
+
+            CBlock *pblock = &pblocktemplate->block;
+            UpdateTime(pblock, chainparams, pindexPrev);
+            pblock->nNonce = 0;
+            pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
+
+            // The aux block hash is the Lotus triple-SHA-256 block hash
+            uint256 auxBlockHash = pblock->GetHash();
+
+            // Compute AuxPoW target
+            uint32_t auxBits =
+                GetNextAuxPowWorkRequired(pindexPrev, consensusParams);
+            arith_uint256 auxTarget = arith_uint256().SetCompact(auxBits);
+
+            // Cache the template
+            auto blockPtr = std::make_shared<CBlock>(*pblock);
+            {
+                LOCK(g_auxwork_mutex);
+                // Prune old entries
+                while (g_auxwork_templates.size() > 20) {
+                    g_auxwork_templates.erase(g_auxwork_templates.begin());
+                }
+                g_auxwork_templates[auxBlockHash] = blockPtr;
+            }
+
+            // Compute coinbase value
+            Amount coinbaseValue = Amount::zero();
+            if (!pblock->vtx.empty()) {
+                for (const auto &out : pblock->vtx[0]->vout) {
+                    coinbaseValue += out.nValue;
+                }
+            }
+
+            UniValue result(UniValue::VOBJ);
+            result.pushKV("hash", auxBlockHash.GetHex());
+            result.pushKV("chainid",
+                          (int)consensusParams.nAuxPowChainId);
+            result.pushKV("previousblockhash",
+                          pblock->hashPrevBlock.GetHex());
+            result.pushKV("coinbasevalue",
+                          int64_t(coinbaseValue / SATOSHI));
+            result.pushKV("bits", strprintf("%08x", auxBits));
+            result.pushKV("height", nHeight);
+            result.pushKV("target", auxTarget.GetHex());
+            return result;
+        },
+    };
+}
+
+static RPCHelpMan submitauxblock() {
+    return RPCHelpMan{
+        "submitauxblock",
+        "Submit a solved auxiliary block with its AuxPoW proof.\n",
+        {
+            {"hash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Hash of the aux block (from createauxblock)."},
+            {"auxpow", RPCArg::Type::STR_HEX, RPCArg::Optional::NO,
+             "Serialized AuxPoW data as hex."},
+        },
+        RPCResult{RPCResult::Type::BOOL, "", "true if accepted"},
+        RPCExamples{HelpExampleCli("submitauxblock",
+                                   "\"hash\" \"auxpow_hex\"")},
+        [&](const RPCHelpMan &self, const Config &config,
+            const JSONRPCRequest &request) -> UniValue {
+            uint256 auxHash = ParseHashV(request.params[0], "hash");
+            std::vector<uint8_t> auxpowData =
+                ParseHexV(request.params[1], "auxpow");
+
+            // Look up the cached template
+            std::shared_ptr<CBlock> pblock;
+            {
+                LOCK(g_auxwork_mutex);
+                auto it = g_auxwork_templates.find(auxHash);
+                if (it == g_auxwork_templates.end()) {
+                    throw JSONRPCError(
+                        RPC_INVALID_PARAMETER,
+                        "Block hash not found in pending aux work");
+                }
+                pblock = std::make_shared<CBlock>(*it->second);
+                g_auxwork_templates.erase(it);
+            }
+
+            // Deserialize the AuxPoW
+            CAuxPow auxpow;
+            CDataStream ss(auxpowData, SER_NETWORK, PROTOCOL_VERSION);
+            try {
+                ss >> auxpow;
+            } catch (const std::exception &e) {
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR,
+                                   strprintf("AuxPoW decode failed: %s",
+                                             e.what()));
+            }
+
+            // Store AuxPoW in block metadata and update metadata hash + size
+            pblock->SetAuxPow(auxpow);
+            pblock->hashExtendedMetadata =
+                SerializeHash(pblock->vMetadata);
+            pblock->SetSize(
+                GetSerializeSize(*pblock, PROTOCOL_VERSION));
+
+            // Submit the block
+            bool newBlock = false;
+            auto shared = std::const_pointer_cast<const CBlock>(pblock);
+            if (!EnsureChainman(request.context)
+                     .ProcessNewBlock(config, shared, true, &newBlock)) {
+                throw JSONRPCError(RPC_VERIFY_ERROR,
+                                   "Block not accepted");
+            }
+
+            return newBlock;
+        },
+    };
+}
+
 static RPCHelpMan estimatefee() {
     return RPCHelpMan{
         "estimatefee",
@@ -1295,6 +1492,8 @@ void RegisterMiningRPCCommands(CRPCTable &t) {
         {"mining",      getrawunsolvedblock,   },
         {"mining",      submitblock,           },
         {"mining",      submitheader,          },
+        {"mining",      createauxblock,        },
+        {"mining",      submitauxblock,        },
 
         {"generating",  generatetoaddress,     },
         {"generating",  generatetodescriptor,  },

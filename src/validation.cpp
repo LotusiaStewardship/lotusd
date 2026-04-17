@@ -32,6 +32,7 @@
 #include <policy/policy.h>
 #include <policy/settings.h>
 #include <pow/aserti32d.h> // For ResetASERTAnchorBlockCache
+#include <pow/auxpow.h>
 #include <pow/pow.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
@@ -3754,18 +3755,26 @@ static bool CheckBlockHeader(const CBlockHeader &block,
                              BlockValidationState &state,
                              const Consensus::Params &params,
                              BlockValidationOptions validationOptions) {
-    // Check proof of work matches claimed amount
-    // Skip PoW check if in mock block mode (for testing)
+    // PoW is checked at the full-block level in CheckBlock() to support
+    // AuxPoW blocks whose proof lives in vMetadata. For header-only
+    // validation, we attempt the native PoW check but don't reject on
+    // failure -- AuxPoW blocks will naturally fail the native check.
+    // The definitive PoW check happens in CheckBlock().
     const bool skipPoW = IsMockBlockMode();
-    
-    if (!skipPoW && validationOptions.shouldValidatePoW() &&
-        !CheckProofOfWork(block.GetHash(), block.nBits, params)) {
-        LogPrint(BCLog::VALIDATION, "PoW check failed for block %s\n", 
-                 block.GetHash().ToString());
-        return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER,
-                             "high-hash", "proof of work failed");
+
+    if (!skipPoW && validationOptions.shouldValidatePoW()) {
+        // Try native PoW. If it passes, great. If it fails, the block might
+        // be a valid AuxPoW block -- we'll check in CheckBlock().
+        if (!CheckProofOfWork(block.GetHash(), block.nBits, params)) {
+            LogPrint(BCLog::VALIDATION,
+                     "Native PoW check did not pass for block %s "
+                     "(may be AuxPoW)\n",
+                     block.GetHash().ToString());
+            // Don't reject here; defer to CheckBlock()
+        }
     } else if (skipPoW && validationOptions.shouldValidatePoW()) {
-        LogPrint(BCLog::VALIDATION, "PoW check bypassed (mock mode) for block %s\n",
+        LogPrint(BCLog::VALIDATION,
+                 "PoW check bypassed (mock mode) for block %s\n",
                  block.GetHash().ToString());
     }
 
@@ -3834,11 +3843,33 @@ bool CheckBlock(const CBlock &block, BlockValidationState &state,
     // transaction validation, as otherwise we may mark the header as invalid
     // because we receive the wrong transactions or metadata for it.
 
-    // Metadata must be empty (for now)
-    if (!block.vMetadata.empty()) {
-        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
-                             "bad-metadata",
-                             "forbidden extended metadata field");
+    // Validate metadata fields: only METADATA_FIELD_AUXPOW is allowed (after
+    // activation), and at most once.
+    {
+        bool hasAuxPowField = false;
+        for (const auto &field : block.vMetadata) {
+            if (field.nFieldId == METADATA_FIELD_AUXPOW) {
+                if (hasAuxPowField) {
+                    return state.Invalid(
+                        BlockValidationResult::BLOCK_CONSENSUS,
+                        "bad-metadata-dup-auxpow",
+                        "duplicate AuxPoW metadata field");
+                }
+                hasAuxPowField = true;
+            } else {
+                return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                     "bad-metadata",
+                                     "unknown metadata field ID");
+            }
+        }
+    }
+
+    // Full PoW validation (native or AuxPoW) now that we have the metadata.
+    if (!IsMockBlockMode() && validationOptions.shouldValidatePoW()) {
+        if (!CheckAuxProofOfWork(block, block.nHeight, params)) {
+            return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER,
+                                 "high-hash", "proof of work failed");
+        }
     }
 
     // First transaction must be coinbase.
@@ -4511,6 +4542,9 @@ bool CChainState::AcceptBlock(const Config &config,
         return error("%s: %s (block %s)", __func__, state.ToString(),
                      block.GetHash().ToString());
     }
+
+    // Record whether this block uses AuxPoW for the dual-ASERT tracker
+    pindex->fAuxPow = block.HasAuxPow();
 
     // If connecting the new block would require rewinding more than one block
     // from the active chain (i.e., a "deep reorg"), then mark the new block as
