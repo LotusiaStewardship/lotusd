@@ -55,6 +55,16 @@
 #include <script/scriptcache.h>
 #include <script/sigcache.h>
 #include <script/standard.h>
+#include <scryptchain/chain_params.h>
+#include <scryptchain/doge_params.h>
+#include <scryptchain/header_chain.h>
+#include <scryptchain/ltc_params.h>
+#include <scryptchain/mempool.h>
+#include <scryptchain/msg_handler.h>
+#include <scryptchain/network_manager.h>
+#include <scryptchain/scryptchain_globals.h>
+#include <scryptchain/solution_handler.h>
+#include <scryptchain/template_builder.h>
 #include <shutdown.h>
 #include <stratum/stratum.h>
 #include <stratum/stratumconfig.h>
@@ -109,6 +119,17 @@ static const bool DEFAULT_STOPAFTERBLOCKIMPORT = false;
 #endif
 
 static const char *DEFAULT_ASMAP_FILENAME = "ip_asn.map";
+
+static scryptchain::ScryptHeaderChain *g_ltcChain = nullptr;
+static scryptchain::ScryptHeaderChain *g_dogeChain = nullptr;
+static scryptchain::ScryptNetworkManager *g_ltcNetMgr = nullptr;
+static scryptchain::ScryptNetworkManager *g_dogeNetMgr = nullptr;
+static scryptchain::ScryptMsgHandler *g_ltcMsgHandler = nullptr;
+static scryptchain::ScryptMsgHandler *g_dogeMsgHandler = nullptr;
+static scryptchain::ScryptMemPool *g_ltcMempool = nullptr;
+static scryptchain::ScryptMemPool *g_dogeMempool = nullptr;
+static scryptchain::ScryptTemplateBuilder *g_scryptTemplateBuilder = nullptr;
+static scryptchain::ScryptSolutionHandler *g_scryptSolutionHandler = nullptr;
 
 /**
  * The PID file facilities.
@@ -270,6 +291,24 @@ void Shutdown(NodeContext &node) {
     // After the threads that potentially access these pointers have been
     // stopped, destruct and reset all to nullptr.
     node.peerman.reset();
+
+    // Destroy Scrypt chain thin nodes
+    {
+        auto &scGlobals = scryptchain::GetScryptChainGlobals();
+        scGlobals = {};
+    }
+    delete g_scryptSolutionHandler;
+    g_scryptSolutionHandler = nullptr;
+    delete g_scryptTemplateBuilder;
+    g_scryptTemplateBuilder = nullptr;
+    if (g_ltcMsgHandler) { delete g_ltcMsgHandler; g_ltcMsgHandler = nullptr; }
+    if (g_dogeMsgHandler) { delete g_dogeMsgHandler; g_dogeMsgHandler = nullptr; }
+    if (g_ltcNetMgr) { g_ltcNetMgr->Stop(); delete g_ltcNetMgr; g_ltcNetMgr = nullptr; }
+    if (g_dogeNetMgr) { g_dogeNetMgr->Stop(); delete g_dogeNetMgr; g_dogeNetMgr = nullptr; }
+    delete g_ltcMempool; g_ltcMempool = nullptr;
+    delete g_dogeMempool; g_dogeMempool = nullptr;
+    delete g_ltcChain; g_ltcChain = nullptr;
+    delete g_dogeChain; g_dogeChain = nullptr;
 
     // Destroy various global instances
     g_avalanche.reset();
@@ -1229,6 +1268,36 @@ void SetupServerArgs(NodeContext &node) {
                    OptionsCategory::BLOCK_CREATION);
 
     stratum::RegisterStratumArgs(argsman);
+
+    argsman.AddArg("-litecoin",
+                   "Enable Litecoin thin node for merged mining (default: 0)",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-ltccoinbaseaddr=<addr>",
+                   "Litecoin address for LTC block rewards",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-ltcmaxpeers=<n>",
+                   "Maximum outbound peers for LTC thin node (default: 8)",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-dogecoin",
+                   "Enable Dogecoin thin node for merged mining (default: 0)",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-dogecoinbaseaddr=<addr>",
+                   "Dogecoin address for DOGE block rewards",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-dogemaxpeers=<n>",
+                   "Maximum outbound peers for DOGE thin node (default: 8)",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-scryptmempoolsize=<n>",
+                   "Shared mempool limit in MB per Scrypt chain (default: 50)",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-scrypttxminpeers=<n>",
+                   "Minimum peers confirming a tx before inclusion in Scrypt "
+                   "chain templates (default: 5)",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    argsman.AddArg("-scrypttxmaxstage=<n>",
+                   "Seconds before unconfirmed Scrypt mempool txs are evicted "
+                   "(default: 600)",
+                   ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
 
     argsman.AddArg("-server", "Accept command line and JSON-RPC commands",
                    ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
@@ -3328,6 +3397,94 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                 node.mempool.get(), config.GetChainParams(),
                 *node.chainman);
             stratum::StartStratumServer();
+        }
+    }
+
+    // Step 14b: Multi-chain Scrypt mining (LTC/DOGE thin nodes)
+    {
+        const bool enableLtc = args.GetBoolArg("-litecoin", false);
+        const bool enableDoge = args.GetBoolArg("-dogecoin", false);
+
+        if (enableLtc || enableDoge) {
+            const int txMinPeers = args.GetArg("-scrypttxminpeers", 5);
+            const int txMaxStage = args.GetArg("-scrypttxmaxstage", 600);
+            const int64_t mempoolMB = args.GetArg("-scryptmempoolsize", 50);
+            const size_t mempoolBytes =
+                static_cast<size_t>(mempoolMB) * 1024 * 1024;
+            const fs::path dataDir = GetDataDir();
+
+            if (enableLtc) {
+                auto ltcParams = scryptchain::GetLtcMainnetParams();
+                g_ltcChain = new scryptchain::ScryptHeaderChain(
+                    ltcParams, (dataDir / "ltc_headers.sqlite").string());
+                g_ltcChain->Initialize();
+                g_ltcMempool = new scryptchain::ScryptMemPool(
+                    mempoolBytes, txMinPeers, txMaxStage);
+                int ltcMaxPeers = args.GetArg("-ltcmaxpeers", 8);
+                g_ltcNetMgr = new scryptchain::ScryptNetworkManager(
+                    ltcParams, ltcMaxPeers);
+                g_ltcMsgHandler = new scryptchain::ScryptMsgHandler(
+                    *g_ltcChain, *g_ltcNetMgr, ltcParams);
+                g_ltcMsgHandler->SetTxRelayCallback(
+                    [](const CTransactionRef &tx, int peerId) {
+                        if (g_ltcMempool) {
+                            g_ltcMempool->AddTransaction(tx, peerId);
+                        }
+                    });
+                g_ltcNetMgr->Start();
+                LogPrintf("LTC thin node: started (%d max peers)\n",
+                          ltcMaxPeers);
+            }
+
+            if (enableDoge) {
+                auto dogeParams = scryptchain::GetDogeMainnetParams();
+                g_dogeChain = new scryptchain::ScryptHeaderChain(
+                    dogeParams, (dataDir / "doge_headers.sqlite").string());
+                g_dogeChain->Initialize();
+                g_dogeMempool = new scryptchain::ScryptMemPool(
+                    mempoolBytes, txMinPeers, txMaxStage);
+                int dogeMaxPeers = args.GetArg("-dogemaxpeers", 8);
+                g_dogeNetMgr = new scryptchain::ScryptNetworkManager(
+                    dogeParams, dogeMaxPeers);
+                g_dogeMsgHandler = new scryptchain::ScryptMsgHandler(
+                    *g_dogeChain, *g_dogeNetMgr, dogeParams);
+                g_dogeMsgHandler->SetTxRelayCallback(
+                    [](const CTransactionRef &tx, int peerId) {
+                        if (g_dogeMempool) {
+                            g_dogeMempool->AddTransaction(tx, peerId);
+                        }
+                    });
+                g_dogeNetMgr->Start();
+                LogPrintf("DOGE thin node: started (%d max peers)\n",
+                          dogeMaxPeers);
+            }
+
+            g_scryptTemplateBuilder =
+                new scryptchain::ScryptTemplateBuilder();
+            g_scryptSolutionHandler =
+                new scryptchain::ScryptSolutionHandler();
+
+            stratum::StratumServer *server = stratum::GetStratumServer();
+            if (server) {
+                std::string ltcCoinbaseAddr =
+                    args.GetArg("-ltccoinbaseaddr", "");
+                std::string dogeCoinbaseAddr =
+                    args.GetArg("-dogecoinbaseaddr", "");
+                server->SetMultiChainComponents(
+                    g_ltcChain, g_dogeChain,
+                    g_ltcMempool, g_dogeMempool,
+                    g_scryptTemplateBuilder,
+                    g_scryptSolutionHandler,
+                    ltcCoinbaseAddr, dogeCoinbaseAddr);
+            }
+
+            auto &scGlobals = scryptchain::GetScryptChainGlobals();
+            scGlobals.ltcChain = g_ltcChain;
+            scGlobals.dogeChain = g_dogeChain;
+            scGlobals.ltcNetMgr = g_ltcNetMgr;
+            scGlobals.dogeNetMgr = g_dogeNetMgr;
+            scGlobals.ltcMempool = g_ltcMempool;
+            scGlobals.dogeMempool = g_dogeMempool;
         }
     }
 

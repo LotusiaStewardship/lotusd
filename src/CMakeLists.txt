@@ -687,6 +687,9 @@ if(ENABLE_UPNP)
 	endif()
 endif()
 
+add_subdirectory(scryptchain)
+target_link_libraries(server scryptchain)
+
 # Test suites.
 add_subdirectory(test)
 add_subdirectory(avalanche/test)

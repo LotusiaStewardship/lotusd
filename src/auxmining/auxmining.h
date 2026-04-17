@@ -11,6 +11,7 @@
 #include <uint256.h>
 
 #include <cstdint>
+#include <map>
 #include <vector>
 
 /**
@@ -27,11 +28,45 @@ struct MergeMineCommitment {
 };
 
 /**
+ * Entry for a child chain in a multi-chain merge-mine commitment.
+ */
+struct AuxChainEntry {
+    uint256 blockHash;
+    uint32_t chainId;
+};
+
+/**
+ * Per-chain result from BuildMultiChainCommitment.
+ */
+struct ChainMerklePath {
+    uint32_t nChainIndex;
+    std::vector<uint256> chainMerkleBranch;
+};
+
+/**
+ * Result of building a multi-chain merge-mine commitment.
+ */
+struct MultiChainCommitment {
+    std::vector<uint8_t> coinbasePayload;
+    uint256 chainMerkleRoot;
+    uint32_t nTreeSize;
+    uint32_t nMergeMineNonce;
+    std::map<uint32_t, ChainMerklePath> perChain; // chainId -> merkle path
+};
+
+/**
  * Build the merge-mine commitment data for embedding in a parent coinbase.
- * @param auxBlockHash The Lotus block hash to commit to.
- * @param nChainId The Lotus chain ID.
+ * Single-chain variant (backward compatible).
  */
 MergeMineCommitment
 BuildMergeMineCommitment(const uint256 &auxBlockHash, uint32_t nChainId);
+
+/**
+ * Build a multi-chain merge-mine commitment for N child chains.
+ * Finds a nonce that places each chain at its CalcExpectedMerkleTreeIndex slot.
+ * Returns commitment data with per-chain merkle branches.
+ */
+MultiChainCommitment
+BuildMultiChainCommitment(const std::vector<AuxChainEntry> &children);
 
 #endif // BITCOIN_AUXMINING_AUXMINING_H
