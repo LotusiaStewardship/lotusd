@@ -36,6 +36,16 @@ struct StratumPoolEntry {
     int priority = 0;
 };
 
+struct MergeMineEntry {
+    std::string name;
+    std::string rpcHost;
+    uint16_t rpcPort = 9332;
+    std::string rpcUser;
+    std::string rpcPassword;
+    uint32_t chainId = 0;
+    int pollIntervalMs = 5000;
+};
+
 struct StratumConfig {
     bool enabled = false;
     std::string bind = "0.0.0.0";
@@ -57,6 +67,8 @@ struct StratumConfig {
     bool sharechainEnabled = false;
     int sharechainWindow = DEFAULT_SHARECHAIN_WINDOW;
     double shareDifficulty = 0;
+
+    std::vector<MergeMineEntry> mergeMineChains;
 };
 
 void RegisterStratumArgs(ArgsManager &args);

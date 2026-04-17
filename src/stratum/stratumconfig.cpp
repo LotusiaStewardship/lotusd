@@ -8,6 +8,7 @@
 #include <util/system.h>
 
 #include <cstdlib>
+#include <sstream>
 
 namespace stratum {
 
@@ -79,6 +80,13 @@ void RegisterStratumArgs(ArgsManager &args) {
     args.AddArg("-sharedifficulty=<n>",
                 "Initial share difficulty (0 = auto-adjust) (default: 0)",
                 ArgsManager::ALLOW_ANY, OptionsCategory::BLOCK_CREATION);
+    args.AddArg(
+        "-mergemine=<spec>",
+        "Add an external chain for merged mining. Format: "
+        "name:host:port:user:pass:chainid[:poll_ms]. Can be specified "
+        "multiple times.",
+        ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY,
+        OptionsCategory::BLOCK_CREATION);
 }
 
 bool ParseStratumConfig(const ArgsManager &args, StratumConfig &config,
@@ -205,6 +213,42 @@ bool ParseStratumConfig(const ArgsManager &args, StratumConfig &config,
     }
     config.shareDifficulty =
         atof(args.GetArg("-sharedifficulty", "0").c_str());
+
+    // Merge-mine external chains
+    for (const std::string &spec : args.GetArgs("-mergemine")) {
+        MergeMineEntry entry;
+        std::vector<std::string> parts;
+        std::istringstream ss(spec);
+        std::string token;
+        while (std::getline(ss, token, ':')) {
+            parts.push_back(token);
+        }
+
+        if (parts.size() < 6) {
+            error = strprintf("-mergemine format: "
+                              "name:host:port:user:pass:chainid[:poll_ms], "
+                              "got '%s'",
+                              spec);
+            return false;
+        }
+
+        entry.name = parts[0];
+        entry.rpcHost = parts[1];
+        entry.rpcPort = static_cast<uint16_t>(atoi(parts[2].c_str()));
+        if (entry.rpcPort == 0) {
+            error = strprintf("Invalid port in -mergemine '%s'", spec);
+            return false;
+        }
+        entry.rpcUser = parts[3];
+        entry.rpcPassword = parts[4];
+        entry.chainId = static_cast<uint32_t>(strtoul(parts[5].c_str(),
+                                                       nullptr, 0));
+        if (parts.size() > 6) {
+            entry.pollIntervalMs = atoi(parts[6].c_str());
+        }
+
+        config.mergeMineChains.push_back(entry);
+    }
 
     return true;
 }

@@ -806,6 +806,10 @@ void StratumServer::UpdatedBlockTip(const CBlockIndex *pindexNew,
     }
 }
 
+void StratumServer::OnExternalWorkUpdate() {
+    CreateAndBroadcastJob(false);
+}
+
 void StratumServer::CreateAndBroadcastJob(bool cleanJobs) {
     if (m_router && m_router->GetActiveTier() == RoutingTier::LOCAL) {
         auto *jobMgr = m_router->GetJobManager();

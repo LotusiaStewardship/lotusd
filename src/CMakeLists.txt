@@ -633,7 +633,9 @@ add_library(server
 	script/scriptcache.cpp
 	script/sigcache.cpp
 	shutdown.cpp
+	stratum/mergemine.cpp
 	stratum/stratum.cpp
+	stratum/stratumaux.cpp
 	stratum/stratumconfig.cpp
 	stratum/stratumjob.cpp
 	stratum/stratumprotocol.cpp
