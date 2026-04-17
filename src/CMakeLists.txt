@@ -484,7 +484,10 @@ add_library(common
 	netbase.cpp
 	outputtype.cpp
 	policy/policy.cpp
+	auxmining/auxmining.cpp
+	primitives/auxpow.cpp
 	primitives/block.cpp
+	primitives/parentheader.cpp
 	protocol.cpp
 	psbt.cpp
 	rpc/rawtransaction_util.cpp
@@ -619,6 +622,7 @@ add_library(server
 	policy/fees.cpp
 	policy/settings.cpp
 	pow/aserti32d.cpp
+	pow/auxpow.cpp
 	pow/pow.cpp
 	rest.cpp
 	rpc/abc.cpp

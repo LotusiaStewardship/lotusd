@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /miner
+COPY lotus_rpc.py native_miner.py scrypt_miner.py monitor.py bootstrap.sh ./
+RUN chmod +x bootstrap.sh

@@ -50,10 +50,11 @@ bool ReadBlockFromDisk(CBlock &block, const FlatFilePos &pos,
                      e.what(), pos.ToString());
     }
 
-    // Check the header (skip in mock block mode)
+    // Check the header (skip in mock block mode, skip native check for AuxPoW)
     const bool skipPoW = IsMockBlockMode();
     
-    if (!skipPoW && !CheckProofOfWork(block.GetHash(), block.nBits, params)) {
+    if (!skipPoW && !block.HasAuxPow() &&
+        !CheckProofOfWork(block.GetHash(), block.nBits, params)) {
         return error("ReadBlockFromDisk: Errors in block header at %s",
                      pos.ToString());
     }

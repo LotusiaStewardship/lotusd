@@ -83,6 +83,10 @@ public:
     uint256 hashMerkleRoot{};
     uint256 hashExtendedMetadata{};
 
+    //! Whether this block was mined via AuxPoW (has METADATA_FIELD_AUXPOW).
+    //! Used by the dual ASERT difficulty tracker to filter blocks by type.
+    bool fAuxPow{false};
+
     //! (memory only) Sequential id assigned to distinguish order in which
     //! blocks are received.
     int32_t nSequenceId{0};

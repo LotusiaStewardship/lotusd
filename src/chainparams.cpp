@@ -20,6 +20,7 @@
 #include <consensus/addresses.h>
 
 #include <cassert>
+#include <limits>
 
 static bool UseECashPrefix() {
     return gArgs.GetBoolArg("-ecash", DEFAULT_ECASH) ||
@@ -84,6 +85,13 @@ public:
 
         // two days
         consensus.nDAAHalfLife = 2 * 24 * 60 * 60;
+
+        // AuxPoW merged mining (Scrypt via Dogecoin)
+        consensus.auxpowActivationHeight = std::numeric_limits<int>::max();
+        consensus.nAuxPowChainId = 0x4C;
+        consensus.auxpowPowLimit = uint256S(
+            "0000000001800000000000000000000000000000000000000000000000000000");
+        consensus.nAuxPowDAAHalfLife = 2 * 24 * 60 * 60;
 
         // nPowTargetTimespan / nPowTargetSpacing
         consensus.nMinerConfirmationWindow = 2016;
@@ -225,6 +233,13 @@ public:
 
         // two days
         consensus.nDAAHalfLife = 2 * 24 * 60 * 60;
+
+        // AuxPoW merged mining (Scrypt via Dogecoin)
+        consensus.auxpowActivationHeight = 100;
+        consensus.nAuxPowChainId = 0x4C;
+        consensus.auxpowPowLimit = uint256S(
+            "0000000100000000000000000000000000000000000000000000000000000000");
+        consensus.nAuxPowDAAHalfLife = 2 * 24 * 60 * 60;
 
         // nPowTargetTimespan / nPowTargetSpacing
         consensus.nMinerConfirmationWindow = 2016;
@@ -368,6 +383,13 @@ public:
 
         // two days
         consensus.nDAAHalfLife = 2 * 24 * 60 * 60;
+
+        // AuxPoW merged mining (Scrypt via Dogecoin)
+        consensus.auxpowActivationHeight = 200;
+        consensus.nAuxPowChainId = 0x4C;
+        consensus.auxpowPowLimit = uint256S(
+            "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        consensus.nAuxPowDAAHalfLife = 2 * 24 * 60 * 60;
 
         // Faster than normal for regtest (144 instead of 2016)
         consensus.nMinerConfirmationWindow = 144;
