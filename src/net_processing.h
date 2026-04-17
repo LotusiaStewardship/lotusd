@@ -96,4 +96,11 @@ void RelayTransaction(const TxId &txid, const CConnman &connman);
 /** Relay proof to every node */
 void RelayProof(const avalanche::ProofId &proofid, const CConnman &connman);
 
+namespace sharechain {
+class ShareChain;
+}
+
+/** Global share chain pointer, set from init.cpp when -sharechain is enabled */
+extern sharechain::ShareChain *g_sharechain;
+
 #endif // BITCOIN_NET_PROCESSING_H

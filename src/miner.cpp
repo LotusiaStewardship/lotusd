@@ -17,6 +17,8 @@
 #include <consensus/validation.h>
 #include <minerfund.h>
 #include <net.h>
+#include <net_processing.h>
+#include <sharechain/sharepayout.h>
 #include <policy/policy.h>
 #include <policy/settings.h>
 #include <pow/pow.h>
@@ -257,6 +259,15 @@ BlockAssembler::CreateNewBlock(const CScript &scriptPubKeyIn) {
     for (const CTxOut &requiredOutput : requiredOutputs) {
         coinbaseTx.vout[1].nValue -= requiredOutput.nValue;
         coinbaseTx.vout.push_back(requiredOutput);
+    }
+
+    if (g_sharechain) {
+        CScript minerFundScript;
+        if (!requiredOutputs.empty()) {
+            minerFundScript = requiredOutputs[0].scriptPubKey;
+        }
+        sharechain::ApplyShareChainPayouts(coinbaseTx, *g_sharechain,
+                                           minerFundScript);
     }
 
     // Make sure the coinbase is big enough.

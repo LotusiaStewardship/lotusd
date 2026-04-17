@@ -52,6 +52,9 @@ const char *AVAHELLO = "avahello";
 const char *AVAPOLL = "avapoll";
 const char *AVARESPONSE = "avaresponse";
 const char *AVAPROOF = "avaproof";
+const char *SHARE = "share";
+const char *GETSHARESYNC = "getsharesync";
+const char *SHARESYNC = "sharesync";
 
 bool IsBlockLike(const std::string &strCommand) {
     return strCommand == NetMsgType::BLOCK ||
@@ -76,6 +79,7 @@ static const std::string allNetMessageTypes[] = {
     NetMsgType::CMPCTBLOCK,  NetMsgType::GETBLOCKTXN,  NetMsgType::BLOCKTXN,
     NetMsgType::GETCFILTERS, NetMsgType::CFILTER,      NetMsgType::GETCFHEADERS,
     NetMsgType::CFHEADERS,   NetMsgType::GETCFCHECKPT, NetMsgType::CFCHECKPT,
+    NetMsgType::SHARE,       NetMsgType::GETSHARESYNC, NetMsgType::SHARESYNC,
 };
 static const std::vector<std::string>
     allNetMessageTypesVec(allNetMessageTypes,
@@ -226,6 +230,8 @@ std::string CInv::GetCommand() const {
             return cmd.append(NetMsgType::CMPCTBLOCK);
         case MSG_AVA_PROOF:
             return cmd.append(NetMsgType::AVAPROOF);
+        case MSG_SHARE:
+            return cmd.append(NetMsgType::SHARE);
         default:
             throw std::out_of_range(
                 strprintf("CInv::GetCommand(): type=%d unknown type", type));
