@@ -22,9 +22,13 @@
 #include <rpc/protocol.h>
 #include <util/ref.h>
 
+#include <chrono>
 #include <functional>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <vector>
 
 static const char *API_PREFIX = "/api/v1/";
@@ -37,13 +41,78 @@ struct Route {
     HTTPRequest::RequestMethod method;
     std::string prefix;
     RouteHandler handler;
+    int cacheTTL; // seconds; 0 = no cache
 };
 
 static std::vector<Route> g_routes;
 
 static void AddRoute(HTTPRequest::RequestMethod method,
-                     const std::string &prefix, RouteHandler handler) {
-    g_routes.push_back({method, prefix, std::move(handler)});
+                     const std::string &prefix, RouteHandler handler,
+                     int cacheTTL = 0) {
+    g_routes.push_back({method, prefix, std::move(handler), cacheTTL});
+}
+
+// ── Response cache with stale-while-revalidate ──────────────────────────
+
+struct CacheEntry {
+    std::string body;
+    int status;
+    int64_t cachedAt;   // unix timestamp (seconds)
+    bool refreshing;    // background revalidation in progress
+};
+
+static std::mutex g_cache_mutex;
+static std::unordered_map<std::string, CacheEntry> g_cache;
+
+static int64_t NowUnix() {
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+static void ServeCached(HTTPRequest *req, const CacheEntry &entry) {
+    req->WriteHeader("Content-Type", "application/json");
+    req->WriteHeader("Access-Control-Allow-Origin", "*");
+    req->WriteHeader("X-Cached-At", std::to_string(entry.cachedAt));
+    req->WriteHeader("X-Cache", "HIT");
+    req->WriteReply(entry.status, entry.body);
+}
+
+// Execute handler in capture mode; returns true on success.
+static bool RunCaptured(const util::Ref &context, const RouteHandler &handler,
+                        HTTPRequest *req,
+                        const std::vector<std::string> &parts,
+                        const api::QueryParams &qp,
+                        api::CapturedResponse &out) {
+    api::StartCapture(&out);
+    try {
+        handler(context, req, parts, qp);
+    } catch (const std::exception &e) {
+        api::StopCapture();
+        return false;
+    }
+    api::StopCapture();
+    return true;
+}
+
+static const Route *FindRoute(HTTPRequest::RequestMethod method,
+                               const std::vector<std::string> &parts) {
+    const Route *bestMatch = nullptr;
+    size_t bestLen = 0;
+    for (const auto &route : g_routes) {
+        if (route.method != method) continue;
+        auto routeParts = api::SplitPath(route.prefix);
+        if (routeParts.size() > parts.size()) continue;
+        bool match = true;
+        for (size_t i = 0; i < routeParts.size(); i++) {
+            if (routeParts[i] != parts[i]) { match = false; break; }
+        }
+        if (match && routeParts.size() > bestLen) {
+            bestLen = routeParts.size();
+            bestMatch = &route;
+        }
+    }
+    return bestMatch;
 }
 
 static bool DispatchRequest(const util::Ref &context, Config &config,
@@ -65,32 +134,16 @@ static bool DispatchRequest(const util::Ref &context, Config &config,
         return true;
     }
 
-    // Match routes: find longest prefix match
-    const Route *bestMatch = nullptr;
-    size_t bestLen = 0;
+    const Route *bestMatch = FindRoute(method, parts);
 
-    for (const auto &route : g_routes) {
-        if (route.method != method) {
-            continue;
-        }
-        auto routeParts = api::SplitPath(route.prefix);
-        if (routeParts.size() > parts.size()) {
-            continue;
-        }
-        bool match = true;
-        for (size_t i = 0; i < routeParts.size(); i++) {
-            if (routeParts[i] != parts[i]) {
-                match = false;
-                break;
-            }
-        }
-        if (match && routeParts.size() > bestLen) {
-            bestLen = routeParts.size();
-            bestMatch = &route;
-        }
+    if (!bestMatch) {
+        api::WriteError(req, HTTP_NOT_FOUND, "not_found",
+                        "Endpoint not found: /api/v1/" + fullPath);
+        return true;
     }
 
-    if (bestMatch) {
+    // No cache for non-GET or zero-TTL routes
+    if (method != HTTPRequest::GET || bestMatch->cacheTTL <= 0) {
         try {
             return bestMatch->handler(context, req, parts, qp);
         } catch (const std::exception &e) {
@@ -101,8 +154,89 @@ static bool DispatchRequest(const util::Ref &context, Config &config,
         }
     }
 
-    api::WriteError(req, HTTP_NOT_FOUND, "not_found",
-                    "Endpoint not found: /api/v1/" + fullPath);
+    // ── Cache path (GET with TTL > 0) ───────────────────────────────────
+    std::string cacheKey = strURIPart;
+    int64_t now = NowUnix();
+    int ttl = bestMatch->cacheTTL;
+
+    // Snapshot cache state under the mutex; never do I/O while locked.
+    enum CacheHit { MISS, FRESH, STALE, STALE_NEEDS_REFRESH };
+    CacheHit hit = MISS;
+    std::string snapBody;
+    int snapStatus = 200;
+    int64_t snapCachedAt = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mutex);
+        auto it = g_cache.find(cacheKey);
+        if (it != g_cache.end()) {
+            snapBody = it->second.body;
+            snapStatus = it->second.status;
+            snapCachedAt = it->second.cachedAt;
+            int64_t age = now - snapCachedAt;
+            if (age < ttl) {
+                hit = FRESH;
+            } else if (it->second.refreshing) {
+                hit = STALE;
+            } else {
+                hit = STALE_NEEDS_REFRESH;
+                it->second.refreshing = true;
+            }
+        }
+    }
+    // Mutex released — all I/O and thread creation below is lock-free.
+
+    if (hit == FRESH || hit == STALE) {
+        CacheEntry snap{snapBody, snapStatus, snapCachedAt, false};
+        ServeCached(req, snap);
+        return true;
+    }
+
+    if (hit == STALE_NEEDS_REFRESH) {
+        CacheEntry snap{snapBody, snapStatus, snapCachedAt, false};
+        ServeCached(req, snap);
+        // Background revalidation
+        std::string bgKey = cacheKey;
+        RouteHandler bgHandler = bestMatch->handler;
+        std::vector<std::string> bgParts = parts;
+        api::QueryParams bgQp = qp;
+        std::thread([&context, bgHandler, bgParts, bgQp, bgKey]() {
+            HTTPRequest dummy;
+            api::CapturedResponse cap;
+            if (RunCaptured(context, bgHandler, &dummy, bgParts,
+                            bgQp, cap)) {
+                std::lock_guard<std::mutex> lk(g_cache_mutex);
+                auto &e = g_cache[bgKey];
+                e.body = std::move(cap.body);
+                e.status = cap.status;
+                e.cachedAt = NowUnix();
+                e.refreshing = false;
+            } else {
+                std::lock_guard<std::mutex> lk(g_cache_mutex);
+                if (g_cache.count(bgKey))
+                    g_cache[bgKey].refreshing = false;
+            }
+        }).detach();
+        return true;
+    }
+
+    // Cold cache: run handler synchronously, cache, serve.
+    api::CapturedResponse cap;
+    if (RunCaptured(context, bestMatch->handler, req, parts, qp, cap)) {
+        CacheEntry entry;
+        entry.body = cap.body;
+        entry.status = cap.status;
+        entry.cachedAt = now;
+        entry.refreshing = false;
+        {
+            std::lock_guard<std::mutex> lock(g_cache_mutex);
+            g_cache[cacheKey] = entry;
+        }
+        ServeCached(req, entry);
+    } else {
+        api::WriteError(req, HTTP_INTERNAL_SERVER_ERROR,
+                        "internal_error", "handler failed");
+    }
     return true;
 }
 
@@ -116,53 +250,27 @@ void StartAPI(const util::Ref &context) {
 
     g_routes.clear();
 
-    // Chain endpoints
-    AddRoute(HTTPRequest::GET, "chain", api::HandleGetChainInfo);
-    AddRoute(HTTPRequest::GET, "chain/tip", api::HandleGetChainTip);
-
-    // Block endpoints
-    AddRoute(HTTPRequest::GET, "blocks", api::HandleGetBlocks);
-
-    // Transaction endpoints
-    AddRoute(HTTPRequest::GET, "txs", api::HandleGetTx);
-    AddRoute(HTTPRequest::GET, "mempool", api::HandleGetMempool);
-    AddRoute(HTTPRequest::POST, "txs/send", api::HandleSendTx);
-    AddRoute(HTTPRequest::POST, "txs/decode", api::HandleDecodeTx);
-
-    // Address/UTXO endpoints
-    AddRoute(HTTPRequest::GET, "addresses", api::HandleGetAddress);
-    AddRoute(HTTPRequest::GET, "utxos", api::HandleGetUtxos);
-
-    // Network endpoints
-    AddRoute(HTTPRequest::GET, "network", api::HandleGetNetworkInfo);
-    AddRoute(HTTPRequest::GET, "network/peers", api::HandleGetPeers);
-
-    // Node endpoints
-    AddRoute(HTTPRequest::GET, "node", api::HandleGetNodeInfo);
-
-    // Mining endpoints
-    AddRoute(HTTPRequest::GET, "mining", api::HandleGetMiningInfo);
-
-    // Stats endpoints
-    AddRoute(HTTPRequest::GET, "stats", api::HandleGetStats);
-
-    // Mempool history
-    AddRoute(HTTPRequest::GET, "mempool/history", api::HandleGetMempoolHistory);
-
-    // Network nodes
-    AddRoute(HTTPRequest::GET, "network/nodes", api::HandleGetNetworkNodes);
-
-    // Overview (combined endpoint)
-    AddRoute(HTTPRequest::GET, "overview", api::HandleGetOverview);
-
-    // Wallet endpoints
-    AddRoute(HTTPRequest::GET, "wallet", api::HandleGetWalletInfo);
-
-    // Events endpoint (long-poll SSE)
-    AddRoute(HTTPRequest::GET, "events", api::HandleGetEvents);
-
-    // OpenAPI schema
-    AddRoute(HTTPRequest::GET, "openapi.json", api::HandleGetOpenAPISchema);
+    //                                                       TTL (seconds)
+    AddRoute(HTTPRequest::GET, "chain",     api::HandleGetChainInfo,    5);
+    AddRoute(HTTPRequest::GET, "chain/tip", api::HandleGetChainTip,     5);
+    AddRoute(HTTPRequest::GET, "blocks",    api::HandleGetBlocks,      10);
+    AddRoute(HTTPRequest::GET, "txs",       api::HandleGetTx,          15);
+    AddRoute(HTTPRequest::GET, "mempool",   api::HandleGetMempool,      5);
+    AddRoute(HTTPRequest::POST,"txs/send",  api::HandleSendTx);
+    AddRoute(HTTPRequest::POST,"txs/decode",api::HandleDecodeTx);
+    AddRoute(HTTPRequest::GET, "addresses", api::HandleGetAddress,     15);
+    AddRoute(HTTPRequest::GET, "utxos",     api::HandleGetUtxos,       10);
+    AddRoute(HTTPRequest::GET, "network",   api::HandleGetNetworkInfo, 30);
+    AddRoute(HTTPRequest::GET, "network/peers", api::HandleGetPeers,   30);
+    AddRoute(HTTPRequest::GET, "node",      api::HandleGetNodeInfo,    30);
+    AddRoute(HTTPRequest::GET, "mining",    api::HandleGetMiningInfo,  15);
+    AddRoute(HTTPRequest::GET, "stats",     api::HandleGetStats,       30);
+    AddRoute(HTTPRequest::GET, "mempool/history", api::HandleGetMempoolHistory, 30);
+    AddRoute(HTTPRequest::GET, "network/nodes", api::HandleGetNetworkNodes, 60);
+    AddRoute(HTTPRequest::GET, "overview",  api::HandleGetOverview,    10);
+    AddRoute(HTTPRequest::GET, "wallet",    api::HandleGetWalletInfo,  15);
+    AddRoute(HTTPRequest::GET, "events",    api::HandleGetEvents);
+    AddRoute(HTTPRequest::GET, "openapi.json", api::HandleGetOpenAPISchema, 3600);
 
     api::StartEvents();
     api::StartStatsCollector(context);
@@ -191,4 +299,8 @@ void StopAPI() {
     UnregisterHTTPHandler("/dashboard", true);
     UnregisterHTTPHandler(API_PREFIX, false);
     g_routes.clear();
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mutex);
+        g_cache.clear();
+    }
 }

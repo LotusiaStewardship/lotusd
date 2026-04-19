@@ -111,10 +111,22 @@ std::vector<std::string> SplitPath(const std::string &path) {
     return parts;
 }
 
+static thread_local CapturedResponse *tl_capture = nullptr;
+
+void StartCapture(CapturedResponse *out) { tl_capture = out; }
+void StopCapture() { tl_capture = nullptr; }
+bool IsCapturing() { return tl_capture != nullptr; }
+
 void WriteJSON(HTTPRequest *req, int status, const UniValue &body) {
+    std::string json = body.write() + "\n";
+    if (tl_capture) {
+        tl_capture->body = json;
+        tl_capture->status = status;
+        return;
+    }
     req->WriteHeader("Content-Type", "application/json");
     req->WriteHeader("Access-Control-Allow-Origin", "*");
-    req->WriteReply(status, body.write() + "\n");
+    req->WriteReply(status, json);
 }
 
 void WriteSuccess(HTTPRequest *req, const UniValue &data) {

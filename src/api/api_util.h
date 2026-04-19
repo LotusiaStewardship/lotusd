@@ -43,6 +43,17 @@ UniValue CursorPaginatedResponse(const UniValue &items,
 // Hex/binary helpers
 bool ParseHashFromHex(const std::string &hex, uint256 &out);
 
+// Thread-local response capture for stale-while-revalidate cache.
+// When active, WriteJSON/WriteError store their output here instead of
+// writing to the HTTPRequest.
+struct CapturedResponse {
+    std::string body;
+    int status{200};
+};
+void StartCapture(CapturedResponse *out);
+void StopCapture();
+bool IsCapturing();
+
 } // namespace api
 
 #endif // BITCOIN_API_UTIL_H

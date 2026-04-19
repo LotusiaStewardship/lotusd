@@ -4,13 +4,16 @@
 
 #include <api/stats_handler.h>
 
+#include <blockdb.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <logging.h>
 #include <node/context.h>
 #include <pow/pow.h>
+#include <primitives/block.h>
 #include <rpc/blockchain.h>
 #include <rpc/protocol.h>
+#include <sqlite/block_analytics.h>
 #include <sqlite/block_tree_sqlite.h>
 #include <sqlite3.h>
 #include <sync.h>
@@ -111,19 +114,21 @@ static bool HandleStatsCards(const util::Ref &ctx, HTTPRequest *req,
     return true;
 }
 
-static int PeriodToPoints(const std::string &period) {
-    if (period == "week") return 7 * 24;
-    if (period == "month") return 31 * 24;
-    if (period == "quarter") return 90 * 24;
-    if (period == "year") return 365;
-    return 24 * 12; // "day" default: every 5 min for 24h
+// Returns {range_seconds, bucket_seconds} for each period.
+// The query picks the latest snapshot within each time bucket.
+static std::pair<int64_t, int64_t> PeriodParams(const std::string &period) {
+    if (period == "week")    return {7  * 86400,  3600};      // 1h buckets
+    if (period == "month")   return {31 * 86400,  7200};      // 2h buckets
+    if (period == "quarter") return {90 * 86400,  21600};     // 6h buckets
+    if (period == "year")    return {365 * 86400, 86400};     // 1d buckets
+    /* "day" */              return {86400,        300};       // 5min buckets
 }
 
 static bool HandleStatsCharts(const util::Ref &, HTTPRequest *req,
                               const QueryParams &qp) {
     auto periodOpt = qp.Get("period");
     std::string period = periodOpt.value_or("day");
-    int points = PeriodToPoints(period);
+    auto [rangeSecs, bucketSecs] = PeriodParams(period);
 
     auto *btree = dynamic_cast<CBlockTreeSqlite *>(pblocktree.get());
     if (!btree) {
@@ -133,12 +138,20 @@ static bool HandleStatsCharts(const util::Ref &, HTTPRequest *req,
     }
     CSqliteWrapper &db = btree->GetDb();
 
+    int64_t cutoff = GetTime() - rangeSecs;
+
+    // GROUP BY time bucket; MAX(snapshot_ts) selects the latest row in
+    // each bucket and in SQLite the non-aggregate columns come from that
+    // same row (documented bare-column behaviour).
     sqlite3_stmt *stmt = db.Prepare(
-        "SELECT snapshot_ts, block_height, hashrate, difficulty, "
+        "SELECT MAX(snapshot_ts), block_height, hashrate, difficulty, "
         "mempool_count, total_supply, burned_supply "
         "FROM chain_stats_snapshots "
-        "ORDER BY snapshot_ts DESC LIMIT ?1");
-    sqlite3_bind_int(stmt, 1, points);
+        "WHERE snapshot_ts >= ?1 "
+        "GROUP BY snapshot_ts / ?2 "
+        "ORDER BY 1 ASC");
+    sqlite3_bind_int64(stmt, 1, cutoff);
+    sqlite3_bind_int64(stmt, 2, bucketSecs);
 
     UniValue series(UniValue::VARR);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -156,15 +169,9 @@ static bool HandleStatsCharts(const util::Ref &, HTTPRequest *req,
     }
     sqlite3_reset(stmt);
 
-    // Reverse so oldest is first
-    UniValue reversed(UniValue::VARR);
-    for (int i = (int)series.size() - 1; i >= 0; i--) {
-        reversed.push_back(series[i]);
-    }
-
     UniValue result(UniValue::VOBJ);
     result.pushKV("period", period);
-    result.pushKV("series", reversed);
+    result.pushKV("series", series);
     WriteSuccess(req, result);
     return true;
 }
@@ -227,45 +234,54 @@ static void WriteOneSnapshot(CSqliteWrapper &db, int64_t ts, int height,
     sqlite3_reset(ins);
 }
 
-// Backfill chain_stats_snapshots from block_index when the table is empty.
-// Generates one snapshot per hour from historical block timestamps.
+// Backfill chain_stats_snapshots from block_index when historical data is
+// missing.  Generates one snapshot per hour from block timestamps.
+// Safe to re-run (INSERT OR IGNORE).
 static void BackfillFromBlockIndex(CSqliteWrapper &db) {
-    sqlite3_stmt *check =
-        db.Prepare("SELECT 1 FROM chain_stats_snapshots LIMIT 1");
-    bool hasData = (sqlite3_step(check) == SQLITE_ROW);
-    sqlite3_reset(check);
-    if (hasData) {
+    // Check if we already have data spanning back far enough.
+    // If the oldest snapshot is less than 180 days old, we need more history.
+    int64_t oldestTs = 0;
+    {
+        sqlite3_stmt *q =
+            db.Prepare("SELECT MIN(snapshot_ts) FROM chain_stats_snapshots");
+        if (sqlite3_step(q) == SQLITE_ROW &&
+            sqlite3_column_type(q, 0) != SQLITE_NULL) {
+            oldestTs = sqlite3_column_int64(q, 0);
+        }
+        sqlite3_reset(q);
+    }
+
+    // Get the earliest block time in the chain
+    int64_t earliestBlockTime = 0;
+    {
+        sqlite3_stmt *q = db.Prepare(
+            "SELECT MIN(n_time) FROM block_index "
+            "WHERE n_height > 0 AND n_time > 0");
+        if (sqlite3_step(q) == SQLITE_ROW &&
+            sqlite3_column_type(q, 0) != SQLITE_NULL) {
+            earliestBlockTime = sqlite3_column_int64(q, 0);
+        }
+        sqlite3_reset(q);
+    }
+
+    // Skip if snapshots already cover back to near genesis
+    if (oldestTs > 0 && earliestBlockTime > 0 &&
+        oldestTs - earliestBlockTime < 86400) {
         return;
     }
 
-    LogPrintf("API: chain_stats_snapshots is empty, backfilling from "
-              "block_index...\n");
+    // Determine where to start: just before the oldest existing snapshot
+    // (or from genesis if none exist)
+    int64_t fillUpTo = (oldestTs > 0) ? oldestTs : GetTime();
 
-    // Current supply for the latest snapshot point
-    int64_t totalSupply = 0, burnedSupply = 0;
-    {
-        sqlite3_stmt *qs = db.Prepare(
-            "SELECT COALESCE(SUM(balance_sats), 0) FROM address_balances");
-        if (sqlite3_step(qs) == SQLITE_ROW) {
-            totalSupply = sqlite3_column_int64(qs, 0);
-        }
-        sqlite3_reset(qs);
+    LogPrintf("API: backfilling chain_stats_snapshots from block_index "
+              "(filling up to ts=%d)...\n", fillUpTo);
 
-        sqlite3_stmt *qb = db.Prepare(
-            "SELECT COALESCE(SUM(value_sats), 0) FROM tx_outputs "
-            "WHERE script_type = 'nulldata' AND value_sats > 0");
-        if (sqlite3_step(qb) == SQLITE_ROW) {
-            burnedSupply = sqlite3_column_int64(qb, 0);
-        }
-        sqlite3_reset(qb);
-    }
-
-    // Sample one block per hour (every ~30 blocks at 2-min target).
-    // Walk through block_index by time, picking one block per 3600s window.
     sqlite3_stmt *blks = db.Prepare(
         "SELECT n_height, n_time, n_bits FROM block_index "
-        "WHERE n_height > 0 AND n_time > 0 "
+        "WHERE n_height > 0 AND n_time > 0 AND n_time < ?1 "
         "ORDER BY n_height ASC");
+    sqlite3_bind_int64(blks, 1, fillUpTo);
 
     db.BeginTransaction();
 
@@ -276,41 +292,26 @@ static void BackfillFromBlockIndex(CSqliteWrapper &db) {
         int64_t blockTime = sqlite3_column_int64(blks, 1);
         uint32_t nBits = static_cast<uint32_t>(sqlite3_column_int(blks, 2));
 
-        // One snapshot per hour
         if (blockTime - lastSnapshotTs < 3600 && lastSnapshotTs > 0) {
             continue;
         }
         lastSnapshotTs = blockTime;
 
         double diff = DifficultyFromBits(nBits);
-        // Rough hashrate estimate: difficulty * 2^32 / target_spacing
-        // For Lotus with 120s target: hashrate ≈ diff * 2^32 / 120
         double hashrate = diff * 4294967296.0 / 120.0;
 
-        // Supply data is only accurate for current state; historical
-        // snapshots get 0 (charts will show supply only for recent data).
+        // Historical snapshots have 0 for supply/mempool (unavailable)
         WriteOneSnapshot(db, blockTime, height, hashrate, diff,
                          0, 0, 0, 0);
         count++;
     }
     sqlite3_reset(blks);
 
-    // Write one "now" snapshot with accurate supply data
-    {
-        LOCK(cs_main);
-        const CBlockIndex *tip = ::ChainActive().Tip();
-        if (tip) {
-            double diff = GetDifficulty(tip);
-            double hashrate = EstimateHashrate(120);
-            WriteOneSnapshot(db, GetTime(), tip->nHeight, hashrate, diff,
-                             0, 0, totalSupply, burnedSupply);
-            count++;
-        }
-    }
-
     db.CommitTransaction();
-    LogPrintf("API: backfilled %d chain_stats_snapshots from block_index\n",
-              count);
+    if (count > 0) {
+        LogPrintf("API: backfilled %d chain_stats_snapshots from "
+                  "block_index\n", count);
+    }
 }
 
 // Seed mempool_snapshots with a single entry so the table isn't empty.
@@ -434,6 +435,71 @@ static void PruneOldSnapshots(CSqliteWrapper &db) {
     sqlite3_reset(del2);
 }
 
+// Backfill the transactions/tx_inputs/tx_outputs/address tables by reading
+// blocks from disk and running CBlockAnalytics::ConnectBlock for any height
+// not yet indexed.  Runs once at startup; safe to re-run (INSERT OR IGNORE).
+static void BackfillBlockAnalytics(CSqliteWrapper &db) {
+    if (!g_block_analytics) return;
+
+    int maxIndexed = -1;
+    sqlite3_stmt *q = db.Prepare(
+        "SELECT MAX(block_height) FROM transactions");
+    if (sqlite3_step(q) == SQLITE_ROW &&
+        sqlite3_column_type(q, 0) != SQLITE_NULL) {
+        maxIndexed = sqlite3_column_int(q, 0);
+    }
+    sqlite3_reset(q);
+
+    int chainHeight = 0;
+    {
+        LOCK(cs_main);
+        const CBlockIndex *tip = ::ChainActive().Tip();
+        if (!tip) return;
+        chainHeight = tip->nHeight;
+    }
+
+    if (maxIndexed >= chainHeight) return;
+
+    int startHeight = maxIndexed + 1;
+    int total = chainHeight - startHeight + 1;
+    LogPrintf("API: backfilling block analytics from height %d to %d "
+              "(%d blocks)...\n", startHeight, chainHeight, total);
+
+    const auto &params = Params();
+    const auto &consensus = params.GetConsensus();
+    int64_t lastLog = GetTime();
+    int processed = 0;
+
+    for (int h = startHeight; h <= chainHeight && g_collector_running.load();
+         h++) {
+        const CBlockIndex *pindex = nullptr;
+        {
+            LOCK(cs_main);
+            pindex = ::ChainActive()[h];
+        }
+        if (!pindex) continue;
+
+        CBlock block;
+        if (!ReadBlockFromDisk(block, pindex, consensus)) {
+            LogPrintf("API: backfill failed to read block %d\n", h);
+            continue;
+        }
+
+        g_block_analytics->ConnectBlock(block, pindex, params);
+        processed++;
+
+        int64_t now = GetTime();
+        if (now - lastLog >= 10) {
+            LogPrintf("API: backfill progress %d/%d (height %d)\n",
+                      processed, total, h);
+            lastLog = now;
+        }
+    }
+
+    LogPrintf("API: block analytics backfill complete (%d blocks)\n",
+              processed);
+}
+
 static void CollectorLoop(const util::Ref &ctx) {
     // Wait until the chain tip is available and block index is loaded.
     // Poll every 2 seconds up to 5 minutes; this avoids competing with
@@ -459,6 +525,7 @@ static void CollectorLoop(const util::Ref &ctx) {
     auto *btree = dynamic_cast<CBlockTreeSqlite *>(pblocktree.get());
     if (btree) {
         CSqliteWrapper &db = btree->GetDb();
+        BackfillBlockAnalytics(db);
         BackfillFromBlockIndex(db);
         BackfillMempoolSnapshots(db, ctx);
     }

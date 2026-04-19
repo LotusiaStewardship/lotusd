@@ -18,6 +18,7 @@
 #include <txmempool.h>
 #include <util/ref.h>
 #include <util/strencodings.h>
+#include <util/time.h>
 #include <validation.h>
 #include <consensus/validation.h>
 
@@ -349,18 +350,21 @@ bool HandleDecodeTx(const util::Ref &ctx, HTTPRequest *req,
     return true;
 }
 
+static std::pair<int64_t, int64_t> MempoolPeriodParams(
+        const std::string &period) {
+    if (period == "week")    return {7  * 86400,  3600};
+    if (period == "month")   return {31 * 86400,  7200};
+    if (period == "quarter") return {90 * 86400,  21600};
+    if (period == "year")    return {365 * 86400, 86400};
+    /* "day" */              return {86400,        300};
+}
+
 bool HandleGetMempoolHistory(const util::Ref &, HTTPRequest *req,
                               const std::vector<std::string> &,
                               const QueryParams &qp) {
     auto periodOpt = qp.Get("period");
     std::string period = periodOpt.value_or("day");
-
-    int points;
-    if (period == "week") points = 7 * 24;
-    else if (period == "month") points = 31 * 24;
-    else if (period == "quarter") points = 90 * 24;
-    else if (period == "year") points = 365;
-    else { period = "day"; points = 24 * 12; }
+    auto [rangeSecs, bucketSecs] = MempoolPeriodParams(period);
 
     auto *btree = dynamic_cast<CBlockTreeSqlite *>(pblocktree.get());
     if (!btree) {
@@ -369,12 +373,16 @@ bool HandleGetMempoolHistory(const util::Ref &, HTTPRequest *req,
         return true;
     }
     CSqliteWrapper &db = btree->GetDb();
+    int64_t cutoff = GetTime() - rangeSecs;
 
     sqlite3_stmt *stmt = db.Prepare(
-        "SELECT snapshot_ts, tx_count, total_bytes "
+        "SELECT MAX(snapshot_ts), tx_count, total_bytes "
         "FROM mempool_snapshots "
-        "ORDER BY snapshot_ts DESC LIMIT ?1");
-    sqlite3_bind_int(stmt, 1, points);
+        "WHERE snapshot_ts >= ?1 "
+        "GROUP BY snapshot_ts / ?2 "
+        "ORDER BY 1 ASC");
+    sqlite3_bind_int64(stmt, 1, cutoff);
+    sqlite3_bind_int64(stmt, 2, bucketSecs);
 
     UniValue series(UniValue::VARR);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -386,14 +394,9 @@ bool HandleGetMempoolHistory(const util::Ref &, HTTPRequest *req,
     }
     sqlite3_reset(stmt);
 
-    UniValue reversed(UniValue::VARR);
-    for (int i = (int)series.size() - 1; i >= 0; i--) {
-        reversed.push_back(series[i]);
-    }
-
     UniValue result(UniValue::VOBJ);
     result.pushKV("period", period);
-    result.pushKV("series", reversed);
+    result.pushKV("series", series);
     WriteSuccess(req, result);
     return true;
 }

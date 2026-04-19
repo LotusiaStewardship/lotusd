@@ -325,8 +325,10 @@ void StopHTTPServer() {
 HTTPRequest::HTTPRequest(std::unique_ptr<Impl> impl)
     : m_impl(std::move(impl)) {}
 
+HTTPRequest::HTTPRequest() : m_impl(nullptr), replySent(true) {}
+
 HTTPRequest::~HTTPRequest() {
-    if (!replySent) {
+    if (m_impl && !replySent) {
         LogPrintf("%s: Unhandled request\n", __func__);
         WriteReply(HTTP_INTERNAL_SERVER_ERROR, "Unhandled request");
     }
@@ -342,7 +344,7 @@ HTTPRequest::GetHeader(const std::string &hdr) const {
 }
 
 std::string HTTPRequest::ReadBody() {
-    if (m_impl->bodyConsumed) {
+    if (!m_impl || m_impl->bodyConsumed) {
         return "";
     }
     m_impl->bodyConsumed = true;
@@ -351,10 +353,12 @@ std::string HTTPRequest::ReadBody() {
 
 void HTTPRequest::WriteHeader(const std::string &hdr,
                               const std::string &value) {
+    if (!m_impl) return;
     m_impl->extraHeaders[hdr] = value;
 }
 
 void HTTPRequest::WriteReply(int nStatus, const std::string &strReply) {
+    if (!m_impl) { replySent = true; return; }
     assert(!replySent);
     if (ShutdownRequested()) {
         m_impl->extraHeaders["Connection"] = "close";

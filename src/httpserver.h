@@ -71,6 +71,8 @@ public:
     struct Impl;
 
     explicit HTTPRequest(std::unique_ptr<Impl> impl);
+    // Lightweight dummy for cache background-refresh threads (no I/O)
+    HTTPRequest();
     ~HTTPRequest();
 
     enum RequestMethod { UNKNOWN, GET, POST, HEAD, PUT, OPTIONS };
