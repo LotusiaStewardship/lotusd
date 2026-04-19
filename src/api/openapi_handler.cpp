@@ -83,7 +83,11 @@ static UniValue BuildPaths() {
     // /chain
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "Get chain information");
+        get.pushKV("summary", "Get blockchain status and metadata");
+        get.pushKV("description",
+            "Returns the current chain name, height, best block hash, "
+            "difficulty, median time, cumulative chain work, and whether "
+            "the node is still in initial block download (IBD).");
         get.pushKV("operationId", "getChainInfo");
         UniValue tags(UniValue::VARR);
         tags.push_back("Chain");
@@ -100,7 +104,10 @@ static UniValue BuildPaths() {
     // /chain/tip
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "Get chain tip");
+        get.pushKV("summary", "Get the latest block (chain tip)");
+        get.pushKV("description",
+            "Returns a summary of the most recently mined block, including "
+            "hash, height, timestamp, transaction count, and size.");
         get.pushKV("operationId", "getChainTip");
         UniValue tags(UniValue::VARR);
         tags.push_back("Chain");
@@ -118,6 +125,10 @@ static UniValue BuildPaths() {
     {
         UniValue get(UniValue::VOBJ);
         get.pushKV("summary", "List recent blocks");
+        get.pushKV("description",
+            "Returns a paginated list of blocks from the tip backwards. "
+            "Each entry includes hash, height, timestamp, tx count, size, "
+            "difficulty, and confirmations.");
         get.pushKV("operationId", "listBlocks");
         UniValue tags(UniValue::VARR);
         tags.push_back("Blocks");
@@ -139,6 +150,10 @@ static UniValue BuildPaths() {
     {
         UniValue get(UniValue::VOBJ);
         get.pushKV("summary", "Get block by hash or height");
+        get.pushKV("description",
+            "Accepts either a block hash (64 hex chars) or a decimal height. "
+            "Returns full block summary including coinbase, merkle root, and "
+            "transaction count.");
         get.pushKV("operationId", "getBlock");
         UniValue tags(UniValue::VARR);
         tags.push_back("Blocks");
@@ -181,6 +196,9 @@ static UniValue BuildPaths() {
     {
         UniValue get(UniValue::VOBJ);
         get.pushKV("summary", "Get transaction by txid");
+        get.pushKV("description",
+            "Returns transaction details including inputs, outputs, fees, "
+            "block height, confirmations, and OP_RETURN data if present.");
         get.pushKV("operationId", "getTx");
         UniValue tags(UniValue::VARR);
         tags.push_back("Transactions");
@@ -236,7 +254,10 @@ static UniValue BuildPaths() {
     // /mempool
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "Get mempool info and transactions");
+        get.pushKV("summary", "Get mempool info and pending transactions");
+        get.pushKV("description",
+            "Returns current mempool size, byte total, and a list of "
+            "unconfirmed transaction IDs with their fee rates and sizes.");
         get.pushKV("operationId", "getMempool");
         UniValue tags(UniValue::VARR);
         tags.push_back("Mempool");
@@ -286,17 +307,28 @@ static UniValue BuildPaths() {
     // /addresses, /addresses/{addr}, /addresses/{addr}/txs, /addresses/{addr}/utxos
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "Rich list (addresses ranked by balance)");
+        get.pushKV("summary", "Rich list / wealth distribution");
+        get.pushKV("description",
+            "Without query params, returns addresses ranked by balance "
+            "(descending). Use ?sort=received to rank by total received. "
+            "Use ?mode=wealth to get wealth distribution buckets instead "
+            "of individual addresses — returns counts of addresses in "
+            "ranges like 0-1 XPI, 1-10 XPI, etc.");
         get.pushKV("operationId", "listAddresses");
         UniValue tags(UniValue::VARR);
         tags.push_back("Addresses");
         get.pushKV("tags", tags);
         UniValue params(UniValue::VARR);
-        params.push_back(QueryParam("limit", "Max results", "integer"));
-        params.push_back(QueryParam("offset", "Offset", "integer"));
+        params.push_back(QueryParam("limit", "Max results (default 20, max 100)", "integer"));
+        params.push_back(QueryParam("offset", "Skip N entries for pagination", "integer"));
+        params.push_back(QueryParam("sort",
+            "Sort order: 'balance' (default) or 'received'", "string"));
+        params.push_back(QueryParam("mode",
+            "Set to 'wealth' to return wealth distribution buckets "
+            "instead of individual addresses", "string"));
         get.pushKV("parameters", params);
         UniValue responses(UniValue::VOBJ);
-        responses.pushKV("200", JsonResponse("Address list", SchemaRef("PaginatedAddresses")));
+        responses.pushKV("200", JsonResponse("Address list or wealth distribution", SchemaRef("PaginatedAddresses")));
         get.pushKV("responses", responses);
         UniValue path(UniValue::VOBJ);
         path.pushKV("get", get);
@@ -381,7 +413,10 @@ static UniValue BuildPaths() {
     // /network, /network/peers, /node
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "Get network information");
+        get.pushKV("summary", "Get network status and connection counts");
+        get.pushKV("description",
+            "Returns protocol version, user agent, inbound/outbound "
+            "connection counts, and whether the network is active.");
         get.pushKV("operationId", "getNetworkInfo");
         UniValue tags(UniValue::VARR);
         tags.push_back("Network");
@@ -395,7 +430,11 @@ static UniValue BuildPaths() {
     }
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "List connected peers");
+        get.pushKV("summary", "List all connected peers with stats");
+        get.pushKV("description",
+            "Returns per-peer details: address, user agent, direction "
+            "(inbound/outbound), starting height, ping latency, and "
+            "bytes sent/received.");
         get.pushKV("operationId", "getPeers");
         UniValue tags(UniValue::VARR);
         tags.push_back("Network");
@@ -409,7 +448,10 @@ static UniValue BuildPaths() {
     }
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "Get node information");
+        get.pushKV("summary", "Get node software version and uptime");
+        get.pushKV("description",
+            "Returns software version, protocol version, uptime in seconds, "
+            "IBD status, current chain height, and data directory path.");
         get.pushKV("operationId", "getNodeInfo");
         UniValue tags(UniValue::VARR);
         tags.push_back("Node");
@@ -425,7 +467,10 @@ static UniValue BuildPaths() {
     // /mining
     {
         UniValue get(UniValue::VOBJ);
-        get.pushKV("summary", "Get mining information");
+        get.pushKV("summary", "Get current mining difficulty and chain info");
+        get.pushKV("description",
+            "Returns the current difficulty, target bits, chain name, and "
+            "tip height. Useful for miners and pool operators.");
         get.pushKV("operationId", "getMiningInfo");
         UniValue tags(UniValue::VARR);
         tags.push_back("Mining");
@@ -438,17 +483,134 @@ static UniValue BuildPaths() {
         paths.pushKV("/api/v1/mining", path);
     }
 
+    // /stats/cards
+    {
+        UniValue get(UniValue::VOBJ);
+        get.pushKV("summary", "Live aggregate stats for dashboard cards");
+        get.pushKV("description",
+            "Returns current tip height, difficulty, estimated hashrate, "
+            "mempool size, total circulating supply, and burned sats. "
+            "Data is computed live from the chain state and SQLite indexes.");
+        get.pushKV("operationId", "getStatsCards");
+        UniValue tags(UniValue::VARR);
+        tags.push_back("Stats");
+        get.pushKV("tags", tags);
+        UniValue responses(UniValue::VOBJ);
+        responses.pushKV("200", JsonResponse("Stats cards", SchemaRef("StatsCards")));
+        get.pushKV("responses", responses);
+        UniValue path(UniValue::VOBJ);
+        path.pushKV("get", get);
+        paths.pushKV("/api/v1/stats/cards", path);
+    }
+
+    // /stats/charts
+    {
+        UniValue get(UniValue::VOBJ);
+        get.pushKV("summary", "Historical time-series data for charts");
+        get.pushKV("description",
+            "Returns an array of snapshots taken every 5 minutes, with "
+            "hashrate, difficulty, mempool size, supply, and burned supply. "
+            "On first start, historical data is backfilled from the block "
+            "index (one sample per hour). Use the 'period' parameter to "
+            "control the time window.");
+        get.pushKV("operationId", "getStatsCharts");
+        UniValue tags(UniValue::VARR);
+        tags.push_back("Stats");
+        get.pushKV("tags", tags);
+        UniValue params(UniValue::VARR);
+        params.push_back(QueryParam("period",
+            "Time window: day (default, 288 points), week, month, quarter, "
+            "year, or 7d/30d/90d/365d aliases", "string"));
+        get.pushKV("parameters", params);
+        UniValue responses(UniValue::VOBJ);
+        responses.pushKV("200", JsonResponse("Chart series", SchemaRef("StatsChartSeries")));
+        get.pushKV("responses", responses);
+        UniValue path(UniValue::VOBJ);
+        path.pushKV("get", get);
+        paths.pushKV("/api/v1/stats/charts", path);
+    }
+
+    // /overview
+    {
+        UniValue get(UniValue::VOBJ);
+        get.pushKV("summary", "Combined overview of chain, mining, mempool, and network");
+        get.pushKV("description",
+            "Single endpoint that aggregates chain info, latest block "
+            "summary, mining stats, mempool status, and network peer counts. "
+            "Useful for dashboard landing pages to avoid multiple round-trips.");
+        get.pushKV("operationId", "getOverview");
+        UniValue tags(UniValue::VARR);
+        tags.push_back("Overview");
+        get.pushKV("tags", tags);
+        UniValue responses(UniValue::VOBJ);
+        responses.pushKV("200", JsonResponse("Overview", SchemaRef("Overview")));
+        get.pushKV("responses", responses);
+        UniValue path(UniValue::VOBJ);
+        path.pushKV("get", get);
+        paths.pushKV("/api/v1/overview", path);
+    }
+
+    // /mempool/history
+    {
+        UniValue get(UniValue::VOBJ);
+        get.pushKV("summary", "Mempool size history over time");
+        get.pushKV("description",
+            "Returns time-series snapshots of mempool tx count and total "
+            "bytes. Snapshots are recorded every 5 minutes by the stats "
+            "collector. Useful for mempool congestion charts.");
+        get.pushKV("operationId", "getMempoolHistory");
+        UniValue tags(UniValue::VARR);
+        tags.push_back("Mempool");
+        get.pushKV("tags", tags);
+        UniValue params(UniValue::VARR);
+        params.push_back(QueryParam("period",
+            "Time window: day (default), week, month, quarter, year",
+            "string"));
+        get.pushKV("parameters", params);
+        UniValue responses(UniValue::VOBJ);
+        responses.pushKV("200", JsonResponse("Mempool history", SchemaRef("MempoolHistorySeries")));
+        get.pushKV("responses", responses);
+        UniValue path(UniValue::VOBJ);
+        path.pushKV("get", get);
+        paths.pushKV("/api/v1/mempool/history", path);
+    }
+
+    // /network/nodes
+    {
+        UniValue get(UniValue::VOBJ);
+        get.pushKV("summary", "Get connected peer addresses as addnode/onetry strings");
+        get.pushKV("description",
+            "Returns the currently connected peers formatted as 'addnode=' "
+            "and 'onetry=' strings, ready to be used in lotus.conf or CLI. "
+            "Useful for bootstrapping new nodes.");
+        get.pushKV("operationId", "getNetworkNodes");
+        UniValue tags(UniValue::VARR);
+        tags.push_back("Network");
+        get.pushKV("tags", tags);
+        UniValue responses(UniValue::VOBJ);
+        responses.pushKV("200", JsonResponse("Node strings", SchemaRef("NetworkNodes")));
+        get.pushKV("responses", responses);
+        UniValue path(UniValue::VOBJ);
+        path.pushKV("get", get);
+        paths.pushKV("/api/v1/network/nodes", path);
+    }
+
     // /events
     {
         UniValue get(UniValue::VOBJ);
         get.pushKV("summary", "Poll chain events (long-poll style)");
+        get.pushKV("description",
+            "Long-poll endpoint for real-time chain events. Returns new "
+            "blocks, transactions, and other events since the given sequence "
+            "number. The client should poll with the last received seq to "
+            "get incremental updates. Times out after ~30s if no events.");
         get.pushKV("operationId", "getEvents");
         UniValue tags(UniValue::VARR);
         tags.push_back("Events");
         get.pushKV("tags", tags);
         UniValue params(UniValue::VARR);
         params.push_back(QueryParam("since_seq", "Return events after this sequence number", "integer"));
-        params.push_back(QueryParam("limit", "Max events to return", "integer"));
+        params.push_back(QueryParam("limit", "Max events to return (default 50)", "integer"));
         get.pushKV("parameters", params);
         UniValue responses(UniValue::VOBJ);
         responses.pushKV("200", JsonResponse("Events", SchemaRef("EventList")));
@@ -462,6 +624,9 @@ static UniValue BuildPaths() {
     {
         UniValue get(UniValue::VOBJ);
         get.pushKV("summary", "Get wallet info (requires wallet support)");
+        get.pushKV("description",
+            "Returns wallet balance and status. Only available when the node "
+            "is compiled with wallet support and a wallet is loaded.");
         get.pushKV("operationId", "getWalletInfo");
         UniValue tags(UniValue::VARR);
         tags.push_back("Wallet");
@@ -560,6 +725,7 @@ static UniValue BuildSchemas() {
     {
         UniValue s(UniValue::VOBJ);
         s.pushKV("type", "object");
+        s.pushKV("description", "Balance, activity, and UTXO summary for a single address");
         UniValue props(UniValue::VOBJ);
         props.pushKV("address", StringSchema());
         props.pushKV("balance_sats", IntSchema());
@@ -571,6 +737,132 @@ static UniValue BuildSchemas() {
         props.pushKV("last_height", IntSchema());
         s.pushKV("properties", props);
         schemas.pushKV("AddressSummary", s);
+    }
+
+    // StatsCards — live aggregate snapshot
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description", "Live aggregate stats for dashboard cards");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("tip_height", IntSchema());
+        props.pushKV("difficulty", NumSchema());
+        props.pushKV("hashrate", NumSchema());
+        props.pushKV("mempool_count", IntSchema());
+        props.pushKV("mempool_bytes", IntSchema());
+        props.pushKV("total_supply_sats", IntSchema());
+        props.pushKV("burned_sats", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("StatsCards", s);
+    }
+
+    // StatsChartPoint — single time-series data point
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description", "A single snapshot in a time-series chart");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("ts", IntSchema());
+        props.pushKV("block_height", IntSchema());
+        props.pushKV("hashrate", NumSchema());
+        props.pushKV("difficulty", NumSchema());
+        props.pushKV("mempool_count", IntSchema());
+        props.pushKV("total_supply_sats", IntSchema());
+        props.pushKV("burned_supply_sats", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("StatsChartPoint", s);
+    }
+
+    // StatsChartSeries — time-series wrapper
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description",
+            "Time-series chart data with period label and array of snapshots "
+            "ordered oldest-first. Snapshots are taken every 5 minutes; "
+            "historical data is backfilled hourly from the block index.");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("period", StringSchema());
+        UniValue seriesArr(UniValue::VOBJ);
+        seriesArr.pushKV("type", "array");
+        seriesArr.pushKV("items", SchemaRef("StatsChartPoint"));
+        props.pushKV("series", seriesArr);
+        s.pushKV("properties", props);
+        schemas.pushKV("StatsChartSeries", s);
+    }
+
+    // Overview — combined dashboard response
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description",
+            "Combined response with chain, mining, mempool, network, and "
+            "latest block info. Avoids multiple round-trips for dashboard "
+            "rendering.");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("chain", SchemaRef("ChainInfo"));
+        props.pushKV("latest_block", SchemaRef("BlockSummary"));
+        UniValue miningObj(UniValue::VOBJ);
+        miningObj.pushKV("type", "object");
+        props.pushKV("mining", miningObj);
+        UniValue mempoolObj(UniValue::VOBJ);
+        mempoolObj.pushKV("type", "object");
+        props.pushKV("mempool", mempoolObj);
+        UniValue netObj(UniValue::VOBJ);
+        netObj.pushKV("type", "object");
+        props.pushKV("network", netObj);
+        s.pushKV("properties", props);
+        schemas.pushKV("Overview", s);
+    }
+
+    // MempoolHistoryPoint
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description", "A single mempool snapshot");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("ts", IntSchema());
+        props.pushKV("tx_count", IntSchema());
+        props.pushKV("total_bytes", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("MempoolHistoryPoint", s);
+    }
+
+    // MempoolHistorySeries
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description",
+            "Time-series of mempool size snapshots, oldest-first. "
+            "Useful for plotting mempool congestion over time.");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("period", StringSchema());
+        UniValue seriesArr(UniValue::VOBJ);
+        seriesArr.pushKV("type", "array");
+        seriesArr.pushKV("items", SchemaRef("MempoolHistoryPoint"));
+        props.pushKV("series", seriesArr);
+        s.pushKV("properties", props);
+        schemas.pushKV("MempoolHistorySeries", s);
+    }
+
+    // NetworkNodes
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description",
+            "Currently connected peers formatted as addnode= and onetry= "
+            "strings for lotus.conf or CLI usage");
+        UniValue props(UniValue::VOBJ);
+        UniValue addArr(UniValue::VOBJ);
+        addArr.pushKV("type", "array");
+        addArr.pushKV("items", StringSchema());
+        props.pushKV("addnode", addArr);
+        UniValue oneArr(UniValue::VOBJ);
+        oneArr.pushKV("type", "array");
+        oneArr.pushKV("items", StringSchema());
+        props.pushKV("onetry", oneArr);
+        s.pushKV("properties", props);
+        schemas.pushKV("NetworkNodes", s);
     }
 
     return schemas;
@@ -585,7 +877,13 @@ bool HandleGetOpenAPISchema(const util::Ref &, HTTPRequest *req,
     UniValue info(UniValue::VOBJ);
     info.pushKV("title", "Lotus Node API");
     info.pushKV("description",
-                "RESTful API for the Lotus blockchain node, powered by SQLite");
+                "RESTful API for the Lotus blockchain node. All data is served "
+                "directly from the node's embedded SQLite database and in-memory "
+                "state — no external indexer required. Supports chain info, block "
+                "and transaction queries, address balances with rich list, mempool "
+                "monitoring with history, mining stats, network peers, historical "
+                "charts (hashrate, difficulty, supply), real-time events via "
+                "long-polling, and a combined overview endpoint for dashboards.");
     info.pushKV("version", FormatFullVersion());
     doc.pushKV("info", info);
 

@@ -38,7 +38,9 @@
 #include <index/txindex.h>
 #include <interfaces/chain.h>
 #include <interfaces/node.h>
+#include <consensus/consensus.h>
 #include <key.h>
+#include <key_io.h>
 #include <miner.h>
 #include <net.h>
 #include <net_permissions.h>
@@ -3498,47 +3500,73 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
             const fs::path dataDir = GetDataDir();
 
             if (enableLtc) {
-                auto ltcParams = scryptchain::GetLtcMainnetParams();
+                const auto &ltcParams = scryptchain::LitecoinMainnetParams();
                 g_ltcChain = new scryptchain::ScryptHeaderChain(
-                    ltcParams, (dataDir / "ltc_headers.sqlite").string());
-                g_ltcChain->Initialize();
+                    ltcParams, dataDir / "ltc_headers.sqlite");
+                std::string ltcInitErr;
+                if (!g_ltcChain->Initialize(ltcInitErr)) {
+                    return InitError(Untranslated(strprintf(
+                        "LTC header chain init failed: %s", ltcInitErr)));
+                }
                 g_ltcMempool = new scryptchain::ScryptMemPool(
-                    mempoolBytes, txMinPeers, txMaxStage);
+                    txMinPeers, txMaxStage, mempoolBytes);
                 int ltcMaxPeers = args.GetArg("-ltcmaxpeers", 8);
                 g_ltcNetMgr = new scryptchain::ScryptNetworkManager(
                     ltcParams, ltcMaxPeers);
                 g_ltcMsgHandler = new scryptchain::ScryptMsgHandler(
-                    *g_ltcChain, *g_ltcNetMgr, ltcParams);
+                    ltcParams, *g_ltcChain, *g_ltcNetMgr);
                 g_ltcMsgHandler->SetTxRelayCallback(
-                    [](const CTransactionRef &tx, int peerId) {
+                    [](int peerId, const uint256 &/*txid*/,
+                       const std::vector<uint8_t> &txData) {
                         if (g_ltcMempool) {
-                            g_ltcMempool->AddTransaction(tx, peerId);
+                            CDataStream ss(txData, SER_NETWORK,
+                                           PROTOCOL_VERSION);
+                            CTransaction tx(deserialize, ss);
+                            std::string err;
+                            g_ltcMempool->AcceptTransaction(
+                                tx, peerId, MAX_TX_SIZE, err);
                         }
                     });
-                g_ltcNetMgr->Start();
+                std::string ltcNetErr;
+                if (!g_ltcNetMgr->Start(ltcNetErr)) {
+                    LogPrintf("LTC network start warning: %s\n", ltcNetErr);
+                }
                 LogPrintf("LTC thin node: started (%d max peers)\n",
                           ltcMaxPeers);
             }
 
             if (enableDoge) {
-                auto dogeParams = scryptchain::GetDogeMainnetParams();
+                const auto &dogeParams = scryptchain::DogecoinMainnetParams();
                 g_dogeChain = new scryptchain::ScryptHeaderChain(
-                    dogeParams, (dataDir / "doge_headers.sqlite").string());
-                g_dogeChain->Initialize();
+                    dogeParams, dataDir / "doge_headers.sqlite");
+                std::string dogeInitErr;
+                if (!g_dogeChain->Initialize(dogeInitErr)) {
+                    return InitError(Untranslated(strprintf(
+                        "DOGE header chain init failed: %s", dogeInitErr)));
+                }
                 g_dogeMempool = new scryptchain::ScryptMemPool(
-                    mempoolBytes, txMinPeers, txMaxStage);
+                    txMinPeers, txMaxStage, mempoolBytes);
                 int dogeMaxPeers = args.GetArg("-dogemaxpeers", 8);
                 g_dogeNetMgr = new scryptchain::ScryptNetworkManager(
                     dogeParams, dogeMaxPeers);
                 g_dogeMsgHandler = new scryptchain::ScryptMsgHandler(
-                    *g_dogeChain, *g_dogeNetMgr, dogeParams);
+                    dogeParams, *g_dogeChain, *g_dogeNetMgr);
                 g_dogeMsgHandler->SetTxRelayCallback(
-                    [](const CTransactionRef &tx, int peerId) {
+                    [](int peerId, const uint256 &/*txid*/,
+                       const std::vector<uint8_t> &txData) {
                         if (g_dogeMempool) {
-                            g_dogeMempool->AddTransaction(tx, peerId);
+                            CDataStream ss(txData, SER_NETWORK,
+                                           PROTOCOL_VERSION);
+                            CTransaction tx(deserialize, ss);
+                            std::string err;
+                            g_dogeMempool->AcceptTransaction(
+                                tx, peerId, MAX_TX_SIZE, err);
                         }
                     });
-                g_dogeNetMgr->Start();
+                std::string dogeNetErr;
+                if (!g_dogeNetMgr->Start(dogeNetErr)) {
+                    LogPrintf("DOGE network start warning: %s\n", dogeNetErr);
+                }
                 LogPrintf("DOGE thin node: started (%d max peers)\n",
                           dogeMaxPeers);
             }
@@ -3546,7 +3574,8 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
             g_scryptTemplateBuilder =
                 new scryptchain::ScryptTemplateBuilder();
             g_scryptSolutionHandler =
-                new scryptchain::ScryptSolutionHandler();
+                new scryptchain::ScryptSolutionHandler(
+                    config, *node.chainman);
 
             stratum::StratumServer *server = stratum::GetStratumServer();
             if (server) {
@@ -3554,12 +3583,29 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
                     args.GetArg("-ltccoinbaseaddr", "");
                 std::string dogeCoinbaseAddr =
                     args.GetArg("-dogecoinbaseaddr", "");
+                CScript ltcCoinbaseScript, dogeCoinbaseScript;
+                if (!ltcCoinbaseAddr.empty()) {
+                    CTxDestination dest =
+                        DecodeDestination(ltcCoinbaseAddr,
+                                          config.GetChainParams());
+                    if (IsValidDestination(dest)) {
+                        ltcCoinbaseScript = GetScriptForDestination(dest);
+                    }
+                }
+                if (!dogeCoinbaseAddr.empty()) {
+                    CTxDestination dest =
+                        DecodeDestination(dogeCoinbaseAddr,
+                                          config.GetChainParams());
+                    if (IsValidDestination(dest)) {
+                        dogeCoinbaseScript = GetScriptForDestination(dest);
+                    }
+                }
                 server->SetMultiChainComponents(
-                    g_ltcChain, g_dogeChain,
-                    g_ltcMempool, g_dogeMempool,
                     g_scryptTemplateBuilder,
                     g_scryptSolutionHandler,
-                    ltcCoinbaseAddr, dogeCoinbaseAddr);
+                    g_ltcChain, g_dogeChain,
+                    g_ltcMempool, g_dogeMempool,
+                    ltcCoinbaseScript, dogeCoinbaseScript);
             }
 
             auto &scGlobals = scryptchain::GetScryptChainGlobals();

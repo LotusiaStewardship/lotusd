@@ -349,4 +349,53 @@ bool HandleDecodeTx(const util::Ref &ctx, HTTPRequest *req,
     return true;
 }
 
+bool HandleGetMempoolHistory(const util::Ref &, HTTPRequest *req,
+                              const std::vector<std::string> &,
+                              const QueryParams &qp) {
+    auto periodOpt = qp.Get("period");
+    std::string period = periodOpt.value_or("day");
+
+    int points;
+    if (period == "week") points = 7 * 24;
+    else if (period == "month") points = 31 * 24;
+    else if (period == "quarter") points = 90 * 24;
+    else if (period == "year") points = 365;
+    else { period = "day"; points = 24 * 12; }
+
+    auto *btree = dynamic_cast<CBlockTreeSqlite *>(pblocktree.get());
+    if (!btree) {
+        WriteError(req, HTTP_INTERNAL_SERVER_ERROR, "db_error",
+                   "SQLite not available");
+        return true;
+    }
+    CSqliteWrapper &db = btree->GetDb();
+
+    sqlite3_stmt *stmt = db.Prepare(
+        "SELECT snapshot_ts, tx_count, total_bytes "
+        "FROM mempool_snapshots "
+        "ORDER BY snapshot_ts DESC LIMIT ?1");
+    sqlite3_bind_int(stmt, 1, points);
+
+    UniValue series(UniValue::VARR);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        UniValue point(UniValue::VOBJ);
+        point.pushKV("ts", int64_t(sqlite3_column_int64(stmt, 0)));
+        point.pushKV("tx_count", sqlite3_column_int(stmt, 1));
+        point.pushKV("total_bytes", int64_t(sqlite3_column_int64(stmt, 2)));
+        series.push_back(point);
+    }
+    sqlite3_reset(stmt);
+
+    UniValue reversed(UniValue::VARR);
+    for (int i = (int)series.size() - 1; i >= 0; i--) {
+        reversed.push_back(series[i]);
+    }
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("period", period);
+    result.pushKV("series", reversed);
+    WriteSuccess(req, result);
+    return true;
+}
+
 } // namespace api

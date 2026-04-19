@@ -33,6 +33,10 @@ bool HandleDecodeTx(const util::Ref &ctx, HTTPRequest *req,
                     const std::vector<std::string> &parts,
                     const QueryParams &qp);
 
+bool HandleGetMempoolHistory(const util::Ref &ctx, HTTPRequest *req,
+                              const std::vector<std::string> &parts,
+                              const QueryParams &qp);
+
 } // namespace api
 
 #endif // BITCOIN_API_TX_HANDLER_H

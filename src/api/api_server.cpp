@@ -12,6 +12,8 @@
 #include <api/mining_handler.h>
 #include <api/openapi_handler.h>
 #include <api/network_handler.h>
+#include <api/overview_handler.h>
+#include <api/stats_handler.h>
 #include <api/tx_handler.h>
 #include <api/wallet_handler.h>
 #include <config.h>
@@ -141,6 +143,18 @@ void StartAPI(const util::Ref &context) {
     // Mining endpoints
     AddRoute(HTTPRequest::GET, "mining", api::HandleGetMiningInfo);
 
+    // Stats endpoints
+    AddRoute(HTTPRequest::GET, "stats", api::HandleGetStats);
+
+    // Mempool history
+    AddRoute(HTTPRequest::GET, "mempool/history", api::HandleGetMempoolHistory);
+
+    // Network nodes
+    AddRoute(HTTPRequest::GET, "network/nodes", api::HandleGetNetworkNodes);
+
+    // Overview (combined endpoint)
+    AddRoute(HTTPRequest::GET, "overview", api::HandleGetOverview);
+
     // Wallet endpoints
     AddRoute(HTTPRequest::GET, "wallet", api::HandleGetWalletInfo);
 
@@ -151,6 +165,7 @@ void StartAPI(const util::Ref &context) {
     AddRoute(HTTPRequest::GET, "openapi.json", api::HandleGetOpenAPISchema);
 
     api::StartEvents();
+    api::StartStatsCollector(context);
 
     auto handler = [&context](Config &config, HTTPRequest *req,
                               const std::string &prefix) {
@@ -164,13 +179,14 @@ void StartAPI(const util::Ref &context) {
         api::QueryParams qp;
         return api::HandleGetDashboard(context, req, empty, qp);
     };
-    RegisterHTTPHandler("/dashboard", true, dashboardHandler);
+    RegisterHTTPHandler("/dashboard", false, dashboardHandler);
 }
 
 void InterruptAPI() {}
 
 void StopAPI() {
-    // REST API v1 shutdown
+    LogPrintf("Stopping REST API v1\n");
+    api::StopStatsCollector();
     api::StopEvents();
     UnregisterHTTPHandler("/dashboard", true);
     UnregisterHTTPHandler(API_PREFIX, false);

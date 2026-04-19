@@ -20,6 +20,8 @@ extern const char *TX_OUTPUTS_TABLE;
 extern const char *ADDRESS_BALANCES_TABLE;
 extern const char *ADDRESS_HISTORY_TABLE;
 extern const char *META_TABLE;
+extern const char *CHAIN_STATS_SNAPSHOTS_TABLE;
+extern const char *MEMPOOL_SNAPSHOTS_TABLE;
 
 extern const char *ALL_INDEXES;
 

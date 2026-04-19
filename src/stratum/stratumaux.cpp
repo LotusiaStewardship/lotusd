@@ -5,6 +5,7 @@
 #include <stratum/stratumaux.h>
 
 #include <arith_uint256.h>
+#include <auxmining/auxmining.h>
 #include <chainparams.h>
 #include <config.h>
 #include <consensus/merkle.h>
@@ -60,7 +61,7 @@ bool StratumAuxManager::CreateAuxWork(AuxWorkTemplate &out,
         return false;
     }
 
-    BlockAssembler assembler(::GetConfig(), m_chainstate, m_mempool);
+    BlockAssembler assembler(::GetConfig(), *m_mempool);
     auto blockTemplate = assembler.CreateNewBlock(m_coinbaseScript);
     if (!blockTemplate) {
         error = "Failed to create block template";
@@ -77,13 +78,7 @@ bool StratumAuxManager::CreateAuxWork(AuxWorkTemplate &out,
     job.jobId = 0;
     job.height = pindexPrev->nHeight + 1;
 
-    CBlockHeader hdr;
-    hdr.nVersion = VersionWithAuxPow(block.nVersion, true);
-    hdr.hashPrevBlock = block.hashPrevBlock;
-    hdr.hashMerkleRoot = block.hashMerkleRoot;
-    hdr.nTime = block.nTime;
-    hdr.nBits = block.nBits;
-    hdr.nNonce = block.nNonce;
+    CBlockHeader hdr = block.GetBlockHeader();
     uint256 auxBlockHash = hdr.GetHash();
 
     bool fNegative, fOverflow;
@@ -185,7 +180,7 @@ MergeMineCommitment StratumAuxManager::BuildCommitment(
             for (size_t i = 0; i < level.size(); i += 2) {
                 uint256 left = level[i];
                 uint256 right = (i + 1 < level.size()) ? level[i + 1] : left;
-                nextLevel.push_back(Hash(Span(left), Span(right)));
+                nextLevel.push_back(Hash(left, right));
             }
             level = nextLevel;
             index /= 2;
@@ -225,7 +220,7 @@ MergeMineCommitment StratumAuxManager::BuildCommitment(
 
 bool StratumAuxManager::AssembleAuxPow(
     const AuxWorkTemplate &work,
-    const AuxPowSubmission &submission,
+    const AuxPowChainProof &submission,
     std::shared_ptr<CAuxPow> &out,
     std::string &error) const {
 
@@ -253,11 +248,9 @@ bool StratumAuxManager::AssembleAuxPow(
     auxpow->parentBlock = submission.parentHeader;
 
     const Consensus::Params &consensus = m_params.GetConsensus();
-    std::string checkError;
     if (!auxpow->CheckAuxBlockHash(work.auxBlockHash,
-                                    AUXPOW_CHAIN_ID, consensus,
-                                    checkError)) {
-        error = checkError;
+                                    AUXPOW_CHAIN_ID, consensus)) {
+        error = "AuxPow block hash check failed";
         return false;
     }
 
@@ -276,13 +269,11 @@ bool StratumAuxManager::SubmitAuxBlock(const AuxWorkTemplate &work,
                                         std::shared_ptr<CAuxPow> auxpow,
                                         ChainstateManager &chainman) {
     auto block = std::make_shared<CBlock>();
-    // Rebuild block from the aux work template
-    block->nVersion = VersionWithAuxPow(work.underlyingJob.height, true);
     block->hashPrevBlock = work.prevBlockHash;
     block->nBits = work.nBits;
+    block->nHeight = work.height;
 
-    // Attach the AuxPoW proof as metadata
-    block->SetAuxPow(std::move(auxpow));
+    block->SetAuxPow(*auxpow);
     block->hashMerkleRoot = BlockMerkleRoot(*block);
 
     bool newBlock = false;

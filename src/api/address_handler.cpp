@@ -20,7 +20,6 @@ bool HandleGetAddress(const util::Ref &ctx, HTTPRequest *req,
     // GET /api/v1/addresses/<address>/utxos
     // GET /api/v1/addresses?rank=true&limit=N  (rich list)
     if (parts.size() < 2) {
-        // Rich list
         auto *btree = dynamic_cast<CBlockTreeSqlite *>(pblocktree.get());
         if (!btree) {
             WriteError(req, HTTP_INTERNAL_SERVER_ERROR, "db_error",
@@ -29,10 +28,66 @@ bool HandleGetAddress(const util::Ref &ctx, HTTPRequest *req,
         }
         CSqliteWrapper &db = btree->GetDb();
 
+        // Wealth distribution mode: returns bucket aggregation
+        auto modeOpt = qp.Get("mode");
+        if (modeOpt && *modeOpt == "wealth") {
+            sqlite3_stmt *wstmt = db.Prepare(
+                "SELECT "
+                "  CASE "
+                "    WHEN balance_sats >= 1000000000000 THEN '>=1M XPI' "
+                "    WHEN balance_sats >= 100000000000 THEN '100k-1M XPI' "
+                "    WHEN balance_sats >= 10000000000 THEN '10k-100k XPI' "
+                "    WHEN balance_sats >= 1000000000 THEN '1k-10k XPI' "
+                "    WHEN balance_sats >= 100000000 THEN '100-1k XPI' "
+                "    ELSE '<100 XPI' "
+                "  END AS label, "
+                "  COUNT(*) AS holder_count, "
+                "  COALESCE(SUM(balance_sats), 0) AS total_sats "
+                "FROM address_balances "
+                "WHERE balance_sats > 0 "
+                "GROUP BY label "
+                "ORDER BY total_sats DESC");
+
+            sqlite3_stmt *totalStmt = db.Prepare(
+                "SELECT COALESCE(SUM(balance_sats), 0) "
+                "FROM address_balances WHERE balance_sats > 0");
+            int64_t grandTotal = 0;
+            if (sqlite3_step(totalStmt) == SQLITE_ROW) {
+                grandTotal = sqlite3_column_int64(totalStmt, 0);
+            }
+            sqlite3_reset(totalStmt);
+
+            UniValue buckets(UniValue::VARR);
+            while (sqlite3_step(wstmt) == SQLITE_ROW) {
+                UniValue bucket(UniValue::VOBJ);
+                const char *lbl = reinterpret_cast<const char *>(
+                    sqlite3_column_text(wstmt, 0));
+                bucket.pushKV("label", lbl ? std::string(lbl) : "");
+                bucket.pushKV("count", sqlite3_column_int(wstmt, 1));
+                int64_t totalSats = sqlite3_column_int64(wstmt, 2);
+                bucket.pushKV("total_sats", totalSats);
+                double pct = grandTotal > 0
+                    ? (double(totalSats) / double(grandTotal)) * 100.0
+                    : 0.0;
+                bucket.pushKV("pct", pct);
+                buckets.push_back(bucket);
+            }
+            sqlite3_reset(wstmt);
+
+            UniValue result(UniValue::VOBJ);
+            result.pushKV("buckets", buckets);
+            WriteSuccess(req, result);
+            return true;
+        }
+
+        // Rich list (sort by balance or received)
         int limit = qp.GetInt("limit", 20);
         int offset = qp.GetInt("offset", 0);
         limit = std::max(1, std::min(limit, 100));
         offset = std::max(0, offset);
+
+        auto sortOpt = qp.Get("sort");
+        bool sortByReceived = sortOpt && *sortOpt == "received";
 
         sqlite3_stmt *cnt = db.Prepare(
             "SELECT COUNT(*) FROM address_balances WHERE balance_sats > 0");
@@ -42,11 +97,20 @@ bool HandleGetAddress(const util::Ref &ctx, HTTPRequest *req,
         }
         sqlite3_reset(cnt);
 
-        sqlite3_stmt *stmt = db.Prepare(
-            "SELECT address, balance_sats, received_sats, sent_sats, "
-            "tx_count, utxo_count "
-            "FROM address_balances WHERE balance_sats > 0 "
-            "ORDER BY balance_sats DESC LIMIT ?1 OFFSET ?2");
+        sqlite3_stmt *stmt;
+        if (sortByReceived) {
+            stmt = db.Prepare(
+                "SELECT address, balance_sats, received_sats, sent_sats, "
+                "tx_count, utxo_count "
+                "FROM address_balances WHERE balance_sats > 0 "
+                "ORDER BY received_sats DESC LIMIT ?1 OFFSET ?2");
+        } else {
+            stmt = db.Prepare(
+                "SELECT address, balance_sats, received_sats, sent_sats, "
+                "tx_count, utxo_count "
+                "FROM address_balances WHERE balance_sats > 0 "
+                "ORDER BY balance_sats DESC LIMIT ?1 OFFSET ?2");
+        }
         sqlite3_bind_int(stmt, 1, limit);
         sqlite3_bind_int(stmt, 2, offset);
 

@@ -6,6 +6,7 @@
 #define BITCOIN_STRATUM_STRATUMAUX_H
 
 #include <arith_uint256.h>
+#include <auxmining/auxmining.h>
 #include <primitives/auxpow.h>
 #include <primitives/block.h>
 #include <primitives/parentheader.h>
@@ -49,7 +50,7 @@ struct AuxWorkTemplate {
 /**
  * Data submitted from a parent chain miner proving work was done.
  */
-struct AuxPowSubmission {
+struct AuxPowChainProof {
     CTransactionRef parentCoinbaseTx;
     uint256 parentBlockHash;
     std::vector<uint256> coinbaseMerkleBranch;
@@ -83,7 +84,7 @@ public:
      * Validates all structural constraints.
      */
     bool AssembleAuxPow(const AuxWorkTemplate &work,
-                        const AuxPowSubmission &submission,
+                        const AuxPowChainProof &submission,
                         std::shared_ptr<CAuxPow> &out,
                         std::string &error) const;
 

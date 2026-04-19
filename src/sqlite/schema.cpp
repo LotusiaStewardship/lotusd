@@ -119,6 +119,27 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 )";
 
+const char *CHAIN_STATS_SNAPSHOTS_TABLE = R"(
+CREATE TABLE IF NOT EXISTS chain_stats_snapshots (
+    snapshot_ts     INTEGER PRIMARY KEY,
+    block_height    INTEGER NOT NULL,
+    hashrate        REAL NOT NULL DEFAULT 0,
+    difficulty      REAL NOT NULL DEFAULT 0,
+    mempool_count   INTEGER NOT NULL DEFAULT 0,
+    mempool_bytes   INTEGER NOT NULL DEFAULT 0,
+    total_supply    INTEGER NOT NULL DEFAULT 0,
+    burned_supply   INTEGER NOT NULL DEFAULT 0
+);
+)";
+
+const char *MEMPOOL_SNAPSHOTS_TABLE = R"(
+CREATE TABLE IF NOT EXISTS mempool_snapshots (
+    snapshot_ts     INTEGER PRIMARY KEY,
+    tx_count        INTEGER NOT NULL DEFAULT 0,
+    total_bytes     INTEGER NOT NULL DEFAULT 0
+);
+)";
+
 const char *ALL_INDEXES = R"(
 CREATE INDEX IF NOT EXISTS idx_block_height ON block_index(n_height);
 CREATE INDEX IF NOT EXISTS idx_block_time ON block_index(n_time);
@@ -160,6 +181,8 @@ void CreateAllTables(sqlite3 *db) {
     ExecOrThrow(db, ADDRESS_BALANCES_TABLE);
     ExecOrThrow(db, ADDRESS_HISTORY_TABLE);
     ExecOrThrow(db, META_TABLE);
+    ExecOrThrow(db, CHAIN_STATS_SNAPSHOTS_TABLE);
+    ExecOrThrow(db, MEMPOOL_SNAPSHOTS_TABLE);
 }
 
 void CreateAllIndexes(sqlite3 *db) {

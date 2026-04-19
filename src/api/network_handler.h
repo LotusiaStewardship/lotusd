@@ -29,6 +29,10 @@ bool HandleGetNodeInfo(const util::Ref &ctx, HTTPRequest *req,
                        const std::vector<std::string> &parts,
                        const QueryParams &qp);
 
+bool HandleGetNetworkNodes(const util::Ref &ctx, HTTPRequest *req,
+                            const std::vector<std::string> &parts,
+                            const QueryParams &qp);
+
 } // namespace api
 
 #endif // BITCOIN_API_NETWORK_HANDLER_H

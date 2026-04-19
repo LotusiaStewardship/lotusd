@@ -220,7 +220,7 @@ bool ExternalChainClient::RefreshWork(const std::string &address) {
         }
         if (result.exists("height")) {
             m_currentWork.height =
-                static_cast<int32_t>(result["height"].getInt<int64_t>());
+                static_cast<int32_t>(result["height"].get_int64());
         }
         if (result.exists("target")) {
             m_currentWork.target = result["target"].get_str();

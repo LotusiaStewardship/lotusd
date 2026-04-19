@@ -106,4 +106,36 @@ bool HandleGetNodeInfo(const util::Ref &ctx, HTTPRequest *req,
     return true;
 }
 
+bool HandleGetNetworkNodes(const util::Ref &ctx, HTTPRequest *req,
+                            const std::vector<std::string> &,
+                            const QueryParams &) {
+    NodeContext *node =
+        ctx.Has<NodeContext>() ? &ctx.Get<NodeContext>() : nullptr;
+    if (!node || !node->connman) {
+        WriteError(req, HTTP_SERVICE_UNAVAILABLE, "no_network",
+                   "Network not available");
+        return true;
+    }
+
+    std::vector<CNodeStats> vstats;
+    node->connman->GetNodeStats(vstats);
+
+    UniValue addnodeArr(UniValue::VARR);
+    UniValue onetryArr(UniValue::VARR);
+    for (const auto &stats : vstats) {
+        std::string host = stats.addrName;
+        if (host.empty()) {
+            continue;
+        }
+        addnodeArr.push_back("addnode=" + host);
+        onetryArr.push_back("onetry=" + host);
+    }
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("addnode", addnodeArr);
+    result.pushKV("onetry", onetryArr);
+    WriteSuccess(req, result);
+    return true;
+}
+
 } // namespace api
