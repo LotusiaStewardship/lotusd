@@ -27,6 +27,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
+#include <string>
 #include <thread>
 
 namespace api {
@@ -379,7 +380,7 @@ static void TakeCurrentSnapshot(CSqliteWrapper &db, const util::Ref &ctx) {
 
         sqlite3_stmt *qburn = db.Prepare(
             "SELECT COALESCE(SUM(value_sats), 0) FROM tx_outputs "
-            "WHERE script_type = 'nulldata' AND value_sats > 0");
+            "WHERE script_type IS NULL AND address IS NULL AND value_sats > 0");
         if (sqlite3_step(qburn) == SQLITE_ROW) {
             burnedSupply = sqlite3_column_int64(qburn, 0);
         }
@@ -500,6 +501,93 @@ static void BackfillBlockAnalytics(CSqliteWrapper &db) {
               processed);
 }
 
+// Fill in total_supply and burned_supply for historical snapshots.
+// Uses the current SUM(balance_sats) as the tip supply and scales
+// proportionally by block_height for older snapshots, giving a smooth
+// chart curve.  Also fixes any live snapshots that had burned=0 due
+// to the old buggy query.
+static void BackfillSupplyInSnapshots(CSqliteWrapper &db) {
+    int64_t currentSupply = 0;
+    {
+        sqlite3_stmt *q = db.Prepare(
+            "SELECT COALESCE(SUM(balance_sats), 0) FROM address_balances");
+        if (sqlite3_step(q) == SQLITE_ROW)
+            currentSupply = sqlite3_column_int64(q, 0);
+        sqlite3_reset(q);
+    }
+    if (currentSupply == 0) return;
+
+    int64_t currentBurned = 0;
+    {
+        sqlite3_stmt *q = db.Prepare(
+            "SELECT COALESCE(SUM(value_sats), 0) FROM tx_outputs "
+            "WHERE script_type IS NULL AND address IS NULL "
+            "AND value_sats > 0");
+        if (sqlite3_step(q) == SQLITE_ROW)
+            currentBurned = sqlite3_column_int64(q, 0);
+        sqlite3_reset(q);
+    }
+
+    int tipHeight = 0;
+    {
+        sqlite3_stmt *q = db.Prepare(
+            "SELECT MAX(block_height) FROM chain_stats_snapshots");
+        if (sqlite3_step(q) == SQLITE_ROW)
+            tipHeight = sqlite3_column_int(q, 0);
+        sqlite3_reset(q);
+    }
+    if (tipHeight == 0) return;
+
+    int needFix = 0;
+    {
+        sqlite3_stmt *q = db.Prepare(
+            "SELECT COUNT(*) FROM chain_stats_snapshots "
+            "WHERE total_supply = 0 OR burned_supply = 0");
+        if (sqlite3_step(q) == SQLITE_ROW)
+            needFix = sqlite3_column_int(q, 0);
+        sqlite3_reset(q);
+    }
+    if (needFix == 0) return;
+
+    LogPrintf("API: backfilling supply data for %d snapshots "
+              "(proportional, tip supply=%lld, tip height=%d)...\n",
+              needFix, (long long)currentSupply, tipHeight);
+
+    // Proportional: supply(H) ≈ currentSupply * H / tipHeight
+    // Use REAL to avoid int64 overflow in the multiplication.
+    db.ExecSQL(
+        "UPDATE chain_stats_snapshots "
+        "SET total_supply = CAST(CAST(" +
+        std::to_string(currentSupply) +
+        " AS REAL) * block_height / " +
+        std::to_string(tipHeight) +
+        " AS INTEGER), "
+        "burned_supply = CAST(CAST(" +
+        std::to_string(currentBurned) +
+        " AS REAL) * block_height / " +
+        std::to_string(tipHeight) +
+        " AS INTEGER) "
+        "WHERE total_supply = 0 OR burned_supply = 0");
+
+    LogPrintf("API: supply data backfill complete\n");
+}
+
+void SnapshotMempoolBeforeBlock(int64_t blockTime,
+                                int64_t txCount, int64_t totalBytes) {
+    auto *btree = dynamic_cast<CBlockTreeSqlite *>(pblocktree.get());
+    if (!btree) return;
+    CSqliteWrapper &db = btree->GetDb();
+
+    sqlite3_stmt *ins = db.Prepare(
+        "INSERT OR IGNORE INTO mempool_snapshots "
+        "(snapshot_ts, tx_count, total_bytes) VALUES (?1, ?2, ?3)");
+    sqlite3_bind_int64(ins, 1, blockTime);
+    sqlite3_bind_int64(ins, 2, txCount);
+    sqlite3_bind_int64(ins, 3, totalBytes);
+    sqlite3_step(ins);
+    sqlite3_reset(ins);
+}
+
 static void CollectorLoop(const util::Ref &ctx) {
     // Wait until the chain tip is available and block index is loaded.
     // Poll every 2 seconds up to 5 minutes; this avoids competing with
@@ -527,6 +615,7 @@ static void CollectorLoop(const util::Ref &ctx) {
         CSqliteWrapper &db = btree->GetDb();
         BackfillBlockAnalytics(db);
         BackfillFromBlockIndex(db);
+        BackfillSupplyInSnapshots(db);
         BackfillMempoolSnapshots(db, ctx);
     }
 

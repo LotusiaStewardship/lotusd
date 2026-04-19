@@ -146,10 +146,12 @@ CREATE INDEX IF NOT EXISTS idx_block_time ON block_index(n_time);
 CREATE INDEX IF NOT EXISTS idx_block_prev ON block_index(prev_hash);
 CREATE INDEX IF NOT EXISTS idx_utxo_height ON utxos(height);
 CREATE INDEX IF NOT EXISTS idx_tx_block ON transactions(block_height, block_pos);
-CREATE INDEX IF NOT EXISTS idx_txout_addr_unspent ON tx_outputs(address)
+CREATE INDEX IF NOT EXISTS idx_txout_addr_unspent ON tx_outputs(address, value_sats DESC)
     WHERE spent = 0 AND address IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_txout_address ON tx_outputs(address, value_sats DESC)
     WHERE address IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_txout_burned ON tx_outputs(value_sats)
+    WHERE script_type IS NULL AND address IS NULL AND value_sats > 0;
 CREATE INDEX IF NOT EXISTS idx_txout_spent_txid ON tx_outputs(spent_txid)
     WHERE spent_txid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_txin_prevout ON tx_inputs(prev_txid, prev_vout)
@@ -157,6 +159,8 @@ CREATE INDEX IF NOT EXISTS idx_txin_prevout ON tx_inputs(prev_txid, prev_vout)
 CREATE INDEX IF NOT EXISTS idx_txin_address ON tx_inputs(address)
     WHERE address IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_addr_bal_rank ON address_balances(balance_sats DESC);
+CREATE INDEX IF NOT EXISTS idx_addr_received_rank ON address_balances(received_sats DESC)
+    WHERE balance_sats > 0;
 CREATE INDEX IF NOT EXISTS idx_addr_hist ON address_history(address, block_height DESC);
 CREATE INDEX IF NOT EXISTS idx_addr_hist_txid ON address_history(txid);
 )";
@@ -185,7 +189,14 @@ void CreateAllTables(sqlite3 *db) {
     ExecOrThrow(db, MEMPOOL_SNAPSHOTS_TABLE);
 }
 
+// Indexes whose column lists changed; IF NOT EXISTS won't replace an
+// existing index with a different shape, so drop the old version first.
+static const char *MIGRATED_INDEXES = R"(
+DROP INDEX IF EXISTS idx_txout_addr_unspent;
+)";
+
 void CreateAllIndexes(sqlite3 *db) {
+    ExecOrThrow(db, MIGRATED_INDEXES);
     ExecOrThrow(db, ALL_INDEXES);
 }
 

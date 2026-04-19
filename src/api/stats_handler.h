@@ -24,6 +24,11 @@ bool HandleGetStats(const util::Ref &ctx, HTTPRequest *req,
 void StartStatsCollector(const util::Ref &ctx);
 void StopStatsCollector();
 
+// Record a mempool snapshot right before a block is connected.
+// Call with cs_main and mempool.cs held.
+void SnapshotMempoolBeforeBlock(int64_t blockTime,
+                                int64_t txCount, int64_t totalBytes);
+
 } // namespace api
 
 #endif // BITCOIN_API_STATS_HANDLER_H

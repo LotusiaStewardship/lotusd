@@ -626,7 +626,7 @@ async function loadStats(){
   const chartDefs=[
     {id:'chart-difficulty',title:'Block Difficulty',periods:['week','month','quarter','year'],defaultP:'week',field:'difficulty',type:'line',color:'#42a5f5'},
     {id:'chart-hashrate',title:'Network Hashrate',periods:['week','month','quarter','year'],defaultP:'week',field:'hashrate',type:'line',color:'#66bb6a'},
-    {id:'chart-mempool',title:'Mempool Transactions',periods:['day','week','month'],defaultP:'day',field:'mempool_count',type:'bar',color:'#ef5350'},
+    {id:'chart-mempool',title:'Mempool Transactions',periods:['day','week','month'],defaultP:'day',field:'tx_count',type:'bar',color:'#ef5350',mempool:true},
     {id:'chart-supply',title:'Total Supply (XPI)',periods:['week','month','quarter','year'],defaultP:'month',field:'total_supply_sats',type:'line',color:'#ffa726',isSats:true},
     {id:'chart-burned',title:'Burned Supply (XPI)',periods:['week','month','quarter','year'],defaultP:'month',field:'burned_supply_sats',type:'line',color:'#ef5350',isSats:true}
   ];
@@ -641,7 +641,8 @@ async function loadStats(){
 window.loadChart=async function(chartId,period){
   const cd=window._chartDefs.find(c=>c.id===chartId);if(!cd)return;
   $$('[data-chart="'+chartId+'"]').forEach(b=>{b.classList.remove('active');if(b.dataset.period===period)b.classList.add('active')});
-  const d=await api('stats/charts?period='+period);if(!d||!d.series||!d.series.length)return;
+  const endpoint=cd.mempool?'mempool/history?period='+period:'stats/charts?period='+period;
+  const d=await api(endpoint);if(!d||!d.series||!d.series.length)return;
   const labels=d.series.map(p=>{const dt=new Date(p.ts*1000);return dt.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})});
   let values=d.series.map(p=>p[cd.field]||0);if(cd.isSats)values=values.map(v=>v/1e6);
   if(chartInstances[chartId]){chartInstances[chartId].destroy()}

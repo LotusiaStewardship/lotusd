@@ -323,9 +323,10 @@ void CRankModule::CreateSchema() {
         "ON rank_votes(platform, profile_id, post_id) "
         "WHERE post_id != '';"
     );
+    m_db->ExecSQL("DROP INDEX IF EXISTS idx_rv_time;");
     m_db->ExecSQL(
         "CREATE INDEX IF NOT EXISTS idx_rv_time "
-        "ON rank_votes(block_height DESC);"
+        "ON rank_votes(block_height DESC, vout ASC);"
     );
 
     m_db->ExecSQL(
@@ -358,6 +359,10 @@ void CRankModule::CreateSchema() {
     m_db->ExecSQL(
         "CREATE INDEX IF NOT EXISTS idx_rpost_ranking "
         "ON rank_posts(ranking DESC);"
+    );
+    m_db->ExecSQL(
+        "CREATE INDEX IF NOT EXISTS idx_rpost_profile_rank "
+        "ON rank_posts(platform, profile_id, ranking DESC);"
     );
 
     m_db->ExecSQL(

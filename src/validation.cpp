@@ -6,6 +6,7 @@
 
 #include <validation.h>
 
+#include <api/stats_handler.h>
 #include <arith_uint256.h>
 #include <modules/module_registry.h>
 #include <sqlite/block_analytics.h>
@@ -2594,6 +2595,15 @@ bool CChainState::ConnectTip(const Config &config, BlockValidationState &state,
     }
 
     const CBlock &blockConnecting = *pthisBlock;
+
+    // Snapshot mempool state just before the block removes its transactions.
+    // Skip during IBD — the mempool is empty and we'd write millions of rows.
+    if (!::ChainstateActive().IsInitialBlockDownload()) {
+        api::SnapshotMempoolBeforeBlock(
+            pindexNew->GetBlockTime(),
+            int64_t(m_mempool.size()),
+            int64_t(m_mempool.GetTotalTxSize()));
+    }
 
     // Apply the block atomically to the chain state.
     int64_t nTime2 = GetTimeMicros();
