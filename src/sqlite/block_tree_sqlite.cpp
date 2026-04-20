@@ -21,6 +21,22 @@
 
 #include <cassert>
 
+// On-disk schema version for the SQLite block index. Bump this ONLY when the
+// physical layout of `block_index` / `block_file_info` / `meta` actually
+// changes in a way that requires a full reindex. Do NOT tie this to
+// CLIENT_VERSION — otherwise every binary release forces users to reindex the
+// chain for no reason.
+//
+// History:
+//   1 — initial schema shipped in lotusd 10.4.x / 11.0.x
+static constexpr uint64_t BLOCK_TREE_SCHEMA_VERSION = 1;
+
+// Legacy db's stored the raw CLIENT_VERSION here (e.g. 10040500 for 10.4.5).
+// Anything at or above this threshold is assumed to be a legacy-encoded
+// value and accepted as schema 1 for forward compatibility. The next flush
+// will overwrite the field with BLOCK_TREE_SCHEMA_VERSION.
+static constexpr uint64_t LEGACY_CLIENT_VERSION_THRESHOLD = 1000000;
+
 static void BindHash(sqlite3_stmt *stmt, int idx, const uint256 &hash) {
     sqlite3_bind_blob(stmt, idx, hash.begin(), 32, SQLITE_STATIC);
 }
@@ -125,10 +141,11 @@ bool CBlockTreeSqlite::WriteBatchSync(
         sqlite3_reset(bi_stmt);
     }
 
-    // Write version
+    // Write schema version (NOT CLIENT_VERSION — see the constant's docstring
+    // at the top of this file).
     {
         CDataStream ss(SER_DISK, CLIENT_VERSION);
-        ss << static_cast<uint64_t>(CLIENT_VERSION);
+        ss << BLOCK_TREE_SCHEMA_VERSION;
         sqlite3_bind_text(meta_stmt, 1, "version", -1, SQLITE_STATIC);
         sqlite3_bind_blob(meta_stmt, 2, ss.data(), ss.size(), SQLITE_TRANSIENT);
         sqlite3_step(meta_stmt);
@@ -250,7 +267,13 @@ bool CBlockTreeSqlite::LoadBlockIndexGuts(
     const Consensus::Params &params,
     std::function<CBlockIndex *(const BlockHash &)> insertBlockIndex) {
 
-    // Check version
+    // Check schema version. We accept two on-disk encodings:
+    //   - BLOCK_TREE_SCHEMA_VERSION (written by 11.0.x+): must be <= current
+    //   - legacy CLIENT_VERSION-style integers (e.g. 10040500) written by
+    //     older builds that incorrectly pinned this field to the binary
+    //     version. The on-disk layout for those releases is identical to
+    //     schema v1, so we accept them silently; the next WriteBatchSync
+    //     will overwrite the field with the real schema version.
     sqlite3_stmt *ver_stmt =
         m_db->Prepare("SELECT value FROM meta WHERE key = 'version'");
     int rc = sqlite3_step(ver_stmt);
@@ -262,10 +285,21 @@ bool CBlockTreeSqlite::LoadBlockIndexGuts(
                        CLIENT_VERSION);
         uint64_t version = 0;
         ss >> version;
-        if (version != CLIENT_VERSION) {
+        const bool is_legacy_client_version =
+            version >= LEGACY_CLIENT_VERSION_THRESHOLD;
+        if (is_legacy_client_version) {
+            LogPrintf("%s: Accepting legacy CLIENT_VERSION-encoded block "
+                      "index version %llu as schema v%llu (will be "
+                      "rewritten on next flush)\n",
+                      __func__, (unsigned long long)version,
+                      (unsigned long long)BLOCK_TREE_SCHEMA_VERSION);
+        } else if (version > BLOCK_TREE_SCHEMA_VERSION) {
             sqlite3_reset(ver_stmt);
-            LogPrintf("%s: Invalid block index database version: %llu\n",
-                      __func__, version);
+            LogPrintf("%s: Block index schema is from a newer build "
+                      "(on-disk schema v%llu, this build supports up to "
+                      "v%llu). Please run a matching or newer lotusd.\n",
+                      __func__, (unsigned long long)version,
+                      (unsigned long long)BLOCK_TREE_SCHEMA_VERSION);
             return false;
         }
     }

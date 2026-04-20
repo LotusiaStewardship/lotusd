@@ -284,7 +284,13 @@ static void BackfillFromBlockIndex(CSqliteWrapper &db) {
         "ORDER BY n_height ASC");
     sqlite3_bind_int64(blks, 1, fillUpTo);
 
-    db.BeginTransaction();
+    // Begin must succeed before we can commit — otherwise we'd try to
+    // release a transaction lock we never acquired.
+    const bool have_txn = db.BeginTransaction();
+    if (!have_txn) {
+        LogPrintf("API: BackfillFromBlockIndex: failed to begin txn, "
+                  "writing snapshots one-by-one\n");
+    }
 
     int64_t lastSnapshotTs = 0;
     int count = 0;
@@ -308,7 +314,9 @@ static void BackfillFromBlockIndex(CSqliteWrapper &db) {
     }
     sqlite3_reset(blks);
 
-    db.CommitTransaction();
+    if (have_txn) {
+        db.CommitTransaction();
+    }
     if (count > 0) {
         LogPrintf("API: backfilled %d chain_stats_snapshots from "
                   "block_index\n", count);

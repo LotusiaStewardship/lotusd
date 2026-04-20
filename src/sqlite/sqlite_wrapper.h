@@ -68,6 +68,14 @@ private:
 
     mutable std::mutex m_stmt_mutex;
     std::unordered_map<std::string, sqlite3_stmt *> m_stmt_cache;
+
+    // Serializes BEGIN/COMMIT/ROLLBACK across threads. SQLite does not
+    // allow two BEGINs on the same connection — even with FULLMUTEX —
+    // so every caller that wants a transaction on this wrapper must queue
+    // up here. Locked in BeginTransaction() and unlocked in
+    // Commit/RollbackTransaction(). This is intentionally non-recursive:
+    // nested transactions on one connection are a bug, not a feature.
+    std::mutex m_txn_mutex;
 };
 
 /**

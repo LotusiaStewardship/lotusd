@@ -441,7 +441,14 @@ void CRankModule::InsertExtractedVotes(
         const std::vector<ExtractedVote> &votes) {
     if (votes.empty()) return;
 
-    m_db->BeginTransaction();
+    // CSqliteWrapper::BeginTransaction now holds a per-wrapper mutex that
+    // must be released by a matching Commit/Rollback on the same thread —
+    // so we can't blindly commit if Begin failed.
+    if (!m_db->BeginTransaction()) {
+        LogPrintf("ERROR: CRankModule::InsertExtractedVotes: failed to begin "
+                  "transaction, skipping %zu votes\n", votes.size());
+        return;
+    }
 
     sqlite3_stmt *ins = m_db->Prepare(
         "INSERT OR IGNORE INTO rank_votes"

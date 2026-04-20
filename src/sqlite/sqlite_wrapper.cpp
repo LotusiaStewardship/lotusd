@@ -108,15 +108,31 @@ sqlite3_stmt *CSqliteWrapper::Prepare(const std::string &sql) {
 }
 
 bool CSqliteWrapper::BeginTransaction() {
-    return ExecSQL("BEGIN IMMEDIATE");
+    // Serialize with any other writer on this wrapper. SQLite only allows
+    // one open transaction per connection, and we share this wrapper across
+    // block-index writes (CBlockTreeSqlite::WriteBatchSync), block
+    // analytics (CBlockAnalytics::ConnectBlock, both from the validation
+    // thread and the stats backfill thread), and the periodic collector's
+    // own batches — they would otherwise race and produce "cannot start a
+    // transaction within a transaction" failures.
+    m_txn_mutex.lock();
+    if (!ExecSQL("BEGIN IMMEDIATE")) {
+        m_txn_mutex.unlock();
+        return false;
+    }
+    return true;
 }
 
 bool CSqliteWrapper::CommitTransaction() {
-    return ExecSQL("COMMIT");
+    bool ok = ExecSQL("COMMIT");
+    m_txn_mutex.unlock();
+    return ok;
 }
 
 bool CSqliteWrapper::RollbackTransaction() {
-    return ExecSQL("ROLLBACK");
+    bool ok = ExecSQL("ROLLBACK");
+    m_txn_mutex.unlock();
+    return ok;
 }
 
 bool CSqliteWrapper::IsInTransaction() const {
