@@ -93,7 +93,7 @@ jobs:
             lotus-depends-windows:ci \
             bash -c "make -C depends -j$(nproc) build-${{ matrix.depends_target }} \
                        $([ '${{ matrix.component }}' = 'lotus-qt' ] || echo NO_QT=1) \
-                       NO_JEMALLOC=1"
+                       NO_JEMALLOC=1 NO_NNG=1"
 
       - name: Configure & build ${{ matrix.component }}
         run: |
@@ -109,6 +109,7 @@ jobs:
                        -DBUILD_BITCOIN_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo ON || echo OFF) \
                        -DBUILD_BITCOIN_WALLET=ON \
                        -DBUILD_BITCOIN_SEEDER=OFF \
+                       -DBUILD_BITCOIN_NNG=OFF \
                        -DBUILD_BITCOIN_ZMQ=ON \
                        -DENABLE_UPNP_DEFAULT=OFF \
                        -DUSE_JEMALLOC=OFF \
