@@ -21,6 +21,11 @@ bool HandleGetDashboard(const util::Ref &ctx, HTTPRequest *req,
                         const std::vector<std::string> &parts,
                         const QueryParams &qp);
 
+// Serves the embedded SVG lotus favicon used by the dashboard. Wired to
+// both /favicon.svg and /favicon.ico so legacy clients that hardcode the
+// .ico path still get a usable icon.
+bool HandleFavicon(HTTPRequest *req);
+
 } // namespace api
 
 #endif // BITCOIN_API_DASHBOARD_HANDLER_H

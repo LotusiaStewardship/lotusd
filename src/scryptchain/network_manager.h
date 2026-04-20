@@ -11,6 +11,15 @@
 // For evutil_socket_t (used in OnMaintenance, must match libevent's
 // event_callback_fn on every supported platform).
 #include <event2/util.h>
+// On Windows, <event2/util.h> transitively includes <winsock2.h> which
+// pulls in <windows.h>, which #define-s SendMessage to SendMessageA /
+// SendMessageW. That clobbers our SendMessage member function below
+// (and would silently rename it in every translation unit that includes
+// this header). We don't use the Win32 USER message API, so undefine
+// the macro right at the source.
+#ifdef SendMessage
+#undef SendMessage
+#endif
 
 #include <atomic>
 #include <deque>

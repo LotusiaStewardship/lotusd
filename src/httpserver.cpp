@@ -183,7 +183,31 @@ static void DispatchHTTPRequest(const httplib::Request &httplibReq,
     }
 
     if (matched) {
-        matched->handler(*g_config, hreq.get(), path);
+        // Any exception escaping a handler would otherwise destroy the
+        // HTTPRequest with replySent=false, producing a noisy
+        // "~HTTPRequest: Unhandled request" log line and a generic
+        // cpp-httplib 500 response. Catch here and reply cleanly.
+        try {
+            matched->handler(*g_config, hreq.get(), path);
+        } catch (const std::exception &e) {
+            LogPrintf("HTTP handler exception (%s): %s\n",
+                      SanitizeString(strURI, SAFE_CHARS_URI).substr(0, 100),
+                      e.what());
+            try {
+                hreq->WriteReply(HTTP_INTERNAL_SERVER_ERROR,
+                                 std::string("Internal server error: ") +
+                                     e.what());
+            } catch (...) {
+            }
+        } catch (...) {
+            LogPrintf("HTTP handler unknown exception (%s)\n",
+                      SanitizeString(strURI, SAFE_CHARS_URI).substr(0, 100));
+            try {
+                hreq->WriteReply(HTTP_INTERNAL_SERVER_ERROR,
+                                 "Internal server error");
+            } catch (...) {
+            }
+        }
     } else {
         hreq->WriteReply(HTTP_NOT_FOUND);
     }

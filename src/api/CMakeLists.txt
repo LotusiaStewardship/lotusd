@@ -12,6 +12,7 @@ add_library(api
     openapi_handler.cpp
     stats_handler.cpp
     overview_handler.cpp
+    sitemap_handler.cpp
 )
 
 target_link_libraries(api sqlite-chain SQLite::SQLite3)

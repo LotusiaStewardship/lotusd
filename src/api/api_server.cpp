@@ -13,6 +13,7 @@
 #include <api/openapi_handler.h>
 #include <api/network_handler.h>
 #include <api/overview_handler.h>
+#include <api/sitemap_handler.h>
 #include <api/stats_handler.h>
 #include <api/tx_handler.h>
 #include <api/wallet_handler.h>
@@ -274,6 +275,7 @@ void StartAPI(const util::Ref &context) {
 
     api::StartEvents();
     api::StartStatsCollector(context);
+    api::StartSitemapPreheater();
 
     auto handler = [&context](Config &config, HTTPRequest *req,
                               const std::string &prefix) {
@@ -288,6 +290,28 @@ void StartAPI(const util::Ref &context) {
         return api::HandleGetDashboard(context, req, empty, qp);
     };
     RegisterHTTPHandler("/dashboard", false, dashboardHandler);
+
+    // Sitemap & robots — root-level discovery endpoints for crawlers.
+    auto sitemapHandler = [](Config &, HTTPRequest *req,
+                             const std::string &suffix) {
+        // suffix is the substring after the registered prefix.
+        // For "/sitemap" prefix, suffix is e.g. ".xml" or "-blocks-3.xml".
+        return api::HandleSitemap(req, "/sitemap" + suffix);
+    };
+    RegisterHTTPHandler("/sitemap", false, sitemapHandler);
+
+    auto robotsHandler = [](Config &, HTTPRequest *req, const std::string &) {
+        return api::HandleSitemap(req, "/robots.txt");
+    };
+    RegisterHTTPHandler("/robots.txt", true, robotsHandler);
+
+    // Favicon — same SVG payload served for both modern (.svg) and legacy
+    // (.ico) URLs so browsers and crawlers always get an icon.
+    auto faviconHandler = [](Config &, HTTPRequest *req, const std::string &) {
+        return api::HandleFavicon(req);
+    };
+    RegisterHTTPHandler("/favicon.svg", true, faviconHandler);
+    RegisterHTTPHandler("/favicon.ico", true, faviconHandler);
 }
 
 void InterruptAPI() {}
@@ -296,7 +320,12 @@ void StopAPI() {
     LogPrintf("Stopping REST API v1\n");
     api::StopStatsCollector();
     api::StopEvents();
-    UnregisterHTTPHandler("/dashboard", true);
+    api::StopSitemapPreheater();
+    UnregisterHTTPHandler("/favicon.ico", true);
+    UnregisterHTTPHandler("/favicon.svg", true);
+    UnregisterHTTPHandler("/robots.txt", true);
+    UnregisterHTTPHandler("/sitemap", false);
+    UnregisterHTTPHandler("/dashboard", false);
     UnregisterHTTPHandler(API_PREFIX, false);
     g_routes.clear();
     {
