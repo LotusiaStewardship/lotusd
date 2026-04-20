@@ -55,9 +55,7 @@ jobs:
           - image: lotus-wallet
             dockerfile: dockerfiles/Dockerfile.lotus-wallet
             platforms: linux/amd64
-          - image: lotus-qt
-            dockerfile: dockerfiles/Dockerfile.lotus-qt
-            platforms: linux/amd64
+          # lotus-qt image deferred — depends/ Qt 5.9.8 incompatible with GCC 11+
 
     steps:
       - name: Checkout code

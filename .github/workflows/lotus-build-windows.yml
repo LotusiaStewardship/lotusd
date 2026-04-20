@@ -27,7 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet, lotus-qt ]
+        # lotus-qt deferred — depends/ Qt 5.9.8 incompatible with GCC 11+
+        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet ]
         arch: [ amd64 ]
         include:
           - arch: amd64

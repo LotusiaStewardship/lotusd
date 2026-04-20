@@ -160,7 +160,6 @@ jobs:
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-seeder) — Network seeder
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-tx:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-tx) — Transaction utility
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-wallet:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-wallet) — Wallet utility
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-qt:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-qt) — Desktop GUI wallet
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-gpu-miner) — GPU Miner (NVIDIA, amd64)
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner-amd:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-gpu-miner-amd) — GPU Miner (AMD ROCm, amd64)
 
@@ -263,8 +262,6 @@ jobs:
             ./release-packages/lotus-seeder-${{ inputs.version }}-*.zip
             ./release-packages/lotus-wallet-${{ inputs.version }}-*.tar.gz
             ./release-packages/lotus-wallet-${{ inputs.version }}-*.zip
-            ./release-packages/lotus-qt-${{ inputs.version }}-*.tar.gz
-            ./release-packages/lotus-qt-${{ inputs.version }}-*.zip
             ./release-packages/lotus-gpu-miner-nvidia-${{ inputs.version }}-*.tar.gz
             ./release-packages/lotus-gpu-miner-nvidia-${{ inputs.version }}-*.zip
             ./release-packages/lotus-gpu-miner-amd-${{ inputs.version }}-*.tar.gz

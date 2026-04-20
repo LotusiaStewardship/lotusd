@@ -25,9 +25,11 @@ jobs:
         # Only amd64 for the initial 11.x release.
         # arm64 / armv7 are blocked by a Boost 1.70 cross-compile bug
         # (boost/thread/pthread/thread_data.hpp PAGE_SIZE preprocessor
-        # error) that needs an upstream depends/ patch. Tracked for a
-        # follow-up release.
-        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet, lotus-qt ]
+        # error) that needs an upstream depends/ patch.
+        # lotus-qt is deferred: depends/'s pinned Qt 5.9.8 doesn't compile
+        # with GCC 11+ (qbytearraymatcher.h missing #include <limits>).
+        # Both tracked for a follow-up release.
+        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet ]
         arch: [ amd64 ]
         include:
           - arch: amd64
