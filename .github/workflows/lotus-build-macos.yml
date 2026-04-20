@@ -137,6 +137,7 @@ jobs:
                        -DBUILD_BITCOIN_ZMQ=ON \
                        -DENABLE_UPNP_DEFAULT=OFF \
                        -DUSE_JEMALLOC=OFF \
+                       -DSECP256K1_BUILD_OPENSSL_TESTS=OFF \
                      && ninja -C build_macos_${{ matrix.arch }} ${{ matrix.component }}"
 
       - name: Locate produced binary

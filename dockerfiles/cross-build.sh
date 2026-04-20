@@ -73,7 +73,8 @@ cmake -GNinja -B "$BUILD_DIR" \
     -DBUILD_BITCOIN_SEEDER=ON \
     -DBUILD_BITCOIN_ZMQ=ON \
     -DENABLE_UPNP_DEFAULT=OFF \
-    -DUSE_JEMALLOC=OFF
+    -DUSE_JEMALLOC=OFF \
+    -DSECP256K1_BUILD_OPENSSL_TESTS=OFF
 ninja -C "$BUILD_DIR" -j"$JOBS" "$TARGET"
 
 # 3. Place the binary at a stable, runtime-stage friendly location.
