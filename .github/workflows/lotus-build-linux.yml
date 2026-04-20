@@ -108,6 +108,8 @@ jobs:
         run: |
           set -e
           DIR="${{ steps.pkg.outputs.dir }}"
+          # docker wrote the binary as root; reclaim ownership before packaging
+          sudo chown -R "$(id -u):$(id -g)" artifacts
           chmod +x "artifacts/${DIR}"/*
           (cd artifacts && tar -czf "${DIR}.tar.gz" "${DIR}" && zip -r "${DIR}.zip" "${DIR}")
           ls -la artifacts/

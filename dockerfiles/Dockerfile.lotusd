@@ -51,6 +51,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
         xz-utils \
         zip \
+        # Host-side dev libraries needed by the cmake "native" sub-build
+        # (NativeExecutable runs find_package(SQLite3 REQUIRED) etc on the
+        #  build host; these come from the host distro, not depends/).
+        libboost-all-dev \
+        libdb++-dev \
+        libevent-dev \
+        libsqlite3-dev \
+        libssl-dev \
+        libzmq3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/usr/lib/ccache:${PATH}" \

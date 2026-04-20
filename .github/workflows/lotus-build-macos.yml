@@ -172,6 +172,8 @@ jobs:
             lotus-qt) PKG_NAME=qt ;;
           esac
           DIR="lotus-${PKG_NAME}-${{ inputs.version }}-macos-${{ matrix.arch }}"
+          # docker wrote BIN_PATH as root; reclaim ownership before copying
+          sudo chown -R "$(id -u):$(id -g)" build_macos_${{ matrix.arch }} || true
           mkdir -p "artifacts/${DIR}"
           cp "$BIN_PATH" "artifacts/${DIR}/"
           chmod +x "artifacts/${DIR}/${BIN_NAME}"

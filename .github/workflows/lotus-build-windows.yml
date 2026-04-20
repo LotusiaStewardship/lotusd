@@ -136,6 +136,8 @@ jobs:
             lotus-qt) PKG_NAME=qt ;;
           esac
           DIR="lotus-${PKG_NAME}-${{ inputs.version }}-windows-${{ matrix.arch }}"
+          # docker wrote BIN_PATH as root; reclaim ownership before copying
+          sudo chown -R "$(id -u):$(id -g)" build_windows_${{ matrix.arch }} || true
           mkdir -p "artifacts/${DIR}"
           cp "$BIN_PATH" "artifacts/${DIR}/"
           docker run --rm -v "$PWD":/src -w /src lotus-depends-windows:ci \
