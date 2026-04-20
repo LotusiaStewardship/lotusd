@@ -710,16 +710,27 @@ add_subdirectory(sqlite)
 target_link_libraries(server sqlite-chain)
 
 # REST API v1.
-# PRIVATE so the api library is not transitively pulled into thin
-# downstream consumers of `server` (notably lotus-seeder, which only
-# uses bitcoin/db/dns/options.cpp from server and never references
-# StartAPI/StopAPI). The full `lotusd` binary still pulls api in
-# through init.cpp -> StartAPI(), and the api lib's reverse symbol
-# needs (GetDifficulty, HTTPRequest::WriteHeader, ...) are then
-# resolved against the rest of `server` via CMake's circular static
-# library handling (--start-group/--end-group on GNU ld).
+#
+# The api library is linked into 'server' but it also reverse-references
+# 'server' symbols (GetDifficulty in rpc/blockchain.cpp,
+# HTTPRequest::WriteHeader/WriteReply in httpserver.cpp). For the full
+# lotusd binary CMake handles this cycle automatically via
+# --start-group/--end-group, but the lotus-seeder binary only pulls a
+# narrow subset of server's translation units (bitcoin/db/dns/options.o)
+# and never references StartAPI/StopAPI, so api ends up on the link
+# line without any chance of resolving its reverse symbols against
+# server.
+#
+# We could mark api PRIVATE here, but the rest of this file uses the
+# plain (no-keyword) form of target_link_libraries on 'server' and
+# CMake forbids mixing the two signatures. Instead, we close the cycle
+# explicitly: tell CMake that 'api' depends on 'server', so any
+# consumer that drags in 'api' also drags in 'server' (and the linker
+# wraps both in a --start-group). For consumers that don't need 'api'
+# at all (seeder), this changes nothing.
 add_subdirectory(api)
-target_link_libraries(server PRIVATE api)
+target_link_libraries(server api)
+target_link_libraries(api server)
 
 # Pluggable chain modules
 add_subdirectory(modules)
