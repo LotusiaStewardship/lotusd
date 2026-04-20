@@ -3,6 +3,7 @@ add_library(api
     api_util.cpp
     chain_handler.cpp
     dashboard_handler.cpp
+    legacy_rpc_handler.cpp
     tx_handler.cpp
     address_handler.cpp
     network_handler.cpp
@@ -15,4 +16,4 @@ add_library(api
     sitemap_handler.cpp
 )
 
-target_link_libraries(api sqlite-chain SQLite::SQLite3)
+target_link_libraries(api sqlite-chain SQLite::SQLite3 rpcclient)

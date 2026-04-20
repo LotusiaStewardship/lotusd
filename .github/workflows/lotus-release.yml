@@ -92,14 +92,25 @@ jobs:
           # The release pipeline only runs on version tags, so the tag
           # already exists. Prefer the bare "X.Y.Z" tag if present, else
           # fall back to the "vX.Y.Z" form.
-          if git ls-remote --tags origin | grep -q "refs/tags/${VERSION}$"; then
+          #
+          # Important: Actions runs the script under `bash -e -o pipefail`,
+          # so a `git ls-remote ... | grep -q ...` pipeline returns a SIGPIPE
+          # (141) from git as soon as grep matches and closes stdin, which
+          # pipefail then surfaces as the pipeline's exit code. That made the
+          # `if`-branch falsely look like "no match" for every tag. Capture
+          # the listing into a file first and grep that file instead.
+          REMOTE_TAGS="$(mktemp)"
+          git ls-remote --tags origin > "${REMOTE_TAGS}"
+          if grep -q "refs/tags/${VERSION}$" "${REMOTE_TAGS}"; then
             TAG="${VERSION}"
-          elif git ls-remote --tags origin | grep -q "refs/tags/v${VERSION}$"; then
+          elif grep -q "refs/tags/v${VERSION}$" "${REMOTE_TAGS}"; then
             TAG="v${VERSION}"
           else
             echo "::error::No tag matching ${VERSION} or v${VERSION} on origin"
+            cat "${REMOTE_TAGS}"
             exit 1
           fi
+          rm -f "${REMOTE_TAGS}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Resolved release tag: ${TAG}"
 

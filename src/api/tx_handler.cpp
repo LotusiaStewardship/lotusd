@@ -4,13 +4,17 @@
 
 #include <api/tx_handler.h>
 
+#include <api/legacy_rpc_handler.h>
+#include <chain.h>
 #include <chainparams.h>
 #include <config.h>
 #include <core_io.h>
+#include <index/txindex.h>
 #include <node/context.h>
 #include <primitives/transaction.h>
 #include <rpc/blockchain.h>
 #include <rpc/protocol.h>
+#include <rpc/server.h>
 #include <sqlite/block_tree_sqlite.h>
 #include <sqlite3.h>
 #include <streams.h>
@@ -94,6 +98,63 @@ bool HandleGetTx(const util::Ref &ctx, HTTPRequest *req,
     if (!ParseHashFromHex(parts[1], txid)) {
         WriteError(req, HTTP_BAD_REQUEST, "invalid_txid",
                    "Invalid transaction ID");
+        return true;
+    }
+
+    const std::string subResourceEarly =
+        (parts.size() >= 3) ? parts[2] : std::string();
+    if (subResourceEarly == "raw" || subResourceEarly == "verbose") {
+        // Equivalent to the JSON-RPC `getrawtransaction <txid> [verbose]`
+        // call but unauthenticated. Falls back to mempool / -txindex just
+        // like the RPC version.
+        NodeContext *node =
+            ctx.Has<NodeContext>() ? &ctx.Get<NodeContext>() : nullptr;
+
+        if (g_txindex) {
+            g_txindex->BlockUntilSyncedToCurrentChain();
+        }
+
+        BlockHash hashBlock;
+        const TxId asTxId(txid);
+        const CTransactionRef tx = GetTransaction(
+            /* block_index */ nullptr,
+            node ? node->mempool.get() : nullptr, asTxId,
+            Params().GetConsensus(), hashBlock);
+        if (!tx) {
+            WriteError(req, HTTP_NOT_FOUND, "tx_not_found",
+                       "Transaction not in mempool and not in any block; "
+                       "either it does not exist, or -txindex is disabled.");
+            return true;
+        }
+
+        if (subResourceEarly == "raw") {
+            UniValue out(UniValue::VOBJ);
+            out.pushKV("txid", asTxId.GetHex());
+            out.pushKV("hex", EncodeHexTx(*tx, RPCSerializationFlags()));
+            if (!hashBlock.IsNull()) {
+                out.pushKV("blockhash", hashBlock.GetHex());
+            }
+            WriteSuccess(req, out);
+            return true;
+        }
+
+        // verbose
+        UniValue entry(UniValue::VOBJ);
+        TxToUniv(*tx, uint256(), entry, true, RPCSerializationFlags());
+        if (!hashBlock.IsNull()) {
+            LOCK(cs_main);
+            entry.pushKV("blockhash", hashBlock.GetHex());
+            const CBlockIndex *pindex = LookupBlockIndex(hashBlock);
+            if (pindex && ::ChainActive().Contains(pindex)) {
+                entry.pushKV("confirmations",
+                             1 + ::ChainActive().Height() - pindex->nHeight);
+                entry.pushKV("time", int64_t(pindex->GetBlockTime()));
+                entry.pushKV("blocktime", int64_t(pindex->GetBlockTime()));
+            } else {
+                entry.pushKV("confirmations", 0);
+            }
+        }
+        WriteSuccess(req, entry);
         return true;
     }
 
@@ -399,6 +460,81 @@ bool HandleGetMempoolHistory(const util::Ref &, HTTPRequest *req,
     result.pushKV("series", series);
     WriteSuccess(req, result);
     return true;
+}
+
+bool HandleGetTxOut(const util::Ref &ctx, HTTPRequest *req,
+                   const std::vector<std::string> &parts,
+                   const QueryParams &qp) {
+    // Path layout: ["chain", "txout", "<txid>", "<vout>"] (4 parts).
+    if (parts.size() < 4) {
+        WriteError(req, HTTP_BAD_REQUEST, "missing_outpoint",
+                   "Usage: /api/v1/chain/txout/<txid>/<vout>");
+        return true;
+    }
+    UniValue params(UniValue::VARR);
+    params.push_back(parts[2]);
+    int vout = 0;
+    try {
+        vout = std::stoi(parts[3]);
+    } catch (...) {
+        WriteError(req, HTTP_BAD_REQUEST, "invalid_vout",
+                   "vout must be a non-negative integer");
+        return true;
+    }
+    params.push_back(vout);
+    auto memOpt = qp.Get("include_mempool");
+    bool includeMempool = !memOpt.has_value() || (*memOpt != "false" &&
+                                                   *memOpt != "0");
+    params.push_back(includeMempool);
+    return ProxyReadOnlyRpc(ctx, req, "gettxout", params);
+}
+
+bool HandleGetRawMempool(const util::Ref &ctx, HTTPRequest *req,
+                        const std::vector<std::string> &,
+                        const QueryParams &qp) {
+    UniValue params(UniValue::VARR);
+    auto v = qp.Get("verbose");
+    bool verbose = v.has_value() && (*v == "true" || *v == "1");
+    params.push_back(verbose);
+    return ProxyReadOnlyRpc(ctx, req, "getrawmempool", params);
+}
+
+bool HandleGetMempoolInfo(const util::Ref &ctx, HTTPRequest *req,
+                         const std::vector<std::string> &,
+                         const QueryParams &) {
+    return ProxyReadOnlyRpc(ctx, req, "getmempoolinfo",
+                             UniValue(UniValue::VARR));
+}
+
+bool HandleDecodeScript(const util::Ref &ctx, HTTPRequest *req,
+                       const std::vector<std::string> &,
+                       const QueryParams &qp) {
+    // Accept hex either as raw body, JSON {"hex":"..."} body, or ?hex= query.
+    std::string hex;
+    if (req->GetRequestMethod() == HTTPRequest::POST) {
+        std::string body = req->ReadBody();
+        UniValue parsed;
+        if (parsed.read(body) && parsed.isObject()) {
+            const UniValue &h = find_value(parsed, "hex");
+            if (h.isStr()) {
+                hex = h.get_str();
+            }
+        }
+        if (hex.empty()) {
+            hex = body;
+        }
+    } else {
+        auto qhex = qp.Get("hex");
+        if (qhex) hex = *qhex;
+    }
+    if (hex.empty()) {
+        WriteError(req, HTTP_BAD_REQUEST, "missing_hex",
+                   "Provide hex-encoded script in body or ?hex= query");
+        return true;
+    }
+    UniValue params(UniValue::VARR);
+    params.push_back(hex);
+    return ProxyReadOnlyRpc(ctx, req, "decodescript", params);
 }
 
 } // namespace api

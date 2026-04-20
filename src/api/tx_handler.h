@@ -37,6 +37,36 @@ bool HandleGetMempoolHistory(const util::Ref &ctx, HTTPRequest *req,
                               const std::vector<std::string> &parts,
                               const QueryParams &qp);
 
+// ---------------------------------------------------------------------------
+// Thin REST aliases for read-only legacy RPCs.
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/v1/chain/txout/<txid>/<vout>[?include_mempool=true] → `gettxout`
+ *
+ * Distinct from `/api/v1/utxos/...` which is a SQLite-index lookup; this one
+ * hits the live coin set, so it sees mempool spends and is authoritative for
+ * "is this output currently unspent".
+ */
+bool HandleGetTxOut(const util::Ref &ctx, HTTPRequest *req,
+                   const std::vector<std::string> &parts,
+                   const QueryParams &qp);
+
+/** GET /api/v1/mempool/raw[?verbose=true|false] → `getrawmempool` */
+bool HandleGetRawMempool(const util::Ref &ctx, HTTPRequest *req,
+                        const std::vector<std::string> &parts,
+                        const QueryParams &qp);
+
+/** GET /api/v1/mempool/info → `getmempoolinfo` */
+bool HandleGetMempoolInfo(const util::Ref &ctx, HTTPRequest *req,
+                         const std::vector<std::string> &parts,
+                         const QueryParams &qp);
+
+/** POST /api/v1/scripts/decode { "hex": "..." } → `decodescript` */
+bool HandleDecodeScript(const util::Ref &ctx, HTTPRequest *req,
+                       const std::vector<std::string> &parts,
+                       const QueryParams &qp);
+
 } // namespace api
 
 #endif // BITCOIN_API_TX_HANDLER_H

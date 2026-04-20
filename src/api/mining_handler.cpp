@@ -4,6 +4,7 @@
 
 #include <api/mining_handler.h>
 
+#include <api/legacy_rpc_handler.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <node/context.h>
@@ -51,6 +52,29 @@ bool HandleGetMiningInfo(const util::Ref &ctx, HTTPRequest *req,
 
     WriteSuccess(req, result);
     return true;
+}
+
+bool HandleEstimateFee(const util::Ref &ctx, HTTPRequest *req,
+                       const std::vector<std::string> &,
+                       const QueryParams &) {
+    return ProxyReadOnlyRpc(ctx, req, "estimatefee",
+                             UniValue(UniValue::VARR), "feerate");
+}
+
+bool HandleGetNetworkHashPS(const util::Ref &ctx, HTTPRequest *req,
+                            const std::vector<std::string> &,
+                            const QueryParams &qp) {
+    UniValue params(UniValue::VARR);
+    params.push_back(qp.GetInt("nblocks", 120));
+    params.push_back(qp.GetInt("height", -1));
+    return ProxyReadOnlyRpc(ctx, req, "getnetworkhashps", params, "hashps");
+}
+
+bool HandleGetDifficultyRpc(const util::Ref &ctx, HTTPRequest *req,
+                            const std::vector<std::string> &,
+                            const QueryParams &) {
+    return ProxyReadOnlyRpc(ctx, req, "getdifficulty",
+                             UniValue(UniValue::VARR), "difficulty");
 }
 
 } // namespace api

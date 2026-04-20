@@ -9,6 +9,7 @@
 #include <api/chain_handler.h>
 #include <api/dashboard_handler.h>
 #include <api/events_handler.h>
+#include <api/legacy_rpc_handler.h>
 #include <api/mining_handler.h>
 #include <api/openapi_handler.h>
 #include <api/network_handler.h>
@@ -272,6 +273,31 @@ void StartAPI(const util::Ref &context) {
     AddRoute(HTTPRequest::GET, "wallet",    api::HandleGetWalletInfo,  15);
     AddRoute(HTTPRequest::GET, "events",    api::HandleGetEvents);
     AddRoute(HTTPRequest::GET, "openapi.json", api::HandleGetOpenAPISchema, 3600);
+
+    // ── Unauthenticated read-only legacy RPC surface ───────────────────
+    //
+    // Generic dispatcher: GET/POST /api/v1/rpc/<method>
+    // Dedicated REST aliases for the methods most often needed by light
+    // wallets so callers don't have to remember the JSON-RPC param order.
+    AddRoute(HTTPRequest::GET,  "rpc",  api::HandleLegacyRpc);
+    AddRoute(HTTPRequest::POST, "rpc",  api::HandleLegacyRpc);
+
+    AddRoute(HTTPRequest::GET, "mining/estimatefee",   api::HandleEstimateFee, 5);
+    AddRoute(HTTPRequest::GET, "mining/networkhashps", api::HandleGetNetworkHashPS, 30);
+    AddRoute(HTTPRequest::GET, "mining/difficulty",    api::HandleGetDifficultyRpc, 30);
+
+    AddRoute(HTTPRequest::GET, "chain/best-block-hash", api::HandleGetBestBlockHash, 5);
+    AddRoute(HTTPRequest::GET, "chain/block-count",     api::HandleGetBlockCount,     5);
+    AddRoute(HTTPRequest::GET, "chain/block-hash",      api::HandleGetBlockHash,     30);
+    AddRoute(HTTPRequest::GET, "chain/block-header",    api::HandleGetBlockHeader,   30);
+    AddRoute(HTTPRequest::GET, "chain/tips",            api::HandleGetChainTips,     30);
+    AddRoute(HTTPRequest::GET, "chain/txout",           api::HandleGetTxOut,          5);
+
+    AddRoute(HTTPRequest::GET, "mempool/raw",  api::HandleGetRawMempool,  5);
+    AddRoute(HTTPRequest::GET, "mempool/info", api::HandleGetMempoolInfo, 5);
+
+    AddRoute(HTTPRequest::POST, "scripts/decode",       api::HandleDecodeScript);
+    AddRoute(HTTPRequest::POST, "txs/decoderawtransaction", api::HandleDecodeTx);
 
     api::StartEvents();
     api::StartStatsCollector(context);

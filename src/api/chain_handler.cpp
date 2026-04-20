@@ -4,6 +4,7 @@
 
 #include <api/chain_handler.h>
 
+#include <api/legacy_rpc_handler.h>
 #include <blockindex.h>
 #include <chain.h>
 #include <chainparams.h>
@@ -222,6 +223,65 @@ bool HandleGetBlocks(const util::Ref &ctx, HTTPRequest *req,
 
     WriteSuccess(req, PaginatedResponse(blocks, total, limit, offset));
     return true;
+}
+
+bool HandleGetBestBlockHash(const util::Ref &ctx, HTTPRequest *req,
+                            const std::vector<std::string> &,
+                            const QueryParams &) {
+    return ProxyReadOnlyRpc(ctx, req, "getbestblockhash",
+                             UniValue(UniValue::VARR), "blockhash");
+}
+
+bool HandleGetBlockCount(const util::Ref &ctx, HTTPRequest *req,
+                        const std::vector<std::string> &,
+                        const QueryParams &) {
+    return ProxyReadOnlyRpc(ctx, req, "getblockcount",
+                             UniValue(UniValue::VARR), "count");
+}
+
+bool HandleGetBlockHash(const util::Ref &ctx, HTTPRequest *req,
+                       const std::vector<std::string> &parts,
+                       const QueryParams &) {
+    if (parts.size() < 3) {
+        WriteError(req, HTTP_BAD_REQUEST, "missing_height",
+                   "Usage: /api/v1/chain/block-hash/<height>");
+        return true;
+    }
+    int height = 0;
+    try {
+        height = std::stoi(parts[2]);
+    } catch (...) {
+        WriteError(req, HTTP_BAD_REQUEST, "invalid_height",
+                   "Block height must be a non-negative integer");
+        return true;
+    }
+    UniValue params(UniValue::VARR);
+    params.push_back(height);
+    return ProxyReadOnlyRpc(ctx, req, "getblockhash", params, "blockhash");
+}
+
+bool HandleGetBlockHeader(const util::Ref &ctx, HTTPRequest *req,
+                          const std::vector<std::string> &parts,
+                          const QueryParams &qp) {
+    if (parts.size() < 3) {
+        WriteError(req, HTTP_BAD_REQUEST, "missing_hash",
+                   "Usage: /api/v1/chain/block-header/<hash>");
+        return true;
+    }
+    UniValue params(UniValue::VARR);
+    params.push_back(parts[2]);
+    auto verboseOpt = qp.Get("verbose");
+    bool verbose = !verboseOpt.has_value() || (*verboseOpt != "false" &&
+                                                *verboseOpt != "0");
+    params.push_back(verbose);
+    return ProxyReadOnlyRpc(ctx, req, "getblockheader", params);
+}
+
+bool HandleGetChainTips(const util::Ref &ctx, HTTPRequest *req,
+                       const std::vector<std::string> &,
+                       const QueryParams &) {
+    return ProxyReadOnlyRpc(ctx, req, "getchaintips",
+                             UniValue(UniValue::VARR));
 }
 
 } // namespace api
