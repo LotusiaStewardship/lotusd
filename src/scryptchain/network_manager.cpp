@@ -10,9 +10,14 @@
 
 #include <event2/event.h>
 
+#ifdef WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#endif
 
 #include <algorithm>
 #include <random>

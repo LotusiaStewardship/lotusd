@@ -13,9 +13,14 @@
 #include <event2/event.h>
 #include <event2/util.h>
 
+#ifdef WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#endif
 
 #include <algorithm>
 #include <cassert>

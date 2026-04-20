@@ -29,9 +29,16 @@
 #include <event2/listener.h>
 #include <event2/thread.h>
 
+#ifdef WIN32
+// Winsock provides equivalents of the BSD socket APIs used below
+// (sockaddr_in, AF_INET, htons, inet_pton, inet_ntop, ...).
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#endif
 
 namespace stratum {
 

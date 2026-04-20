@@ -8,6 +8,71 @@
 #include <tinyformat.h>
 #include <util/time.h>
 
+#ifdef WIN32
+// The stratum upstream-pool proxy uses POSIX socket / poll / fcntl APIs
+// that don't have a 1:1 mapping on Winsock (closesocket vs close,
+// ioctlsocket(FIONBIO) vs fcntl(F_SETFL,O_NONBLOCK), WSAPoll vs poll,
+// WSAGetLastError vs errno, ...). The proxy is a server-side mining
+// feature that is not a realistic deployment target on Windows, so we
+// provide trivial stubs here that keep the linker happy while making
+// every operation return "unsupported" at runtime. The full POSIX
+// implementation follows in the #else branch below.
+#include <compat.h>
+
+#include <cerrno>
+#include <cstring>
+
+namespace stratum {
+
+StratumProxyConn::StratumProxyConn(const UpstreamPool &pool,
+                                   const ProxyCallbacks &callbacks)
+    : m_pool(pool), m_callbacks(callbacks) {}
+
+StratumProxyConn::~StratumProxyConn() {}
+
+std::string StratumProxyConn::GetLabel() const {
+    return strprintf("%s:%d", m_pool.host, m_pool.port);
+}
+
+bool StratumProxyConn::Connect() {
+    LogPrintf("Stratum proxy: not supported on Windows builds (pool=%s)\n",
+              GetLabel());
+    {
+        std::lock_guard<std::mutex> lock(m_healthMutex);
+        m_health.connected = false;
+        m_health.authorized = false;
+        m_health.lastError = "stratum proxy is unsupported on Windows";
+        m_health.lastErrorTime = GetTime();
+    }
+    if (m_callbacks.onStateChange) {
+        m_callbacks.onStateChange(false, "unsupported on windows");
+    }
+    return false;
+}
+
+void StratumProxyConn::Disconnect() {}
+
+bool StratumProxyConn::IsHealthy() const { return false; }
+
+ProxyHealth StratumProxyConn::GetHealth() const {
+    std::lock_guard<std::mutex> lock(m_healthMutex);
+    return m_health;
+}
+
+std::string StratumProxyConn::GetUpstreamExtranonce1() const { return {}; }
+int StratumProxyConn::GetUpstreamExtranonce2Size() const { return 4; }
+
+void StratumProxyConn::ForwardSubmit(int64_t minerId, const UniValue & /*params*/) {
+    if (m_callbacks.onSubmitResult) {
+        m_callbacks.onSubmitResult(minerId, false,
+                                   "stratum proxy unsupported on windows");
+    }
+}
+
+} // namespace stratum
+
+#else // WIN32
+
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -444,3 +509,5 @@ void StratumProxyConn::RecordError(const std::string &err) {
 }
 
 } // namespace stratum
+
+#endif // WIN32
