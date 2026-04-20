@@ -49,6 +49,13 @@ static int PlatformId(const std::string &name) {
     return -1;
 }
 
+// Safely read a TEXT column that may be NULL. Constructing std::string from
+// a nullptr char* throws "basic_string: construction from null is not valid".
+static std::string SafeText(sqlite3_stmt *stmt, int col) {
+    const unsigned char *t = sqlite3_column_text(stmt, col);
+    return t ? std::string(reinterpret_cast<const char *>(t)) : std::string();
+}
+
 struct RankVote {
     uint8_t version;
     uint8_t platform;
@@ -989,19 +996,23 @@ void CRankModule::Shutdown() {
 // ─── API Handlers ──────────────────────────────────────────────────────────────
 
 void CRankModule::RegisterRoutes(RouteAdder addRoute) {
-    using namespace std::placeholders;
+    // Boost 1.70 injects _1.._9 into the global namespace via boost/bind
+    // (transitively included from boost/filesystem). Combined with
+    // `using namespace std::placeholders;` this gives ambiguous-overload
+    // errors under GCC 11+. Qualify each std placeholder explicitly.
+    namespace P = std::placeholders;
     addRoute(HTTPRequest::GET, "social/activity",
-             std::bind(&CRankModule::HandleActivity, this, _1, _2, _3, _4));
+             std::bind(&CRankModule::HandleActivity, this, P::_1, P::_2, P::_3, P::_4));
     addRoute(HTTPRequest::GET, "social/profiles",
-             std::bind(&CRankModule::HandleProfiles, this, _1, _2, _3, _4));
+             std::bind(&CRankModule::HandleProfiles, this, P::_1, P::_2, P::_3, P::_4));
     addRoute(HTTPRequest::GET, "social/stats",
-             std::bind(&CRankModule::HandleStats, this, _1, _2, _3, _4));
+             std::bind(&CRankModule::HandleStats, this, P::_1, P::_2, P::_3, P::_4));
     addRoute(HTTPRequest::GET, "social/rescan",
-             std::bind(&CRankModule::HandleRescan, this, _1, _2, _3, _4));
+             std::bind(&CRankModule::HandleRescan, this, P::_1, P::_2, P::_3, P::_4));
     addRoute(HTTPRequest::POST, "social/rescan",
-             std::bind(&CRankModule::HandleRescan, this, _1, _2, _3, _4));
+             std::bind(&CRankModule::HandleRescan, this, P::_1, P::_2, P::_3, P::_4));
     addRoute(HTTPRequest::GET, "social",
-             std::bind(&CRankModule::HandleProfileDetail, this, _1, _2, _3, _4));
+             std::bind(&CRankModule::HandleProfileDetail, this, P::_1, P::_2, P::_3, P::_4));
 }
 
 bool CRankModule::HandleActivity(const util::Ref &, HTTPRequest *req,
@@ -1036,19 +1047,15 @@ bool CRankModule::HandleActivity(const util::Ref &, HTTPRequest *req,
     UniValue votes(UniValue::VARR);
     while (sqlite3_step(q) == SQLITE_ROW) {
         UniValue v(UniValue::VOBJ);
-        v.pushKV("txid", std::string(reinterpret_cast<const char *>(
-                     sqlite3_column_text(q, 0))));
+        v.pushKV("txid", SafeText(q, 0));
         v.pushKV("firstSeen", (int64_t)sqlite3_column_int64(q, 1));
         int plat = sqlite3_column_int(q, 2);
         v.pushKV("platform", PlatformName(plat));
-        v.pushKV("profileId", std::string(reinterpret_cast<const char *>(
-                     sqlite3_column_text(q, 3))));
+        v.pushKV("profileId", SafeText(q, 3));
         v.pushKV("sentiment",
                  sqlite3_column_int(q, 4) == 1 ? "positive" : "negative");
         v.pushKV("sats", (int64_t)sqlite3_column_int64(q, 5));
-        const char *postId = reinterpret_cast<const char *>(
-            sqlite3_column_text(q, 6));
-        v.pushKV("postId", std::string(postId ? postId : ""));
+        v.pushKV("postId", SafeText(q, 6));
         votes.push_back(std::move(v));
     }
     sqlite3_reset(q);
@@ -1093,8 +1100,7 @@ bool CRankModule::HandleProfiles(const util::Ref &, HTTPRequest *req,
         UniValue p(UniValue::VOBJ);
         int plat = sqlite3_column_int(q, 0);
         p.pushKV("platform", PlatformName(plat));
-        p.pushKV("id", std::string(reinterpret_cast<const char *>(
-                     sqlite3_column_text(q, 1))));
+        p.pushKV("id", SafeText(q, 1));
         p.pushKV("ranking", (int64_t)sqlite3_column_int64(q, 2));
         p.pushKV("votesPositive", sqlite3_column_int(q, 3));
         p.pushKV("votesNegative", sqlite3_column_int(q, 4));
@@ -1115,8 +1121,10 @@ bool CRankModule::HandleProfileDetail(const util::Ref &, HTTPRequest *req,
     // Routes: social/{platform}/{profileId}
     //         social/{platform}/{profileId}/posts
     //         social/{platform}/{profileId}/votes
+    //         social/{platform}/{profileId}/post/{postId}
     // parts[0] = "social", parts[1] = platform, parts[2] = profileId,
-    //            parts[3] = optional "posts"/"votes"
+    //            parts[3] = optional "posts"/"votes"/"post",
+    //            parts[4] = postId (when parts[3] == "post")
     if (parts.size() < 3) {
         api::WriteError(req, HTTP_NOT_FOUND, "not_found",
                         "Missing platform or profile ID");
@@ -1189,8 +1197,7 @@ bool CRankModule::HandleProfileDetail(const util::Ref &, HTTPRequest *req,
         UniValue posts(UniValue::VARR);
         while (sqlite3_step(q) == SQLITE_ROW) {
             UniValue p(UniValue::VOBJ);
-            p.pushKV("id", std::string(reinterpret_cast<const char *>(
-                         sqlite3_column_text(q, 0))));
+            p.pushKV("id", SafeText(q, 0));
             p.pushKV("ranking", (int64_t)sqlite3_column_int64(q, 1));
             p.pushKV("votesPositive", sqlite3_column_int(q, 2));
             p.pushKV("votesNegative", sqlite3_column_int(q, 3));
@@ -1238,16 +1245,13 @@ bool CRankModule::HandleProfileDetail(const util::Ref &, HTTPRequest *req,
         UniValue votes(UniValue::VARR);
         while (sqlite3_step(q) == SQLITE_ROW) {
             UniValue v(UniValue::VOBJ);
-            v.pushKV("txid", std::string(reinterpret_cast<const char *>(
-                         sqlite3_column_text(q, 0))));
+            v.pushKV("txid", SafeText(q, 0));
             v.pushKV("timestamp", (int64_t)sqlite3_column_int64(q, 1));
             v.pushKV("sentiment",
                      sqlite3_column_int(q, 2) == 1 ? "positive" : "negative");
             v.pushKV("sats", (int64_t)sqlite3_column_int64(q, 3));
-            const char *postId = reinterpret_cast<const char *>(
-                sqlite3_column_text(q, 4));
             UniValue post(UniValue::VOBJ);
-            post.pushKV("id", std::string(postId ? postId : ""));
+            post.pushKV("id", SafeText(q, 4));
             v.pushKV("post", post);
             votes.push_back(std::move(v));
         }
@@ -1256,6 +1260,91 @@ bool CRankModule::HandleProfileDetail(const util::Ref &, HTTPRequest *req,
         UniValue result(UniValue::VOBJ);
         result.pushKV("votes", votes);
         result.pushKV("numPages", numPages);
+        api::WriteJSON(req, HTTP_OK, result);
+        return true;
+    }
+
+    if (subRoute == "post") {
+        if (parts.size() < 5) {
+            api::WriteError(req, HTTP_NOT_FOUND, "not_found",
+                            "Missing post ID");
+            return true;
+        }
+        const std::string &postId = parts[4];
+
+        // Post summary from rank_posts
+        sqlite3_stmt *qSum = m_db->Prepare(
+            "SELECT ranking, votes_positive, votes_negative "
+            "FROM rank_posts WHERE platform = ?1 AND profile_id = ?2 "
+            "AND post_id = ?3");
+        sqlite3_bind_int(qSum, 1, platId);
+        sqlite3_bind_text(qSum, 2, profileId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(qSum, 3, postId.c_str(), -1, SQLITE_TRANSIENT);
+
+        UniValue summary(UniValue::VOBJ);
+        summary.pushKV("platform", platform);
+        summary.pushKV("profileId", profileId);
+        summary.pushKV("postId", postId);
+        if (sqlite3_step(qSum) == SQLITE_ROW) {
+            summary.pushKV("ranking", (int64_t)sqlite3_column_int64(qSum, 0));
+            summary.pushKV("votesPositive", sqlite3_column_int(qSum, 1));
+            summary.pushKV("votesNegative", sqlite3_column_int(qSum, 2));
+        } else {
+            summary.pushKV("ranking", (int64_t)0);
+            summary.pushKV("votesPositive", 0);
+            summary.pushKV("votesNegative", 0);
+        }
+        sqlite3_reset(qSum);
+
+        // Pagination over votes for this post
+        int page = qp.GetInt("page", 1);
+        int pageSize = qp.GetInt("pageSize", 25);
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 1;
+        if (pageSize > 100) pageSize = 100;
+        int offset = (page - 1) * pageSize;
+
+        sqlite3_stmt *cnt = m_db->Prepare(
+            "SELECT COUNT(*) FROM rank_votes WHERE platform = ?1 "
+            "AND profile_id = ?2 AND post_id = ?3");
+        sqlite3_bind_int(cnt, 1, platId);
+        sqlite3_bind_text(cnt, 2, profileId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(cnt, 3, postId.c_str(), -1, SQLITE_TRANSIENT);
+        int total = 0;
+        if (sqlite3_step(cnt) == SQLITE_ROW) {
+            total = sqlite3_column_int(cnt, 0);
+        }
+        sqlite3_reset(cnt);
+        int numPages = (total + pageSize - 1) / pageSize;
+        if (numPages < 1) numPages = 1;
+
+        sqlite3_stmt *q = m_db->Prepare(
+            "SELECT txid, block_time, sentiment, sats "
+            "FROM rank_votes WHERE platform = ?1 AND profile_id = ?2 "
+            "AND post_id = ?3 ORDER BY block_height DESC LIMIT ?4 OFFSET ?5");
+        sqlite3_bind_int(q, 1, platId);
+        sqlite3_bind_text(q, 2, profileId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(q, 3, postId.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(q, 4, pageSize);
+        sqlite3_bind_int(q, 5, offset);
+
+        UniValue votes(UniValue::VARR);
+        while (sqlite3_step(q) == SQLITE_ROW) {
+            UniValue v(UniValue::VOBJ);
+            v.pushKV("txid", SafeText(q, 0));
+            v.pushKV("timestamp", (int64_t)sqlite3_column_int64(q, 1));
+            v.pushKV("sentiment",
+                     sqlite3_column_int(q, 2) == 1 ? "positive" : "negative");
+            v.pushKV("sats", (int64_t)sqlite3_column_int64(q, 3));
+            votes.push_back(std::move(v));
+        }
+        sqlite3_reset(q);
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("summary", summary);
+        result.pushKV("votes", votes);
+        result.pushKV("numPages", numPages);
+        result.pushKV("totalVotes", total);
         api::WriteJSON(req, HTTP_OK, result);
         return true;
     }
@@ -1306,8 +1395,7 @@ bool CRankModule::HandleStats(const util::Ref &, HTTPRequest *req,
             UniValue p(UniValue::VOBJ);
             p.pushKV("platform",
                      PlatformName(sqlite3_column_int(q, 0)));
-            p.pushKV("profileId", std::string(reinterpret_cast<const char *>(
-                         sqlite3_column_text(q, 1))));
+            p.pushKV("profileId", SafeText(q, 1));
             p.pushKV("ranking", (int64_t)sqlite3_column_int64(q, 2));
             arr.push_back(std::move(p));
         }
@@ -1328,10 +1416,8 @@ bool CRankModule::HandleStats(const util::Ref &, HTTPRequest *req,
             UniValue p(UniValue::VOBJ);
             p.pushKV("platform",
                      PlatformName(sqlite3_column_int(q, 0)));
-            p.pushKV("profileId", std::string(reinterpret_cast<const char *>(
-                         sqlite3_column_text(q, 1))));
-            p.pushKV("postId", std::string(reinterpret_cast<const char *>(
-                         sqlite3_column_text(q, 2))));
+            p.pushKV("profileId", SafeText(q, 1));
+            p.pushKV("postId", SafeText(q, 2));
             p.pushKV("ranking", (int64_t)sqlite3_column_int64(q, 3));
             arr.push_back(std::move(p));
         }
