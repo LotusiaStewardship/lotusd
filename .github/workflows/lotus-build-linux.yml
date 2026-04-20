@@ -22,18 +22,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Only amd64 for the initial 11.x release.
+        # arm64 / armv7 are blocked by a Boost 1.70 cross-compile bug
+        # (boost/thread/pthread/thread_data.hpp PAGE_SIZE preprocessor
+        # error) that needs an upstream depends/ patch. Tracked for a
+        # follow-up release.
         component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet, lotus-qt ]
-        arch: [ amd64, arm64, armv7 ]
+        arch: [ amd64 ]
         include:
           - arch: amd64
             target_platform: linux/amd64
             host_triple: x86_64-linux-gnu
-          - arch: arm64
-            target_platform: linux/arm64
-            host_triple: aarch64-linux-gnu
-          - arch: armv7
-            target_platform: linux/arm/v7
-            host_triple: arm-linux-gnueabihf
 
     steps:
       - name: Checkout code

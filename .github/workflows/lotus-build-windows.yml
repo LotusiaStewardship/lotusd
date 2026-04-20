@@ -82,7 +82,7 @@ jobs:
             lotus-depends-windows:ci \
             bash -c "make -C depends -j$(nproc) build-${{ matrix.depends_target }} \
                        NO_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo 0 || echo 1) \
-                       NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0"
+                       NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0 NO_JEMALLOC=1"
 
       - name: Configure & build ${{ matrix.component }}
         run: |
@@ -99,6 +99,7 @@ jobs:
                        -DBUILD_BITCOIN_SEEDER=ON \
                        -DBUILD_BITCOIN_ZMQ=ON \
                        -DENABLE_UPNP_DEFAULT=OFF \
+                       -DUSE_JEMALLOC=OFF \
                      && ninja -C build_windows_${{ matrix.arch }} ${{ matrix.component }}"
 
       - name: Locate produced binary

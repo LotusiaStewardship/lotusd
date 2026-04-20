@@ -5,7 +5,8 @@ name: ⛏️  Lotus GPU Miner Build
 #   - per-arch tarballs/zips for direct download
 #   - multi-arch Docker images on ghcr.io/<owner>/lotus-gpu-miner
 #
-# NVIDIA variant: linux/amd64 + linux/arm64 (Jetson)
+# NVIDIA variant: linux/amd64 (Jetson arm64 deferred — needs openssl
+#   sysroot for the aarch64 cross; see Dockerfile.lotus-gpu-miner header)
 # AMD ROCm variant: linux/amd64 only (ROCm has no upstream arm64 wheels)
 
 on:
@@ -36,10 +37,6 @@ jobs:
             arch: amd64
             dockerfile: dockerfiles/Dockerfile.lotus-gpu-miner
             platform: linux/amd64
-          - variant: nvidia
-            arch: arm64
-            dockerfile: dockerfiles/Dockerfile.lotus-gpu-miner
-            platform: linux/arm64
           - variant: amd
             arch: amd64
             dockerfile: dockerfiles/Dockerfile.lotus-gpu-miner-amd
@@ -115,7 +112,7 @@ jobs:
           - variant: nvidia
             image: lotus-gpu-miner
             dockerfile: dockerfiles/Dockerfile.lotus-gpu-miner
-            platforms: linux/amd64,linux/arm64
+            platforms: linux/amd64
           - variant: amd
             image: lotus-gpu-miner-amd
             dockerfile: dockerfiles/Dockerfile.lotus-gpu-miner-amd

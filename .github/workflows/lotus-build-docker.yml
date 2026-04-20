@@ -36,25 +36,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Initial 11.x release ships amd64 manifests only. arm64 and
+        # arm/v7 are blocked by an upstream Boost 1.70 cross-compile bug;
+        # see lotus-build-linux.yml for context.
         include:
           - image: lotus-node
             dockerfile: dockerfiles/Dockerfile.lotusd
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
+            platforms: linux/amd64
           - image: lotus-cli
             dockerfile: dockerfiles/Dockerfile.lotus-cli
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
+            platforms: linux/amd64
           - image: lotus-tx
             dockerfile: dockerfiles/Dockerfile.lotus-tx
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
+            platforms: linux/amd64
           - image: lotus-seeder
             dockerfile: dockerfiles/Dockerfile.lotus-seeder
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
+            platforms: linux/amd64
           - image: lotus-wallet
             dockerfile: dockerfiles/Dockerfile.lotus-wallet
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
+            platforms: linux/amd64
           - image: lotus-qt
             dockerfile: dockerfiles/Dockerfile.lotus-qt
-            platforms: linux/amd64,linux/arm64
+            platforms: linux/amd64
 
     steps:
       - name: Checkout code

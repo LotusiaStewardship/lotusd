@@ -57,9 +57,11 @@ echo "   jobs:     $JOBS"
 echo "================================================================"
 
 # 1. Build the depends/ stack for the target host.
+#    jemalloc is left out: it is an optional perf optimisation and the
+#    upstream depends recipe doesn't track every cross host cleanly.
 make -C depends -j"$JOBS" "build-${DEP}" \
     NO_QT="$NO_QT" \
-    NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0 NO_JEMALLOC=0
+    NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0 NO_JEMALLOC=1
 
 # 2. Configure + build the requested cmake target.
 BUILD_DIR="build_${DEP}"
@@ -70,7 +72,8 @@ cmake -GNinja -B "$BUILD_DIR" \
     -DBUILD_BITCOIN_WALLET=ON \
     -DBUILD_BITCOIN_SEEDER=ON \
     -DBUILD_BITCOIN_ZMQ=ON \
-    -DENABLE_UPNP_DEFAULT=OFF
+    -DENABLE_UPNP_DEFAULT=OFF \
+    -DUSE_JEMALLOC=OFF
 ninja -C "$BUILD_DIR" -j"$JOBS" "$TARGET"
 
 # 3. Place the binary at a stable, runtime-stage friendly location.

@@ -154,14 +154,14 @@ jobs:
           ${per_comp_section}
 
           ### Docker Images
-          Multi-arch manifests (\`linux/amd64\`, \`linux/arm64\`, \`linux/arm/v7\` where supported):
+          \`linux/amd64\` manifests (arm64 / armv7 deferred to a follow-up release; see CI README for details):
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-node) — Main Lotus daemon
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-cli) — Command-line interface
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-seeder) — Network seeder
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-tx:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-tx) — Transaction utility
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-wallet:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-wallet) — Wallet utility
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-qt:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-qt) — Desktop GUI wallet
-          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-gpu-miner) — GPU Miner (NVIDIA, amd64+arm64)
+          * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-gpu-miner) — GPU Miner (NVIDIA, amd64)
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-gpu-miner-amd:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-gpu-miner-amd) — GPU Miner (AMD ROCm, amd64)
 
           ## 🔍 What's Changed
@@ -187,7 +187,7 @@ jobs:
 
           ### Linux Binary Installation
           \`\`\`bash
-          # Replace <arch> with one of: amd64, arm64, armv7
+          # 11.0.x ships amd64 only; arm64/armv7 will be re-enabled in a follow-up release.
           ARCH=amd64
           wget https://github.com/${REPO}/releases/download/v${VERSION}/lotus-node-${VERSION}-linux-\${ARCH}.tar.gz
           tar -xzf lotus-node-${VERSION}-linux-\${ARCH}.tar.gz
@@ -213,7 +213,7 @@ jobs:
 
           ### GPU Miner Installation
           \`\`\`bash
-          ARCH=amd64   # or arm64 for NVIDIA Jetson
+          ARCH=amd64
           wget https://github.com/${REPO}/releases/download/v${VERSION}/lotus-gpu-miner-nvidia-${VERSION}-linux-\${ARCH}.tar.gz
           tar -xzf lotus-gpu-miner-nvidia-${VERSION}-linux-\${ARCH}.tar.gz
           cd lotus-gpu-miner-nvidia-${VERSION}-linux-\${ARCH}
@@ -223,7 +223,7 @@ jobs:
 
           ## 📋 System Requirements
           - **OS**: Ubuntu 22.04+, Debian 11+, Windows 10+, macOS 11+ (x86_64 or Apple Silicon)
-          - **Architectures**: x86_64 (amd64) · ARM64 (aarch64) · ARMv7 (32-bit ARM)
+          - **Architectures**: x86_64 (amd64) — arm64 / armv7 deferred to a follow-up release
           - **RAM**: 4 GB min, 8 GB recommended
           - **Storage**: 16 GB min, SSD recommended
           - **GPU Mining**: NVIDIA GPU with CUDA support, or AMD GPU with OpenCL/ROCm
