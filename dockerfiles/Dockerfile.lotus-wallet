@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         automake \
         binutils-aarch64-linux-gnu \
         binutils-arm-linux-gnueabihf \
-        binutils-i686-linux-gnu \
         binutils-gold \
         bsdmainutils \
         build-essential \
@@ -28,12 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         faketime \
         g++-aarch64-linux-gnu \
         g++-arm-linux-gnueabihf \
-        g++-i686-linux-gnu \
-        g++-multilib \
         gcc-aarch64-linux-gnu \
         gcc-arm-linux-gnueabihf \
-        gcc-i686-linux-gnu \
-        gcc-multilib \
         git \
         gperf \
         libtool \

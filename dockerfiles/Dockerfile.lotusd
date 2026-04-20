@@ -3,14 +3,14 @@
 # Multi-arch cross-build of `lotusd` (the Lotus full node daemon).
 #
 # The same Dockerfile produces a binary for every Linux architecture in
-# the matrix (linux/amd64, linux/arm64, linux/arm/v7, linux/386). The
-# heavy compile is pinned to BUILDPLATFORM (typically amd64 on the CI
-# runner) so we avoid running the entire build under QEMU emulation;
-# only the final runtime layer is pulled for the target architecture.
+# the matrix (linux/amd64, linux/arm64, linux/arm/v7). The heavy compile
+# is pinned to BUILDPLATFORM (typically amd64 on the CI runner) so we
+# avoid running the entire build under QEMU emulation; only the final
+# runtime layer is pulled for the target architecture.
 #
 # Build:
 #   docker buildx build \
-#       --platform linux/amd64,linux/arm64,linux/arm/v7,linux/386 \
+#       --platform linux/amd64,linux/arm64,linux/arm/v7 \
 #       -f dockerfiles/Dockerfile.lotusd \
 #       -t ghcr.io/lotusdevorg/lotusd:<tag> .
 
@@ -28,7 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         automake \
         binutils-aarch64-linux-gnu \
         binutils-arm-linux-gnueabihf \
-        binutils-i686-linux-gnu \
         binutils-gold \
         bsdmainutils \
         build-essential \
@@ -39,12 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         faketime \
         g++-aarch64-linux-gnu \
         g++-arm-linux-gnueabihf \
-        g++-i686-linux-gnu \
-        g++-multilib \
         gcc-aarch64-linux-gnu \
         gcc-arm-linux-gnueabihf \
-        gcc-i686-linux-gnu \
-        gcc-multilib \
         git \
         gperf \
         libtool \

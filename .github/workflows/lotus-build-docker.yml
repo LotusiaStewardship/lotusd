@@ -2,8 +2,9 @@ name: 🐳 Lotus Docker Multi-arch Publish
 
 # Builds and publishes a multi-arch manifest per component to
 # ghcr.io/<owner>/lotus-<component>:<version>. Each manifest spans
-# linux/amd64, linux/arm64, linux/arm/v7 and linux/386 (where the
-# component's Dockerfile compiles cleanly under that arch).
+# linux/amd64, linux/arm64 and linux/arm/v7 (where the component's
+# Dockerfile compiles cleanly under that arch). linux/386 is dropped
+# because Ubuntu has no i386 manifest on Docker Hub since 22.04.
 #
 # The per-component Dockerfiles are gitian-style cross-builds: the
 # builder stage is pinned to $BUILDPLATFORM (amd64 on the runner) and
@@ -38,19 +39,19 @@ jobs:
         include:
           - image: lotus-node
             dockerfile: dockerfiles/Dockerfile.lotusd
-            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+            platforms: linux/amd64,linux/arm64,linux/arm/v7
           - image: lotus-cli
             dockerfile: dockerfiles/Dockerfile.lotus-cli
-            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+            platforms: linux/amd64,linux/arm64,linux/arm/v7
           - image: lotus-tx
             dockerfile: dockerfiles/Dockerfile.lotus-tx
-            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+            platforms: linux/amd64,linux/arm64,linux/arm/v7
           - image: lotus-seeder
             dockerfile: dockerfiles/Dockerfile.lotus-seeder
-            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+            platforms: linux/amd64,linux/arm64,linux/arm/v7
           - image: lotus-wallet
             dockerfile: dockerfiles/Dockerfile.lotus-wallet
-            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+            platforms: linux/amd64,linux/arm64,linux/arm/v7
           - image: lotus-qt
             dockerfile: dockerfiles/Dockerfile.lotus-qt
             platforms: linux/amd64,linux/arm64

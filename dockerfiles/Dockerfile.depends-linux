@@ -2,7 +2,7 @@
 #
 # A single image installs every toolchain we need so the same container
 # can produce binaries for linux/amd64, linux/arm64, linux/armv7 and
-# linux/i386 via the depends/ system.
+# Linux cross-build via the depends/ system.
 #
 # Usage (from CI):
 #   docker build -t lotus-depends-linux -f dockerfiles/Dockerfile.depends-linux .
@@ -21,7 +21,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         automake \
         binutils-aarch64-linux-gnu \
         binutils-arm-linux-gnueabihf \
-        binutils-i686-linux-gnu \
         binutils-gold \
         bsdmainutils \
         build-essential \
@@ -32,12 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         faketime \
         g++-aarch64-linux-gnu \
         g++-arm-linux-gnueabihf \
-        g++-i686-linux-gnu \
-        g++-multilib \
         gcc-aarch64-linux-gnu \
         gcc-arm-linux-gnueabihf \
-        gcc-i686-linux-gnu \
-        gcc-multilib \
         git \
         gperf \
         libtool \

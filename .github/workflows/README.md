@@ -39,7 +39,7 @@ release page.
 
 | Workflow | Targets | Runs on |
 | --- | --- | --- |
-| **[lotus-build-linux.yml](./lotus-build-linux.yml)** | `lotusd`, `lotus-cli`, `lotus-tx`, `lotus-seeder`, `lotus-wallet`, `lotus-qt` × `linux-{amd64,arm64,armv7,i386}` via `depends/` | Every run (release **and** dev) |
+| **[lotus-build-linux.yml](./lotus-build-linux.yml)** | `lotusd`, `lotus-cli`, `lotus-tx`, `lotus-seeder`, `lotus-wallet`, `lotus-qt` × `linux-{amd64,arm64,armv7}` via `depends/` | Every run (release **and** dev) |
 | **[lotus-build-windows.yml](./lotus-build-windows.yml)** | All components × `windows-amd64` (mingw32) | Release only |
 | **[lotus-build-macos.yml](./lotus-build-macos.yml)** | All components × `macos-{x86_64, arm64}` via `depends/` darwin (gated by `MACOS_SDK_URL`) | Release only |
 | **[lotus-build-docker.yml](./lotus-build-docker.yml)** | Multi-arch Docker manifests for every component pushed to `ghcr.io/lotusdevorg/*` | Release only |

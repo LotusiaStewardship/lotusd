@@ -154,7 +154,7 @@ jobs:
           ${per_comp_section}
 
           ### Docker Images
-          Multi-arch manifests (\`linux/amd64\`, \`linux/arm64\`, \`linux/arm/v7\`, \`linux/386\` where supported):
+          Multi-arch manifests (\`linux/amd64\`, \`linux/arm64\`, \`linux/arm/v7\` where supported):
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-node:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-node) — Main Lotus daemon
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-cli:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-cli) — Command-line interface
           * [\`ghcr.io/${REPO_OWNER_LC}/lotus-seeder:${VERSION}\`](https://github.com/${REPO}/pkgs/container/lotus-seeder) — Network seeder
@@ -187,7 +187,7 @@ jobs:
 
           ### Linux Binary Installation
           \`\`\`bash
-          # Replace <arch> with one of: amd64, arm64, armv7, i386
+          # Replace <arch> with one of: amd64, arm64, armv7
           ARCH=amd64
           wget https://github.com/${REPO}/releases/download/v${VERSION}/lotus-node-${VERSION}-linux-\${ARCH}.tar.gz
           tar -xzf lotus-node-${VERSION}-linux-\${ARCH}.tar.gz
@@ -223,7 +223,7 @@ jobs:
 
           ## 📋 System Requirements
           - **OS**: Ubuntu 22.04+, Debian 11+, Windows 10+, macOS 11+ (x86_64 or Apple Silicon)
-          - **Architectures**: x86_64 (amd64) · ARM64 (aarch64) · ARMv7 (32-bit ARM) · i386 (32-bit x86, Linux only)
+          - **Architectures**: x86_64 (amd64) · ARM64 (aarch64) · ARMv7 (32-bit ARM)
           - **RAM**: 4 GB min, 8 GB recommended
           - **Storage**: 16 GB min, SSD recommended
           - **GPU Mining**: NVIDIA GPU with CUDA support, or AMD GPU with OpenCL/ROCm

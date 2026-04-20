@@ -3,7 +3,9 @@
 # Cross-build a single Lotus C++ component using the depends/ system.
 # Driven by Docker buildx's TARGETPLATFORM environment variable so the
 # same Dockerfile can produce binaries for every Linux architecture in
-# the matrix (linux/amd64, linux/arm64, linux/arm/v7, linux/386).
+# the matrix (linux/amd64, linux/arm64, linux/arm/v7). linux/386 is
+# unsupported because Ubuntu has dropped i386 from its base manifests
+# and the cross-toolchains are mutually exclusive with multilib.
 #
 # Usage:
 #   cross-build.sh <cmake-target>
@@ -33,8 +35,7 @@ case "$PLATFORM" in
     linux/amd64)  DEP=linux64       ; TC=cmake/platforms/Linux64.cmake     ; TRIPLE=x86_64-linux-gnu      ;;
     linux/arm64)  DEP=linux-aarch64 ; TC=cmake/platforms/LinuxAArch64.cmake; TRIPLE=aarch64-linux-gnu     ;;
     linux/arm/v7) DEP=linux-arm     ; TC=cmake/platforms/LinuxARM.cmake    ; TRIPLE=arm-linux-gnueabihf   ;;
-    linux/386)    DEP=linux32       ; TC=cmake/platforms/Linux32.cmake     ; TRIPLE=i686-pc-linux-gnu     ;;
-    *) echo "ERROR: unsupported TARGETPLATFORM '$PLATFORM'" >&2; exit 1 ;;
+    *) echo "ERROR: unsupported TARGETPLATFORM '$PLATFORM' (supported: linux/amd64, linux/arm64, linux/arm/v7)" >&2; exit 1 ;;
 esac
 
 case "$TARGET" in
