@@ -68,6 +68,7 @@ BUILD_DIR="build_${DEP}"
 mkdir -p "$BUILD_DIR"
 cmake -GNinja -B "$BUILD_DIR" \
     -DCMAKE_TOOLCHAIN_FILE="$TC" \
+    -DBASEPREFIX="$PWD/depends" \
     -DBUILD_BITCOIN_QT="$WANT_QT" \
     -DBUILD_BITCOIN_WALLET=ON \
     -DBUILD_BITCOIN_SEEDER=ON \

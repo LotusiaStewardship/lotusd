@@ -94,6 +94,7 @@ jobs:
             lotus-depends-windows:ci \
             bash -c "cmake -GNinja -B build_windows_${{ matrix.arch }} \
                        -DCMAKE_TOOLCHAIN_FILE=${{ matrix.cmake_toolchain }} \
+                       -DBASEPREFIX=/src/depends \
                        -DBUILD_BITCOIN_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo ON || echo OFF) \
                        -DBUILD_BITCOIN_WALLET=ON \
                        -DBUILD_BITCOIN_SEEDER=ON \

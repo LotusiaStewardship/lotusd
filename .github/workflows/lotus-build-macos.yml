@@ -130,6 +130,7 @@ jobs:
             lotus-depends-macos:ci \
             bash -c "cmake -GNinja -B build_macos_${{ matrix.arch }} \
                        -DCMAKE_TOOLCHAIN_FILE=${{ matrix.cmake_toolchain }} \
+                       -DBASEPREFIX=/src/depends \
                        -DCMAKE_PREFIX_PATH=/src/depends/${{ matrix.host_triple }} \
                        -DBUILD_BITCOIN_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo ON || echo OFF) \
                        -DBUILD_BITCOIN_WALLET=ON \
