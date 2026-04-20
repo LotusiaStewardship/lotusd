@@ -59,9 +59,14 @@ echo "================================================================"
 # 1. Build the depends/ stack for the target host.
 #    jemalloc is left out: it is an optional perf optimisation and the
 #    upstream depends recipe doesn't track every cross host cleanly.
-make -C depends -j"$JOBS" "build-${DEP}" \
-    NO_QT="$NO_QT" \
-    NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0 NO_JEMALLOC=1
+#
+#    NOTE: depends/Makefile uses pattern `pkg_packages_$(NO_PKG) = ...`
+#    which means *any* value of NO_PKG (including 0) disables the
+#    package — only an unset/empty NO_PKG enables it. Therefore we MUST
+#    NOT pass NO_SQLITE=0 / NO_BDB=0 / etc.; we just leave them unset.
+DEPENDS_VARS=( "NO_JEMALLOC=1" )
+[[ "$WANT_QT" == "OFF" ]] && DEPENDS_VARS+=( "NO_QT=1" )
+make -C depends -j"$JOBS" "build-${DEP}" "${DEPENDS_VARS[@]}"
 
 # 2. Configure + build the requested cmake target.
 BUILD_DIR="build_${DEP}"

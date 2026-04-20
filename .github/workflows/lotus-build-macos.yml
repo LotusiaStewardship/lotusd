@@ -117,8 +117,8 @@ jobs:
             -w /src \
             lotus-depends-macos:ci \
             bash -c "make -C depends -j$(nproc) HOST=${{ matrix.host_triple }} \
-                       NO_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo 0 || echo 1) \
-                       NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0 NO_JEMALLOC=1"
+                       $([ '${{ matrix.component }}' = 'lotus-qt' ] || echo NO_QT=1) \
+                       NO_JEMALLOC=1"
 
       - name: Configure & build ${{ matrix.component }}
         run: |
