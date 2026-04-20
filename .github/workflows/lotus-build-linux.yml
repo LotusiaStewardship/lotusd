@@ -1,0 +1,126 @@
+name: 🐧 Lotus Linux Multi-arch Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The version to build"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 🛠️  ${{ matrix.component }} / linux-${{ matrix.arch }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet, lotus-qt ]
+        arch: [ amd64, arm64, armv7, i386 ]
+        include:
+          - arch: amd64
+            target_platform: linux/amd64
+            host_triple: x86_64-linux-gnu
+          - arch: arm64
+            target_platform: linux/arm64
+            host_triple: aarch64-linux-gnu
+          - arch: armv7
+            target_platform: linux/arm/v7
+            host_triple: arm-linux-gnueabihf
+          - arch: i386
+            target_platform: linux/386
+            host_triple: i686-pc-linux-gnu
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build depends image (cached)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.depends-linux
+          tags: lotus-depends-linux:ci
+          load: true
+          cache-from: type=gha,scope=depends-linux
+          cache-to: type=gha,scope=depends-linux,mode=max
+
+      - name: Cache depends/built and SDKs
+        uses: actions/cache@v4
+        with:
+          path: |
+            depends/built
+            depends/sources
+            depends/${{ matrix.host_triple }}
+          key: depends-linux-${{ matrix.arch }}-${{ hashFiles('depends/packages/*.mk', 'depends/funcs.mk', 'depends/Makefile') }}
+          restore-keys: |
+            depends-linux-${{ matrix.arch }}-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-linux-${{ matrix.arch }}-${{ matrix.component }}-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-${{ matrix.arch }}-${{ matrix.component }}-
+            ccache-linux-${{ matrix.arch }}-
+
+      - name: Compute artifact directory
+        id: pkg
+        run: |
+          case "${{ matrix.component }}" in
+            lotusd) PKG_NAME=node ;;
+            lotus-cli) PKG_NAME=cli ;;
+            lotus-tx) PKG_NAME=tx ;;
+            lotus-seeder) PKG_NAME=seeder ;;
+            lotus-wallet) PKG_NAME=wallet ;;
+            lotus-qt) PKG_NAME=qt ;;
+          esac
+          DIR="lotus-${PKG_NAME}-${{ inputs.version }}-linux-${{ matrix.arch }}"
+          mkdir -p "artifacts/${DIR}"
+          echo "dir=${DIR}" >> $GITHUB_OUTPUT
+          echo "out_rel=artifacts/${DIR}" >> $GITHUB_OUTPUT
+
+      - name: Cross-build ${{ matrix.component }} via depends/
+        run: |
+          # Single source of truth: the same dockerfiles/cross-build.sh
+          # used by every per-component Dockerfile. TARGETPLATFORM tells
+          # the script which depends/ host + cmake toolchain to use.
+          # OUT_DIR is bind-mounted via /src so the binary survives the
+          # container exit.
+          docker run --rm \
+            -e TARGETPLATFORM=${{ matrix.target_platform }} \
+            -e JOBS=$(nproc) \
+            -e OUT_DIR=/src/${{ steps.pkg.outputs.out_rel }} \
+            -v "$PWD":/src \
+            -v "$PWD/.ccache":/ccache \
+            -w /src \
+            lotus-depends-linux:ci \
+            bash dockerfiles/cross-build.sh ${{ matrix.component }}
+
+      - name: Package binary
+        run: |
+          set -e
+          DIR="${{ steps.pkg.outputs.dir }}"
+          chmod +x "artifacts/${DIR}"/*
+          (cd artifacts && tar -czf "${DIR}.tar.gz" "${DIR}" && zip -r "${DIR}.zip" "${DIR}")
+          ls -la artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-${{ matrix.component }}-linux-${{ matrix.arch }}-${{ inputs.version }}
+          path: |
+            artifacts/lotus-*-linux-${{ matrix.arch }}.tar.gz
+            artifacts/lotus-*-linux-${{ matrix.arch }}.zip
+          retention-days: 14

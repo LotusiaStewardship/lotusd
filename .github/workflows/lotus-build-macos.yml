@@ -1,0 +1,185 @@
+name: 🍎 Lotus macOS Cross Build
+
+# The depends/ system ships an osx target that produces x86_64 Mach-O
+# binaries (see depends/Makefile -> build-osx). Apple Silicon (arm64)
+# binaries can be produced by overriding HOST=arm64-apple-darwin during
+# the depends + cmake invocation; we run both as separate matrix cells.
+#
+# A MacOSX SDK tarball must be provided via the MACOS_SDK_URL repository
+# secret (Apple license terms apply). The job is skipped with a warning
+# if the secret is not configured.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The version to build"
+        required: true
+        type: string
+    secrets:
+      MACOS_SDK_URL:
+        description: "Pre-signed download URL for a MacOSX SDK tarball (.tar.gz)"
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  check-sdk:
+    name: 🔐 Check SDK availability
+    runs-on: ubuntu-22.04
+    outputs:
+      have_sdk: ${{ steps.check.outputs.have_sdk }}
+    steps:
+      - id: check
+        run: |
+          if [ -n "${{ secrets.MACOS_SDK_URL }}" ]; then
+            echo "have_sdk=true" >> $GITHUB_OUTPUT
+          else
+            echo "have_sdk=false" >> $GITHUB_OUTPUT
+            echo "::warning::MACOS_SDK_URL secret is not set - skipping macOS builds."
+          fi
+
+  build:
+    name: 🛠️  ${{ matrix.component }} / macos-${{ matrix.arch }}
+    needs: check-sdk
+    if: needs.check-sdk.outputs.have_sdk == 'true'
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet, lotus-qt ]
+        arch: [ x86_64, arm64 ]
+        include:
+          - arch: x86_64
+            host_triple: x86_64-apple-darwin18
+            cmake_toolchain: cmake/platforms/OSX.cmake
+          - arch: arm64
+            host_triple: arm64-apple-darwin
+            cmake_toolchain: cmake/platforms/OSX.cmake
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build depends image (cached)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.depends-macos
+          tags: lotus-depends-macos:ci
+          load: true
+          cache-from: type=gha,scope=depends-macos
+          cache-to: type=gha,scope=depends-macos,mode=max
+
+      - name: Download macOS SDK
+        env:
+          SDK_URL: ${{ secrets.MACOS_SDK_URL }}
+        run: |
+          mkdir -p depends/SDKs sdk
+          curl -fsSL "$SDK_URL" -o /tmp/macos-sdk.tar.gz
+          tar -C depends/SDKs -xzf /tmp/macos-sdk.tar.gz
+          rm -f /tmp/macos-sdk.tar.gz
+          ls depends/SDKs/
+
+      - name: Cache depends/built and SDKs
+        uses: actions/cache@v4
+        with:
+          path: |
+            depends/built
+            depends/sources
+            depends/${{ matrix.host_triple }}
+          key: depends-macos-${{ matrix.arch }}-${{ hashFiles('depends/packages/*.mk', 'depends/funcs.mk', 'depends/Makefile') }}
+          restore-keys: |
+            depends-macos-${{ matrix.arch }}-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-macos-${{ matrix.arch }}-${{ matrix.component }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-${{ matrix.arch }}-${{ matrix.component }}-
+            ccache-macos-${{ matrix.arch }}-
+
+      - name: Build depends for osx (HOST=${{ matrix.host_triple }})
+        run: |
+          docker run --rm \
+            -v "$PWD":/src \
+            -v "$PWD/.ccache":/ccache \
+            -w /src \
+            lotus-depends-macos:ci \
+            bash -c "make -C depends -j$(nproc) HOST=${{ matrix.host_triple }} \
+                       NO_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo 0 || echo 1) \
+                       NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0"
+
+      - name: Configure & build ${{ matrix.component }}
+        run: |
+          mkdir -p build_macos_${{ matrix.arch }} artifacts
+          docker run --rm \
+            -v "$PWD":/src \
+            -v "$PWD/.ccache":/ccache \
+            -w /src \
+            lotus-depends-macos:ci \
+            bash -c "cmake -GNinja -B build_macos_${{ matrix.arch }} \
+                       -DCMAKE_TOOLCHAIN_FILE=${{ matrix.cmake_toolchain }} \
+                       -DCMAKE_PREFIX_PATH=/src/depends/${{ matrix.host_triple }} \
+                       -DBUILD_BITCOIN_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo ON || echo OFF) \
+                       -DBUILD_BITCOIN_WALLET=ON \
+                       -DBUILD_BITCOIN_SEEDER=ON \
+                       -DBUILD_BITCOIN_ZMQ=ON \
+                       -DENABLE_UPNP_DEFAULT=OFF \
+                     && ninja -C build_macos_${{ matrix.arch }} ${{ matrix.component }}"
+
+      - name: Locate produced binary
+        id: locate
+        run: |
+          set -e
+          case "${{ matrix.component }}" in
+            lotusd|lotus-cli|lotus-tx)  BIN_PATH=build_macos_${{ matrix.arch }}/src/${{ matrix.component }} ;;
+            lotus-seeder)               BIN_PATH=build_macos_${{ matrix.arch }}/src/seeder/lotus-seeder ;;
+            lotus-wallet)               BIN_PATH=build_macos_${{ matrix.arch }}/src/lotus-wallet ;;
+            lotus-qt)                   BIN_PATH=build_macos_${{ matrix.arch }}/src/qt/lotus-qt ;;
+          esac
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "ERROR: expected binary $BIN_PATH not found" >&2
+            find build_macos_${{ matrix.arch }} -maxdepth 4 -type f -name 'lotus*' || true
+            exit 1
+          fi
+          echo "bin_path=$BIN_PATH" >> $GITHUB_OUTPUT
+
+      - name: Package binary
+        run: |
+          set -e
+          BIN_PATH="${{ steps.locate.outputs.bin_path }}"
+          BIN_NAME=$(basename "$BIN_PATH")
+          case "${{ matrix.component }}" in
+            lotusd) PKG_NAME=node ;;
+            lotus-cli) PKG_NAME=cli ;;
+            lotus-tx) PKG_NAME=tx ;;
+            lotus-seeder) PKG_NAME=seeder ;;
+            lotus-wallet) PKG_NAME=wallet ;;
+            lotus-qt) PKG_NAME=qt ;;
+          esac
+          DIR="lotus-${PKG_NAME}-${{ inputs.version }}-macos-${{ matrix.arch }}"
+          mkdir -p "artifacts/${DIR}"
+          cp "$BIN_PATH" "artifacts/${DIR}/"
+          chmod +x "artifacts/${DIR}/${BIN_NAME}"
+          (cd artifacts && tar -czf "${DIR}.tar.gz" "${DIR}" && zip -r "${DIR}.zip" "${DIR}")
+          ls -la artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-${{ matrix.component }}-macos-${{ matrix.arch }}-${{ inputs.version }}
+          path: |
+            artifacts/lotus-*-macos-${{ matrix.arch }}.tar.gz
+            artifacts/lotus-*-macos-${{ matrix.arch }}.zip
+          retention-days: 14

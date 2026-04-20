@@ -1,0 +1,58 @@
+# Cross-compile build environment for Lotus on Linux.
+#
+# A single image installs every toolchain we need so the same container
+# can produce binaries for linux/amd64, linux/arm64, linux/armv7 and
+# linux/i386 via the depends/ system.
+#
+# Usage (from CI):
+#   docker build -t lotus-depends-linux -f dockerfiles/Dockerfile.depends-linux .
+#   docker run --rm -v $PWD:/src -w /src lotus-depends-linux \
+#     bash -c "make -C depends build-linux64 -j$(nproc) && \
+#              cmake -GNinja -B build -DCMAKE_TOOLCHAIN_FILE=cmake/platforms/Linux64.cmake && \
+#              ninja -C build lotusd"
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf \
+        automake \
+        binutils-aarch64-linux-gnu \
+        binutils-arm-linux-gnueabihf \
+        binutils-i686-linux-gnu \
+        binutils-gold \
+        bsdmainutils \
+        build-essential \
+        ca-certificates \
+        ccache \
+        cmake \
+        curl \
+        faketime \
+        g++-aarch64-linux-gnu \
+        g++-arm-linux-gnueabihf \
+        g++-i686-linux-gnu \
+        g++-multilib \
+        gcc-aarch64-linux-gnu \
+        gcc-arm-linux-gnueabihf \
+        gcc-i686-linux-gnu \
+        gcc-multilib \
+        git \
+        gperf \
+        libtool \
+        ninja-build \
+        patch \
+        pkg-config \
+        python3 \
+        python3-setuptools \
+        unzip \
+        xz-utils \
+        zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Allow ccache to be used transparently by gcc/g++.
+ENV PATH="/usr/lib/ccache:${PATH}"
+ENV CCACHE_DIR=/ccache
+
+WORKDIR /src

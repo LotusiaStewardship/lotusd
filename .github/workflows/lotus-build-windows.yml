@@ -1,0 +1,148 @@
+name: 🪟 Lotus Windows Cross Build
+
+# The depends/ system currently only ships a win64 target (see
+# depends/Makefile -> build-win64). 32-bit Windows is no longer a first-class
+# target upstream, so we build only x86_64 here. Adding i686 would require
+# back-porting the relevant depends/packages/*.mk hosts.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The version to build"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 🛠️  ${{ matrix.component }} / windows-${{ matrix.arch }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet, lotus-qt ]
+        arch: [ amd64 ]
+        include:
+          - arch: amd64
+            depends_target: win64
+            host_triple: x86_64-w64-mingw32
+            cmake_toolchain: cmake/platforms/Win64.cmake
+            exe_suffix: .exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build depends image (cached)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.depends-windows
+          tags: lotus-depends-windows:ci
+          load: true
+          cache-from: type=gha,scope=depends-windows
+          cache-to: type=gha,scope=depends-windows,mode=max
+
+      - name: Cache depends/built and SDKs
+        uses: actions/cache@v4
+        with:
+          path: |
+            depends/built
+            depends/sources
+            depends/${{ matrix.host_triple }}
+          key: depends-windows-${{ matrix.arch }}-${{ hashFiles('depends/packages/*.mk', 'depends/funcs.mk', 'depends/Makefile') }}
+          restore-keys: |
+            depends-windows-${{ matrix.arch }}-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-${{ matrix.arch }}-${{ matrix.component }}-${{ github.sha }}
+          restore-keys: |
+            ccache-windows-${{ matrix.arch }}-${{ matrix.component }}-
+            ccache-windows-${{ matrix.arch }}-
+
+      - name: Build depends for ${{ matrix.depends_target }}
+        run: |
+          docker run --rm \
+            -v "$PWD":/src \
+            -v "$PWD/.ccache":/ccache \
+            -w /src \
+            lotus-depends-windows:ci \
+            bash -c "make -C depends -j$(nproc) build-${{ matrix.depends_target }} \
+                       NO_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo 0 || echo 1) \
+                       NO_UPNP=0 NO_ZMQ=0 NO_BDB=0 NO_SQLITE=0"
+
+      - name: Configure & build ${{ matrix.component }}
+        run: |
+          mkdir -p build_windows_${{ matrix.arch }} artifacts
+          docker run --rm \
+            -v "$PWD":/src \
+            -v "$PWD/.ccache":/ccache \
+            -w /src \
+            lotus-depends-windows:ci \
+            bash -c "cmake -GNinja -B build_windows_${{ matrix.arch }} \
+                       -DCMAKE_TOOLCHAIN_FILE=${{ matrix.cmake_toolchain }} \
+                       -DBUILD_BITCOIN_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo ON || echo OFF) \
+                       -DBUILD_BITCOIN_WALLET=ON \
+                       -DBUILD_BITCOIN_SEEDER=ON \
+                       -DBUILD_BITCOIN_ZMQ=ON \
+                       -DENABLE_UPNP_DEFAULT=OFF \
+                     && ninja -C build_windows_${{ matrix.arch }} ${{ matrix.component }}"
+
+      - name: Locate produced binary
+        id: locate
+        run: |
+          set -e
+          SUFFIX="${{ matrix.exe_suffix }}"
+          case "${{ matrix.component }}" in
+            lotusd|lotus-cli|lotus-tx)  BIN_PATH=build_windows_${{ matrix.arch }}/src/${{ matrix.component }}${SUFFIX} ;;
+            lotus-seeder)               BIN_PATH=build_windows_${{ matrix.arch }}/src/seeder/lotus-seeder${SUFFIX} ;;
+            lotus-wallet)               BIN_PATH=build_windows_${{ matrix.arch }}/src/lotus-wallet${SUFFIX} ;;
+            lotus-qt)                   BIN_PATH=build_windows_${{ matrix.arch }}/src/qt/lotus-qt${SUFFIX} ;;
+          esac
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "ERROR: expected binary $BIN_PATH not found" >&2
+            find build_windows_${{ matrix.arch }} -maxdepth 4 -type f -name 'lotus*' || true
+            exit 1
+          fi
+          echo "bin_path=$BIN_PATH" >> $GITHUB_OUTPUT
+
+      - name: Package binary (zip)
+        run: |
+          set -e
+          BIN_PATH="${{ steps.locate.outputs.bin_path }}"
+          BIN_NAME=$(basename "$BIN_PATH")
+          case "${{ matrix.component }}" in
+            lotusd) PKG_NAME=node ;;
+            lotus-cli) PKG_NAME=cli ;;
+            lotus-tx) PKG_NAME=tx ;;
+            lotus-seeder) PKG_NAME=seeder ;;
+            lotus-wallet) PKG_NAME=wallet ;;
+            lotus-qt) PKG_NAME=qt ;;
+          esac
+          DIR="lotus-${PKG_NAME}-${{ inputs.version }}-windows-${{ matrix.arch }}"
+          mkdir -p "artifacts/${DIR}"
+          cp "$BIN_PATH" "artifacts/${DIR}/"
+          docker run --rm -v "$PWD":/src -w /src lotus-depends-windows:ci \
+            bash -c "${{ matrix.host_triple }}-strip artifacts/${DIR}/${BIN_NAME} || true"
+          (cd artifacts && zip -r "${DIR}.zip" "${DIR}")
+          ls -la artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-${{ matrix.component }}-windows-${{ matrix.arch }}-${{ inputs.version }}
+          path: artifacts/lotus-*-windows-${{ matrix.arch }}.zip
+          retention-days: 14

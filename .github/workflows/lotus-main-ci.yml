@@ -1,90 +1,145 @@
 name: 🌸 Lotus Main CI
 
-# Allow multiple workflows to run in parallel
-# Each workflow will be identified by its unique run ID
+# Two distinct trigger modes:
+#
+#   1. Full release pipeline (Linux + Windows + macOS + Docker + GPU
+#      miner + GitHub release): runs only on a version tag pushed to
+#      master / main, where the tag name is "XX.YY.ZZ" or "vXX.YY.ZZ".
+#
+#   2. Dev build (Linux only, no release): runs on every push to any
+#      branch and on pull requests. Artifacts are uploaded but no tag
+#      or GitHub release is created. Intended for "dev" branches and
+#      open pull requests.
+#
+# Manual runs via workflow_dispatch can opt into the full pipeline
+# regardless of the trigger context.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 on:
   push:
-    branches: [ main, master, develop ]
-    tags: [ 'v*' ]
+    branches: [ '**' ]
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      full_pipeline:
+        description: "Run the full multi-OS pipeline (release-grade)"
+        type: boolean
+        default: false
 
-# Global defaults for all jobs
 defaults:
   run:
     shell: bash
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
-  # Check the current version first
+  # Decide what kind of run this is.
+  classify:
+    name: 🧭 Classify run
+    runs-on: ubuntu-22.04
+    outputs:
+      is_release: ${{ steps.set.outputs.is_release }}
+      is_dev: ${{ steps.set.outputs.is_dev }}
+    steps:
+      - id: set
+        run: |
+          set -e
+          IS_RELEASE=false
+          IS_DEV=false
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # Tag must look like a version (with or without leading v).
+            TAG="${GITHUB_REF#refs/tags/}"
+            if [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              IS_RELEASE=true
+            fi
+          fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.full_pipeline }}" == "true" ]]; then
+            IS_RELEASE=true
+          fi
+          if [[ "$IS_RELEASE" == "false" ]]; then
+            IS_DEV=true
+          fi
+          echo "is_release=$IS_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "is_dev=$IS_DEV"         >> "$GITHUB_OUTPUT"
+          echo "Run classification: release=$IS_RELEASE dev=$IS_DEV"
+
   version-management:
     name: 📊 Version Management
+    needs: [ classify ]
     uses: ./.github/workflows/lotus-version-management.yml
     secrets: inherit
 
-  # Build components in parallel
-  build-core:
-    name: 🏗️ Core Components
-    needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
-    uses: ./.github/workflows/lotus-core-build.yml
+  # ---------------------------------------------------------------------
+  # Dev build: Linux only, runs on every branch / PR.
+  # ---------------------------------------------------------------------
+  build-linux:
+    name: 🐧 Linux Builds
+    needs: [ classify, version-management ]
+    if: always() && needs.version-management.result == 'success'
+    uses: ./.github/workflows/lotus-build-linux.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  build-tools:
-    name: 🔧 Tool Components
-    needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
-    uses: ./.github/workflows/lotus-tools-build.yml
+  # ---------------------------------------------------------------------
+  # Release-only legs: Windows, macOS, Docker manifests, GPU miner,
+  # GitHub release. Skipped on plain branch pushes / PRs.
+  # ---------------------------------------------------------------------
+  build-windows:
+    name: 🪟 Windows Builds
+    needs: [ classify, version-management ]
+    if: needs.classify.outputs.is_release == 'true'
+    uses: ./.github/workflows/lotus-build-windows.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  build-gui:
-    name: 🖥️ GUI Components
-    needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
-    uses: ./.github/workflows/lotus-gui-build.yml
+  build-macos:
+    name: 🍎 macOS Builds
+    needs: [ classify, version-management ]
+    if: needs.classify.outputs.is_release == 'true'
+    uses: ./.github/workflows/lotus-build-macos.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  build-miner:
-    name: ⛏️ Mining Components
-    needs: [ version-management ]
-    if: always() && (needs.version-management.outputs.should_bump == 'false' || needs.version-management.outputs.version_bumped == 'true')
-    uses: ./.github/workflows/lotus-miner-build.yml
+  build-docker:
+    name: 🐳 Docker Multi-arch
+    needs: [ classify, version-management ]
+    if: needs.classify.outputs.is_release == 'true'
+    uses: ./.github/workflows/lotus-build-docker.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Revert version if any builds failed
-  revert-version:
-    name: ⏮️ Revert Version
-    needs: [ version-management, build-core, build-tools, build-gui, build-miner ]
-    if: always() && needs.version-management.outputs.version_bumped == 'true' && (needs.build-core.result == 'failure' || needs.build-tools.result == 'failure' || needs.build-gui.result == 'failure' || needs.build-miner.result == 'failure')
-    uses: ./.github/workflows/lotus-version-revert.yml
+  build-gpu-miner:
+    name: ⛏️  GPU Miner
+    needs: [ classify, version-management ]
+    if: needs.classify.outputs.is_release == 'true'
+    uses: ./.github/workflows/lotus-build-gpu-miner.yml
     with:
-      current_version: ${{ needs.version-management.outputs.version }}
-      prev_version: ${{ needs.version-management.outputs.prev_version }}
-      build_failures: ${{ needs.build-core.result == 'failure' || needs.build-tools.result == 'failure' || needs.build-gui.result == 'failure' || needs.build-miner.result == 'failure' }}
+      version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
 
-  # Release process
   release:
     name: 🚀 Release
-    needs: [ version-management, build-core, build-tools, build-gui, build-miner, revert-version ]
-    if: always() && github.ref == 'refs/heads/master' && github.event_name == 'push' && needs.build-core.result == 'success' && needs.build-tools.result == 'success' && needs.build-gui.result == 'success' && needs.build-miner.result == 'success' && (needs.revert-version.result == 'skipped' || needs.revert-version.result == 'success')
+    needs: [ classify, version-management, build-linux, build-windows, build-macos, build-docker, build-gpu-miner ]
+    if: |
+      always()
+      && needs.classify.outputs.is_release == 'true'
+      && needs.build-linux.result    == 'success'
+      && needs.build-docker.result   == 'success'
+      && needs.build-gpu-miner.result == 'success'
+      && (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped')
+      && (needs.build-macos.result   == 'success' || needs.build-macos.result   == 'skipped')
     uses: ./.github/workflows/lotus-release.yml
     with:
       version: ${{ needs.version-management.outputs.version }}
     secrets: inherit
-
-# Add permissions at the top level
-permissions:
-  contents: write
-  packages: write

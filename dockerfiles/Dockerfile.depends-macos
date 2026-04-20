@@ -1,0 +1,65 @@
+# Cross-compile build environment for Lotus on macOS (darwin).
+#
+# Produces Mach-O binaries for macOS x86_64 and arm64 via the depends/
+# system. Requires a MacOSX SDK tarball (Apple license terms apply).
+# The CI workflow downloads the SDK from a private location stored in
+# the MACOS_SDK_URL repository secret and mounts it into /sdk before
+# building.
+#
+# Usage (from CI):
+#   docker run --rm \
+#     -e SDK_PATH=/sdk \
+#     -v $PWD:/src -v $SDK_DIR:/sdk -w /src lotus-depends-macos \
+#     bash -c "make -C depends build-osx -j$(nproc) && \
+#              cmake -GNinja -B build_osx -DCMAKE_TOOLCHAIN_FILE=cmake/platforms/OSX.cmake && \
+#              ninja -C build_osx lotusd"
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf \
+        automake \
+        bsdmainutils \
+        build-essential \
+        ca-certificates \
+        ccache \
+        clang \
+        cmake \
+        curl \
+        faketime \
+        fonts-tuffy \
+        g++ \
+        git \
+        gperf \
+        imagemagick \
+        libbz2-dev \
+        libcap-dev \
+        librsvg2-bin \
+        libtiff-tools \
+        libtinfo5 \
+        libtool \
+        libz-dev \
+        llvm \
+        ninja-build \
+        patch \
+        pkg-config \
+        python3 \
+        python3-setuptools \
+        unzip \
+        xorriso \
+        xz-utils \
+        zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# depends/ expects the macOS SDK at depends/SDKs/.
+# We create a placeholder so the SDK can be bind-mounted at runtime.
+RUN mkdir -p /sdk
+ENV SDK_PATH=/sdk
+
+ENV PATH="/usr/lib/ccache:${PATH}"
+ENV CCACHE_DIR=/ccache
+
+WORKDIR /src

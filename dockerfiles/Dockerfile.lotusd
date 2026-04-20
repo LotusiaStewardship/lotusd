@@ -1,110 +1,91 @@
-# Build stage
-FROM ubuntu:24.04 AS builder
+# syntax=docker/dockerfile:1.6
+#
+# Multi-arch cross-build of `lotusd` (the Lotus full node daemon).
+#
+# The same Dockerfile produces a binary for every Linux architecture in
+# the matrix (linux/amd64, linux/arm64, linux/arm/v7, linux/386). The
+# heavy compile is pinned to BUILDPLATFORM (typically amd64 on the CI
+# runner) so we avoid running the entire build under QEMU emulation;
+# only the final runtime layer is pulled for the target architecture.
+#
+# Build:
+#   docker buildx build \
+#       --platform linux/amd64,linux/arm64,linux/arm/v7,linux/386 \
+#       -f dockerfiles/Dockerfile.lotusd \
+#       -t ghcr.io/lotusdevorg/lotusd:<tag> .
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    libssl-dev \
-    libzmq3-dev \
-    libboost-all-dev \
-    libevent-dev \
-    libdb++-dev \
-    libminiupnpc-dev \
-    libnng-dev \
-    libjemalloc-dev \
-    pkg-config \
-    libsqlite3-dev \
-    flatbuffers-compiler \
-    libflatbuffers-dev \
-    qtbase5-dev \
-    qt5-qmake \
-    libqt5gui5 \
-    libqt5core5a \
-    libqt5dbus5 \
-    qttools5-dev \
-    qttools5-dev-tools \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libqrencode-dev \
+# ------------------------------------------------------------------
+# 1. Builder stage — depends/ + cmake cross-build
+# ------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM ubuntu:22.04 AS builder
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ENV DEBIAN_FRONTEND=noninteractive TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf \
+        automake \
+        binutils-aarch64-linux-gnu \
+        binutils-arm-linux-gnueabihf \
+        binutils-i686-linux-gnu \
+        binutils-gold \
+        bsdmainutils \
+        build-essential \
+        ca-certificates \
+        ccache \
+        cmake \
+        curl \
+        faketime \
+        g++-aarch64-linux-gnu \
+        g++-arm-linux-gnueabihf \
+        g++-i686-linux-gnu \
+        g++-multilib \
+        gcc-aarch64-linux-gnu \
+        gcc-arm-linux-gnueabihf \
+        gcc-i686-linux-gnu \
+        gcc-multilib \
+        git \
+        gperf \
+        libtool \
+        ninja-build \
+        patch \
+        pkg-config \
+        python3 \
+        python3-setuptools \
+        unzip \
+        xz-utils \
+        zip \
     && rm -rf /var/lib/apt/lists/*
 
-# Create CMake configuration file for Flatbuffers
-RUN mkdir -p /usr/lib/cmake/flatbuffers && \
-    echo 'set(FLATBUFFERS_INCLUDE_DIR "/usr/include")' > /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
-    echo 'set(FLATBUFFERS_LIBRARIES "/usr/lib/x86_64-linux-gnu/libflatbuffers.a")' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake && \
-    echo 'set(FLATBUFFERS_FOUND TRUE)' >> /usr/lib/cmake/flatbuffers/FlatbuffersConfig.cmake
+ENV PATH="/usr/lib/ccache:${PATH}" \
+    CCACHE_DIR=/ccache
 
-# Set working directory for the source code
-WORKDIR /lotus-source
+WORKDIR /src
+COPY . /src
 
-# Copy the source code
-COPY . .
+RUN bash dockerfiles/cross-build.sh lotusd
 
-# Build the binary
-RUN mkdir build
-WORKDIR /lotus-source/build
-RUN cmake ..
-RUN make lotusd -j$(nproc)
+# ------------------------------------------------------------------
+# 2. Runtime stage — minimal target-arch image
+# ------------------------------------------------------------------
+FROM --platform=$TARGETPLATFORM ubuntu:22.04 AS runtime
 
-# Runtime stage
-FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libgcc-s1 \
+        libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/lotus/bin /root/.lotus
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    libssl-dev \
-    libzmq3-dev \
-    libboost-all-dev \
-    libevent-dev \
-    libdb++-dev \
-    libminiupnpc-dev \
-    libnng-dev \
-    libjemalloc-dev \
-    pkg-config \
-    libsqlite3-dev \
-    flatbuffers-compiler \
-    libflatbuffers-dev \
-    qtbase5-dev \
-    qt5-qmake \
-    libqt5gui5 \
-    libqt5core5a \
-    libqt5dbus5 \
-    qttools5-dev \
-    qttools5-dev-tools \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libqrencode-dev \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /opt/lotus/bin/lotusd /opt/lotus/bin/lotusd
+RUN chmod +x /opt/lotus/bin/lotusd
 
-# Create directory structure
-RUN mkdir -p /opt/lotus/bin /opt/lotus/lib
-
-# Copy built binary from builder stage
-COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/
-
-# Set permissions
-RUN chmod +x /opt/lotus/bin/*
-
-# Add to PATH and library path
 ENV PATH="/opt/lotus/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/lotus/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
 
-# Create data directory
-RUN mkdir -p /root/.lotus
+# P2P, RPC and legacy RPC ports.
+EXPOSE 10605 10604 58525
 
-# Expose commonly used ports
-# P2P network
-EXPOSE 9333
-# RPC interface 
-EXPOSE 9332
-# RPC port from docker-compose
-EXPOSE 58525
-
-# Set working directory
 WORKDIR /root
-
-# Default command to run the node daemon
 ENTRYPOINT ["/opt/lotus/bin/lotusd"]
-CMD ["-reindex", "-printtoconsole", "-datadir=/root/.lotus", "-addnode=116.103.232.62", "-addnode=69.234.67.246", "-addnode=146.70.211.96", "-addnode=70.92.25.116", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-rpcuser=lotus", "-rpcpassword=lkdjflheoiueiiir", "-rpcallowip=10.128.0.0/16", "-rpcbind=0.0.0.0:58525", "-rpcport=58525", "-rpcallowip=127.0.0.1", "-rpcthreads=8", "-disablewallet=0"] 
+CMD ["-printtoconsole", "-datadir=/root/.lotus"]

@@ -1,0 +1,103 @@
+name: 🐳 Lotus Docker Multi-arch Publish
+
+# Builds and publishes a multi-arch manifest per component to
+# ghcr.io/<owner>/lotus-<component>:<version>. Each manifest spans
+# linux/amd64, linux/arm64, linux/arm/v7 and linux/386 (where the
+# component's Dockerfile compiles cleanly under that arch).
+#
+# The per-component Dockerfiles are gitian-style cross-builds: the
+# builder stage is pinned to $BUILDPLATFORM (amd64 on the runner) and
+# uses depends/ + cmake/platforms/Linux*.cmake to cross-compile to
+# $TARGETPLATFORM. Only the runtime stage is pulled for the target arch,
+# so the heavy compile runs natively rather than under QEMU. QEMU is
+# still set up for the runtime layer.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The version to build and tag"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: 🛠️  Docker / ${{ matrix.image }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: lotus-node
+            dockerfile: dockerfiles/Dockerfile.lotusd
+            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+          - image: lotus-cli
+            dockerfile: dockerfiles/Dockerfile.lotus-cli
+            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+          - image: lotus-tx
+            dockerfile: dockerfiles/Dockerfile.lotus-tx
+            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+          - image: lotus-seeder
+            dockerfile: dockerfiles/Dockerfile.lotus-seeder
+            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+          - image: lotus-wallet
+            dockerfile: dockerfiles/Dockerfile.lotus-wallet
+            platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386
+          - image: lotus-qt
+            dockerfile: dockerfiles/Dockerfile.lotus-qt
+            platforms: linux/amd64,linux/arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set repository owner (lowercase)
+        run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
+      - name: Compute tags
+        id: tags
+        run: |
+          BASE="ghcr.io/${REPO_OWNER_LC}/${{ matrix.image }}"
+          TAGS="${BASE}:${{ inputs.version }},${BASE}:sha-${GITHUB_SHA},${BASE}:latest"
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+      - name: Build & push multi-arch manifest
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platforms }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=docker-${{ matrix.image }}
+          cache-to: type=gha,scope=docker-${{ matrix.image }},mode=max
+          provenance: false
