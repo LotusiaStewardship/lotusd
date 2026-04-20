@@ -19,6 +19,10 @@
 #include <memory>
 #include <thread>
 
+// For evutil_socket_t (used in OnAccept / HandleAccept signatures, must
+// match libevent's evconnlistener_cb on every supported platform).
+#include <event2/util.h>
+
 struct event_base;
 struct evconnlistener;
 struct bufferevent;
@@ -139,12 +143,15 @@ private:
     std::atomic<uint64_t> m_blocksFound{0};
     int64_t m_startTime = 0;
 
-    static void OnAccept(struct evconnlistener *listener, int fd,
+    // libevent's evutil_socket_t is `int` on POSIX and `intptr_t` on Win64,
+    // so use it (rather than plain `int`) for any function pointer that has
+    // to match an evconnlistener_cb / bufferevent_socket_new signature.
+    static void OnAccept(struct evconnlistener *listener, evutil_socket_t fd,
                          struct sockaddr *addr, int socklen, void *ctx);
     static void OnRead(struct bufferevent *bev, void *ctx);
     static void OnEvent(struct bufferevent *bev, short events, void *ctx);
 
-    void HandleAccept(int fd, struct sockaddr *addr);
+    void HandleAccept(evutil_socket_t fd, struct sockaddr *addr);
     void HandleRead(uint32_t sessionId);
     void HandleDisconnect(uint32_t sessionId);
 

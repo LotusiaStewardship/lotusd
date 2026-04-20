@@ -88,7 +88,11 @@ StratumServer::~StratumServer() {
 bool StratumServer::Start() {
     m_startTime = GetTime();
 
+#ifdef WIN32
+    evthread_use_windows_threads();
+#else
     evthread_use_pthreads();
+#endif
 
     m_eventBase = event_base_new();
     if (!m_eventBase) {
@@ -215,7 +219,7 @@ void StratumServer::EventLoop() {
     }
 }
 
-void StratumServer::OnAccept(struct evconnlistener *, int fd,
+void StratumServer::OnAccept(struct evconnlistener *, evutil_socket_t fd,
                               struct sockaddr *addr, int, void *ctx) {
     auto *server = static_cast<StratumServer *>(ctx);
     server->HandleAccept(fd, addr);
@@ -234,11 +238,15 @@ void StratumServer::OnEvent(struct bufferevent *bev, short events, void *ctx) {
     }
 }
 
-void StratumServer::HandleAccept(int fd, struct sockaddr *addr) {
+void StratumServer::HandleAccept(evutil_socket_t fd, struct sockaddr *addr) {
     LOCK(m_cs);
 
     if ((int)m_sessions.size() >= m_config.maxWorkers) {
+#ifdef WIN32
+        closesocket(fd);
+#else
         close(fd);
+#endif
         LogPrint(BCLog::MINING,
                  "Stratum: rejected connection (max workers)\n");
         return;
