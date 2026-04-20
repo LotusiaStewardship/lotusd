@@ -116,6 +116,21 @@ bool CSqliteWrapper::BeginTransaction() {
     // own batches — they would otherwise race and produce "cannot start a
     // transaction within a transaction" failures.
     m_txn_mutex.lock();
+
+    // Self-heal: if a previous COMMIT/ROLLBACK was reported as failing
+    // (e.g. SQLITE_BUSY from a contended WAL or "SQL statements in progress"
+    // from an HTTP read cursor on the shared connection) the C++ mutex was
+    // released but the SQLite-level transaction was left open. Without this
+    // recovery, every subsequent BEGIN IMMEDIATE would fail with
+    // "cannot start a transaction within a transaction" forever.
+    if (sqlite3_get_autocommit(m_db) == 0) {
+        LogPrintf("SQLite: rolling back stale open transaction before "
+                  "BEGIN IMMEDIATE (previous COMMIT/ROLLBACK likely failed)\n");
+        char *errmsg = nullptr;
+        sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, &errmsg);
+        sqlite3_free(errmsg);
+    }
+
     if (!ExecSQL("BEGIN IMMEDIATE")) {
         m_txn_mutex.unlock();
         return false;
@@ -125,12 +140,29 @@ bool CSqliteWrapper::BeginTransaction() {
 
 bool CSqliteWrapper::CommitTransaction() {
     bool ok = ExecSQL("COMMIT");
+    if (!ok) {
+        // COMMIT failed — the sqlite-level transaction is still open. Issue
+        // a best-effort ROLLBACK so the connection is left in autocommit
+        // mode; otherwise the very next BeginTransaction() would emit
+        // "cannot start a transaction within a transaction".
+        char *errmsg = nullptr;
+        sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, &errmsg);
+        sqlite3_free(errmsg);
+    }
     m_txn_mutex.unlock();
     return ok;
 }
 
 bool CSqliteWrapper::RollbackTransaction() {
     bool ok = ExecSQL("ROLLBACK");
+    if (!ok && sqlite3_get_autocommit(m_db) == 0) {
+        // ROLLBACK itself failed AND the connection still thinks a txn is
+        // open. Force a second attempt without going through ExecSQL's log
+        // spam so we at least clear the autocommit flag.
+        char *errmsg = nullptr;
+        sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, &errmsg);
+        sqlite3_free(errmsg);
+    }
     m_txn_mutex.unlock();
     return ok;
 }
