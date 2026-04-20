@@ -7,6 +7,7 @@
 
 #include <blockdb.h>
 #include <chainparams.h>
+#include <clientversion.h>
 #include <consensus/validation.h>
 #include <logging.h>
 #include <node/coin.h>
@@ -14,6 +15,7 @@
 #include <node/ui_interface.h>
 #include <timedata.h>
 #include <undo.h>
+#include <util/system.h>
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
