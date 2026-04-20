@@ -709,9 +709,17 @@ add_subdirectory(bench)
 add_subdirectory(sqlite)
 target_link_libraries(server sqlite-chain)
 
-# REST API v1
+# REST API v1.
+# PRIVATE so the api library is not transitively pulled into thin
+# downstream consumers of `server` (notably lotus-seeder, which only
+# uses bitcoin/db/dns/options.cpp from server and never references
+# StartAPI/StopAPI). The full `lotusd` binary still pulls api in
+# through init.cpp -> StartAPI(), and the api lib's reverse symbol
+# needs (GetDifficulty, HTTPRequest::WriteHeader, ...) are then
+# resolved against the rest of `server` via CMake's circular static
+# library handling (--start-group/--end-group on GNU ld).
 add_subdirectory(api)
-target_link_libraries(server api)
+target_link_libraries(server PRIVATE api)
 
 # Pluggable chain modules
 add_subdirectory(modules)
