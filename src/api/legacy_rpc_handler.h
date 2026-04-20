@@ -66,8 +66,8 @@ bool HandleLegacyRpc(const util::Ref &ctx, HTTPRequest *req,
 const std::unordered_set<std::string> &LegacyRpcAllowlist();
 
 /**
- * Synchronously execute a read-only RPC and write the result as a JSON
- * response on `req`.
+ * Synchronously execute an allowlist-class RPC (read-only or consensus-
+ * validated broadcast) and write the result as a JSON response on `req`.
  *
  * If `resultKey` is non-empty, the RPC's return value is wrapped as
  * `{ "<resultKey>": <result> }` (handy for primitive return values like

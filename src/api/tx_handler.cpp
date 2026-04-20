@@ -14,6 +14,7 @@
 #include <primitives/transaction.h>
 #include <rpc/blockchain.h>
 #include <rpc/protocol.h>
+#include <rpc/request.h>
 #include <rpc/server.h>
 #include <sqlite/block_tree_sqlite.h>
 #include <sqlite3.h>
@@ -24,7 +25,8 @@
 #include <util/strencodings.h>
 #include <util/time.h>
 #include <validation.h>
-#include <consensus/validation.h>
+
+#include <optional>
 
 namespace api {
 
@@ -307,14 +309,15 @@ bool HandleGetMempool(const util::Ref &ctx, HTTPRequest *req,
     return true;
 }
 
-bool HandleSendTx(const util::Ref &ctx, HTTPRequest *req,
-                  const std::vector<std::string> &parts,
-                  const QueryParams &qp) {
+// Shared helper: pull a hex transaction out of either {"hex":"..."} JSON or
+// the raw request body, and validate the encoding.
+static bool ExtractTxHex(HTTPRequest *req, std::string &hexOut,
+                         UniValue *parsedOut = nullptr) {
     std::string body = req->ReadBody();
     if (body.empty()) {
         WriteError(req, HTTP_BAD_REQUEST, "empty_body",
                    "Request body must contain raw transaction hex");
-        return true;
+        return false;
     }
 
     UniValue parsed;
@@ -323,50 +326,121 @@ bool HandleSendTx(const util::Ref &ctx, HTTPRequest *req,
         if (hexVal.isStr()) {
             body = hexVal.get_str();
         }
+        if (parsedOut) *parsedOut = std::move(parsed);
     }
 
     if (!IsHex(body)) {
         WriteError(req, HTTP_BAD_REQUEST, "invalid_hex",
                    "Transaction must be hex-encoded");
-        return true;
+        return false;
     }
 
-    CMutableTransaction mtx;
+    hexOut = std::move(body);
+    return true;
+}
+
+// Dispatch `sendrawtransaction` via the legacy RPC table. Returns the JSON
+// result on success, or writes an error and returns std::nullopt.
+//
+// Going through the RPC ensures we get the *same* relay path the
+// authenticated JSON-RPC interface uses (ATMP + p2p relay). Calling
+// AcceptToMemoryPool directly would only stuff the tx into our local
+// mempool — peers would never see it.
+static std::optional<UniValue>
+DispatchSendRawTransaction(const util::Ref &ctx, HTTPRequest *req,
+                           const std::string &hex,
+                           const UniValue &maxFeeRate) {
+    JSONRPCRequest jreq(ctx);
+    jreq.strMethod = "sendrawtransaction";
+    UniValue params(UniValue::VARR);
+    params.push_back(hex);
+    if (!maxFeeRate.isNull()) {
+        params.push_back(maxFeeRate);
+    }
+    jreq.params = std::move(params);
+    jreq.URI = "/api/v1/txs/broadcast";
+    jreq.authUser = "rest-anon";
+
     try {
-        CDataStream ssData(ParseHex(body), SER_NETWORK, PROTOCOL_VERSION);
-        ssData >> mtx;
+        return tableRPC.execute(GetConfig(), jreq);
+    } catch (const UniValue &objError) {
+        const UniValue &codeV = find_value(objError, "code");
+        const UniValue &msgV = find_value(objError, "message");
+        int rpcCode = codeV.isNum() ? codeV.get_int() : RPC_MISC_ERROR;
+        std::string msg = msgV.isStr() ? msgV.get_str() : objError.write();
+        // Map common rejection paths to 400 — the caller sent something the
+        // network refused. Everything else is a node-side problem (500).
+        int httpStatus = (rpcCode == RPC_VERIFY_REJECTED ||
+                          rpcCode == RPC_VERIFY_ERROR ||
+                          rpcCode == RPC_VERIFY_ALREADY_IN_CHAIN ||
+                          rpcCode == RPC_DESERIALIZATION_ERROR ||
+                          rpcCode == RPC_INVALID_PARAMETER ||
+                          rpcCode == RPC_INVALID_PARAMS ||
+                          rpcCode == RPC_TYPE_ERROR)
+                             ? HTTP_BAD_REQUEST
+                             : HTTP_INTERNAL_SERVER_ERROR;
+        WriteError(req, httpStatus, "rejected", msg);
+        return std::nullopt;
     } catch (const std::exception &e) {
-        WriteError(req, HTTP_BAD_REQUEST, "decode_failed",
-                   std::string("Failed to decode transaction: ") + e.what());
+        WriteError(req, HTTP_INTERNAL_SERVER_ERROR, "internal_error",
+                   e.what());
+        return std::nullopt;
+    }
+}
+
+bool HandleSendTx(const util::Ref &ctx, HTTPRequest *req,
+                  const std::vector<std::string> &parts,
+                  const QueryParams &qp) {
+    // POST /api/v1/txs/send — legacy alias kept for backwards compatibility.
+    // Delegates to the `sendrawtransaction` RPC so the tx is actually
+    // relayed to peers (the previous direct AcceptToMemoryPool call only
+    // put it in the local mempool).
+    std::string hex;
+    UniValue parsed;
+    if (!ExtractTxHex(req, hex, &parsed)) {
         return true;
     }
 
-    CTransactionRef tx = MakeTransactionRef(std::move(mtx));
-    const TxId &txid = tx->GetId();
+    UniValue maxFeeRate = NullUniValue;
+    if (parsed.isObject()) {
+        const UniValue &v = find_value(parsed, "maxfeerate");
+        if (!v.isNull()) maxFeeRate = v;
+    }
 
-    NodeContext *node =
-        ctx.Has<NodeContext>() ? &ctx.Get<NodeContext>() : nullptr;
-    if (!node || !node->mempool) {
-        WriteError(req, HTTP_INTERNAL_SERVER_ERROR, "no_mempool",
-                   "Mempool not available");
+    auto result = DispatchSendRawTransaction(ctx, req, hex, maxFeeRate);
+    if (!result) return true;
+
+    UniValue out(UniValue::VOBJ);
+    // sendrawtransaction returns the txid as a bare string.
+    out.pushKV("txid", result->isStr() ? result->get_str() : result->write());
+    out.pushKV("accepted", true);
+    WriteJSON(req, 201, out);
+    return true;
+}
+
+bool HandleBroadcastTx(const util::Ref &ctx, HTTPRequest *req,
+                       const std::vector<std::string> &parts,
+                       const QueryParams &qp) {
+    // POST /api/v1/txs/broadcast — preferred entry point. Returns the raw
+    // RPC result wrapped as { "txid": "<hex>" }.
+    std::string hex;
+    UniValue parsed;
+    if (!ExtractTxHex(req, hex, &parsed)) {
         return true;
     }
 
-    TxValidationState state;
-    bool accepted = AcceptToMemoryPool(
-        GetConfig(), *node->mempool, state, std::move(tx),
-        false /* bypass_limits */);
-
-    if (!accepted) {
-        WriteError(req, HTTP_BAD_REQUEST, "rejected",
-                   state.GetRejectReason());
-        return true;
+    UniValue maxFeeRate = NullUniValue;
+    if (parsed.isObject()) {
+        const UniValue &v = find_value(parsed, "maxfeerate");
+        if (!v.isNull()) maxFeeRate = v;
     }
 
-    UniValue result(UniValue::VOBJ);
-    result.pushKV("txid", txid.GetHex());
-    result.pushKV("accepted", true);
-    WriteJSON(req, 201, result);
+    auto result = DispatchSendRawTransaction(ctx, req, hex, maxFeeRate);
+    if (!result) return true;
+
+    UniValue out(UniValue::VOBJ);
+    out.pushKV("txid", result->isStr() ? result->get_str() : result->write());
+    WriteJSON(req, 201, out);
     return true;
 }
 

@@ -29,6 +29,23 @@ bool HandleSendTx(const util::Ref &ctx, HTTPRequest *req,
                   const std::vector<std::string> &parts,
                   const QueryParams &qp);
 
+/**
+ * POST /api/v1/txs/broadcast — dispatches to `sendrawtransaction`.
+ *
+ * Accepts either:
+ *   - a JSON body: `{ "hex": "<rawhex>", "maxfeerate": <optional float> }`
+ *   - or the raw hex string as the request body.
+ *
+ * Returns the dispatcher's result wrapped as `{ "txid": "<hex>" }` so the
+ * shape stays stable even if the underlying RPC ever changes.
+ *
+ * Unauthenticated: the network's consensus + standardness rules are the
+ * gatekeeper for what can be relayed.
+ */
+bool HandleBroadcastTx(const util::Ref &ctx, HTTPRequest *req,
+                       const std::vector<std::string> &parts,
+                       const QueryParams &qp);
+
 bool HandleDecodeTx(const util::Ref &ctx, HTTPRequest *req,
                     const std::vector<std::string> &parts,
                     const QueryParams &qp);
