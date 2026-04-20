@@ -20,12 +20,6 @@ defaults:
 permissions:
   contents: read
 
-env:
-  # Opt every JS-based action onto Node.js 24 to silence the
-  # "Node.js 20 actions are deprecated" runner warnings
-  # (see https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     name: 🛠️  ${{ matrix.component }} / windows-${{ matrix.arch }}
@@ -49,13 +43,13 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build depends image (cached)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: dockerfiles/Dockerfile.depends-windows
@@ -65,7 +59,7 @@ jobs:
           cache-to: type=gha,scope=depends-windows,mode=max
 
       - name: Cache depends/built and SDKs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             depends/built
@@ -76,7 +70,7 @@ jobs:
             depends-windows-${{ matrix.arch }}-
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache
           key: ccache-windows-${{ matrix.arch }}-${{ matrix.component }}-${{ github.sha }}
@@ -158,7 +152,7 @@ jobs:
           ls -la artifacts/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: lotus-${{ matrix.component }}-windows-${{ matrix.arch }}-${{ inputs.version }}
           path: artifacts/lotus-*-windows-${{ matrix.arch }}.zip

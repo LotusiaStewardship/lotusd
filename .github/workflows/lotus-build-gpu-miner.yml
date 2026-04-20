@@ -25,12 +25,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  # Opt every JS-based action onto Node.js 24 to silence the
-  # "Node.js 20 actions are deprecated" runner warnings
-  # (see https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   binaries:
     name: 🔥 Binary / ${{ matrix.variant }}-${{ matrix.arch }}
@@ -50,18 +44,18 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: all
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image (single-arch, --load)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -98,7 +92,7 @@ jobs:
           ls -la artifacts/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: lotus-gpu-miner-${{ matrix.variant }}-linux-${{ matrix.arch }}-${{ inputs.version }}
           path: |
@@ -126,18 +120,18 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: all
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -147,7 +141,7 @@ jobs:
         run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
       - name: Build & push manifest
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}

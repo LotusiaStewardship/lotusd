@@ -16,12 +16,6 @@ permissions:
   contents: write
   packages: write
 
-env:
-  # Opt every JS-based action onto Node.js 24 to silence the
-  # "Node.js 20 actions are deprecated" runner warnings
-  # (see https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   collect-and-publish:
     name: 🎁 Collect Artifacts & Publish Release
@@ -29,12 +23,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ./incoming
           merge-multiple: false
