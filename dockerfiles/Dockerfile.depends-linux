@@ -44,6 +44,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
         xz-utils \
         zip \
+        # Host-side dev libraries needed by the cmake "native" sub-build
+        # (NativeExecutable.cmake spawns a second cmake configure that
+        #  reuses src/CMakeLists.txt for the build host, which calls
+        #  find_package(SQLite3 REQUIRED) etc unconditionally).
+        libboost-all-dev \
+        libdb++-dev \
+        libevent-dev \
+        libsqlite3-dev \
+        libssl-dev \
+        libzmq3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Allow ccache to be used transparently by gcc/g++.

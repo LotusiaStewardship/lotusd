@@ -40,6 +40,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
         xz-utils \
         zip \
+        # Host-side dev libraries needed by the cmake "native" sub-build
+        # (see comment in Dockerfile.depends-linux).
+        libboost-all-dev \
+        libdb++-dev \
+        libevent-dev \
+        libsqlite3-dev \
+        libssl-dev \
+        libzmq3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Force the POSIX threading model on the mingw toolchain (needed by C++11

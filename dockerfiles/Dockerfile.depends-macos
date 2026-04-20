@@ -42,6 +42,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtinfo5 \
         libtool \
         libz-dev \
+        # Host-side dev libraries needed by the cmake "native" sub-build
+        # (see comment in Dockerfile.depends-linux).
+        libboost-all-dev \
+        libdb++-dev \
+        libevent-dev \
+        libsqlite3-dev \
+        libssl-dev \
+        libzmq3-dev \
         llvm \
         ninja-build \
         patch \
