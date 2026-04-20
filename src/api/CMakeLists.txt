@@ -14,6 +14,7 @@ add_library(api
     stats_handler.cpp
     overview_handler.cpp
     sitemap_handler.cpp
+    stratum_handler.cpp
 )
 
 target_link_libraries(api sqlite-chain SQLite::SQLite3 rpcclient)

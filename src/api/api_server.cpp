@@ -16,6 +16,7 @@
 #include <api/overview_handler.h>
 #include <api/sitemap_handler.h>
 #include <api/stats_handler.h>
+#include <api/stratum_handler.h>
 #include <api/tx_handler.h>
 #include <api/wallet_handler.h>
 #include <config.h>
@@ -258,8 +259,9 @@ void StartAPI(const util::Ref &context) {
     AddRoute(HTTPRequest::GET, "blocks",    api::HandleGetBlocks,      10);
     AddRoute(HTTPRequest::GET, "txs",       api::HandleGetTx,          15);
     AddRoute(HTTPRequest::GET, "mempool",   api::HandleGetMempool,      5);
-    AddRoute(HTTPRequest::POST,"txs/send",  api::HandleSendTx);
-    AddRoute(HTTPRequest::POST,"txs/decode",api::HandleDecodeTx);
+    AddRoute(HTTPRequest::POST,"txs/send",      api::HandleSendTx);
+    AddRoute(HTTPRequest::POST,"txs/broadcast", api::HandleBroadcastTx);
+    AddRoute(HTTPRequest::POST,"txs/decode",    api::HandleDecodeTx);
     AddRoute(HTTPRequest::GET, "addresses", api::HandleGetAddress,     15);
     AddRoute(HTTPRequest::GET, "utxos",     api::HandleGetUtxos,       10);
     AddRoute(HTTPRequest::GET, "network",   api::HandleGetNetworkInfo, 30);
@@ -298,6 +300,14 @@ void StartAPI(const util::Ref &context) {
 
     AddRoute(HTTPRequest::POST, "scripts/decode",       api::HandleDecodeScript);
     AddRoute(HTTPRequest::POST, "txs/decoderawtransaction", api::HandleDecodeTx);
+
+    // Merge-mining / Stratum / share-chain visibility endpoints
+    // (ported from lotused on consolidation; see scryptchain + stratum
+    // libraries for the underlying state).
+    AddRoute(HTTPRequest::GET, "stratum",          api::HandleGetStratumInfo,    5);
+    AddRoute(HTTPRequest::GET, "stratum/workers",  api::HandleGetStratumWorkers, 5);
+    AddRoute(HTTPRequest::GET, "sharechain",       api::HandleGetShareChainInfo, 5);
+    AddRoute(HTTPRequest::GET, "scryptchains",     api::HandleGetScryptChains,   5);
 
     api::StartEvents();
     api::StartStatsCollector(context);
