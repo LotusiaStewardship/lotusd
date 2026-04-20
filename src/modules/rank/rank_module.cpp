@@ -244,7 +244,13 @@ static bool DecodeRankOutput(const CScript &script, RankVote &vote) {
 static std::string DateFromTimestamp(int64_t ts) {
     time_t t = static_cast<time_t>(ts);
     struct tm utc;
+#ifdef _WIN32
+    // MSVC/MinGW use the Microsoft-specific gmtime_s, which inverts the
+    // argument order vs POSIX gmtime_r.
+    gmtime_s(&utc, &t);
+#else
     gmtime_r(&t, &utc);
+#endif
     char buf[11];
     strftime(buf, sizeof(buf), "%Y-%m-%d", &utc);
     return std::string(buf);

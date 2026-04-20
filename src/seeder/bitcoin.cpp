@@ -6,6 +6,7 @@
 
 #include <chainparams.h>
 #include <clientversion.h>
+#include <compat.h>
 #include <hash.h>
 #include <netbase.h>
 #include <primitives/blockhash.h>
@@ -16,6 +17,15 @@
 #include <util/time.h>
 
 #include <algorithm>
+
+// Portable wrapper: POSIX close() vs Winsock closesocket() for the SOCKET
+// returned by socket()/accept(). The seeder uses raw sockets (not libevent)
+// so we need to call the right close routine on each platform.
+#ifdef WIN32
+#define SEEDER_CLOSE_SOCKET(s) closesocket(s)
+#else
+#define SEEDER_CLOSE_SOCKET(s) close(s)
+#endif
 
 #define BITCOIN_SEED_NONCE 0x0539a019ca550825ULL
 
@@ -30,7 +40,7 @@ void CSeederNode::Send() {
     if (nBytes > 0) {
         vSend.erase(vSend.begin(), vSend.begin() + nBytes);
     } else {
-        close(sock);
+        SEEDER_CLOSE_SOCKET(sock);
         sock = INVALID_SOCKET;
     }
 }
@@ -288,7 +298,7 @@ bool CSeederNode::Run() {
     if (sock == INVALID_SOCKET) {
         res = false;
     }
-    close(sock);
+    SEEDER_CLOSE_SOCKET(sock);
     sock = INVALID_SOCKET;
     return (ban == 0) && res;
 }
