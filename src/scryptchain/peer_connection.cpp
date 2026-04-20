@@ -16,6 +16,13 @@
 #ifdef WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+// <windows.h> (transitively included by winsock2.h) #define-s SendMessage to
+// either SendMessageA or SendMessageW, which collides with this class's own
+// SendMessage() member function. We don't use the Win32 USER message API
+// here, so just undefine the macro.
+#ifdef SendMessage
+#undef SendMessage
+#endif
 #else
 #include <arpa/inet.h>
 #include <netdb.h>

@@ -8,6 +8,10 @@
 #include <scryptchain/chain_params.h>
 #include <scryptchain/peer_connection.h>
 
+// For evutil_socket_t (used in OnMaintenance, must match libevent's
+// event_callback_fn on every supported platform).
+#include <event2/util.h>
+
 #include <atomic>
 #include <deque>
 #include <functional>
@@ -61,7 +65,7 @@ private:
     void OnPeerMessage(int peerId, const PeerMessage &msg);
     void OnPeerDisconnect(int peerId);
 
-    static void OnMaintenance(int fd, short what, void *ctx);
+    static void OnMaintenance(evutil_socket_t fd, short what, void *ctx);
 
     const ScryptChainParams &m_params;
     int m_maxOutbound;
