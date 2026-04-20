@@ -20,6 +20,12 @@ defaults:
 permissions:
   contents: read
 
+env:
+  # Opt every JS-based action onto Node.js 24 to silence the
+  # "Node.js 20 actions are deprecated" runner warnings
+  # (see https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: 🛠️  ${{ matrix.component }} / windows-${{ matrix.arch }}
