@@ -34,7 +34,11 @@ jobs:
       fail-fast: false
       matrix:
         # lotus-qt deferred — depends/ Qt 5.9.8 incompatible with GCC 11+
-        component: [ lotusd, lotus-cli, lotus-tx, lotus-seeder, lotus-wallet ]
+        # lotus-seeder skipped on Windows — the seeder DNS daemon uses
+        # POSIX-only recvmsg()/sendmsg() with IP_RECVDSTADDR / IPV6_PKTINFO
+        # control messages that have no straight Winsock equivalent. The
+        # seeder is shipped only for Linux/macOS for now.
+        component: [ lotusd, lotus-cli, lotus-tx, lotus-wallet ]
         arch: [ amd64 ]
         include:
           - arch: amd64
@@ -104,7 +108,7 @@ jobs:
                        -DBASEPREFIX=/src/depends \
                        -DBUILD_BITCOIN_QT=$([ '${{ matrix.component }}' = 'lotus-qt' ] && echo ON || echo OFF) \
                        -DBUILD_BITCOIN_WALLET=ON \
-                       -DBUILD_BITCOIN_SEEDER=ON \
+                       -DBUILD_BITCOIN_SEEDER=OFF \
                        -DBUILD_BITCOIN_ZMQ=ON \
                        -DENABLE_UPNP_DEFAULT=OFF \
                        -DUSE_JEMALLOC=OFF \
