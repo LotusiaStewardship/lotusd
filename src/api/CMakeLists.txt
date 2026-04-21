@@ -4,6 +4,7 @@ add_library(api
     api_util.cpp
     chain_handler.cpp
     dashboard_handler.cpp
+    health_handler.cpp
     legacy_rpc_handler.cpp
     tx_handler.cpp
     address_handler.cpp

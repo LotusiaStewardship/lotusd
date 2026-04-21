@@ -639,6 +639,30 @@ static UniValue BuildPaths() {
         paths.pushKV("/api/v1/wallet", path);
     }
 
+    // /health
+    {
+        UniValue get(UniValue::VOBJ);
+        get.pushKV("summary", "Lightweight liveness probe");
+        get.pushKV("description",
+            "Cheap liveness check intended for browsers and light wallets. "
+            "Always returns 200 once the chain is loaded; the `ibd` flag "
+            "indicates whether the node is still doing initial block "
+            "download. Returns 503 only when no tip is available yet.");
+        get.pushKV("operationId", "getHealth");
+        UniValue tags(UniValue::VARR);
+        tags.push_back("Node");
+        get.pushKV("tags", tags);
+        UniValue responses(UniValue::VOBJ);
+        responses.pushKV("200", JsonResponse("Health snapshot",
+                                              SchemaRef("HealthInfo")));
+        responses.pushKV("503", JsonResponse("Chain not yet loaded",
+                                              SchemaRef("Error")));
+        get.pushKV("responses", responses);
+        UniValue path(UniValue::VOBJ);
+        path.pushKV("get", get);
+        paths.pushKV("/api/v1/health", path);
+    }
+
     return paths;
 }
 
@@ -863,6 +887,32 @@ static UniValue BuildSchemas() {
         props.pushKV("onetry", oneArr);
         s.pushKV("properties", props);
         schemas.pushKV("NetworkNodes", s);
+    }
+
+    // HealthInfo
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        s.pushKV("description",
+            "Liveness snapshot returned by GET /api/v1/health. Cheap to "
+            "compute and cached for one second.");
+        UniValue props(UniValue::VOBJ);
+        UniValue statusEnum(UniValue::VOBJ);
+        statusEnum.pushKV("type", "string");
+        UniValue values(UniValue::VARR);
+        values.push_back("ok");
+        values.push_back("syncing");
+        statusEnum.pushKV("enum", values);
+        props.pushKV("status", statusEnum);
+        props.pushKV("height", IntSchema());
+        props.pushKV("best_block_hash", StringSchema());
+        props.pushKV("median_time", IntSchema());
+        props.pushKV("ibd", BoolSchema());
+        props.pushKV("uptime_seconds", IntSchema());
+        props.pushKV("version", IntSchema());
+        props.pushKV("subversion", StringSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("HealthInfo", s);
     }
 
     return schemas;

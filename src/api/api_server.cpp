@@ -9,6 +9,7 @@
 #include <api/chain_handler.h>
 #include <api/dashboard_handler.h>
 #include <api/events_handler.h>
+#include <api/health_handler.h>
 #include <api/legacy_rpc_handler.h>
 #include <api/mining_handler.h>
 #include <api/openapi_handler.h>
@@ -301,6 +302,7 @@ void StartAPI(const util::Ref &context) {
     AddRoute(HTTPRequest::GET, "overview",  api::HandleGetOverview,    10);
     AddRoute(HTTPRequest::GET, "wallet",    api::HandleGetWalletInfo,  15);
     AddRoute(HTTPRequest::GET, "events",    api::HandleGetEvents);
+    AddRoute(HTTPRequest::GET, "health",    api::HandleGetHealth,       1);
     AddRoute(HTTPRequest::GET, "openapi.json", api::HandleGetOpenAPISchema, 3600);
 
     // ── Unauthenticated read-only legacy RPC surface ───────────────────
