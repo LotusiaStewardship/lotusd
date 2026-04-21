@@ -6,6 +6,9 @@ struct NodeContext;
 namespace Consensus {
 struct Params;
 }
+namespace util {
+class Ref;
+}
 
 const std::string MSG_UPDATEBLKTIP = "updateblktip";
 const std::string MSG_MEMPOOLTXADD = "mempooltxadd";
@@ -20,5 +23,6 @@ const std::vector<std::string> AVAILABLE_PUB_MESSAGES = {
 };
 
 bool StartNngInterface(const NodeContext &node,
-                       const Consensus::Params &consensus);
+                       const Consensus::Params &consensus,
+                       const util::Ref &context);
 void StopNngInterface();

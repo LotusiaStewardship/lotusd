@@ -65,6 +65,13 @@ void UnregisterHTTPHandler(const std::string &prefix, bool exactMatch);
 /**
  * In-flight HTTP request.
  * Wraps cpp-httplib request/response pair.
+ *
+ * In-memory mode: an HTTPRequest can also be constructed without a
+ * cpp-httplib backing pair via MakeInMemory(). All Write* and Read*
+ * methods then operate on internal buffers, which can be retrieved with
+ * the Captured* accessors. This is what powers the in-process API
+ * dispatcher used by the NNG RestCall tunnel — existing handlers run
+ * unchanged but their reply is harvested instead of sent over a socket.
  */
 class HTTPRequest {
 public:
@@ -76,6 +83,29 @@ public:
     ~HTTPRequest();
 
     enum RequestMethod { UNKNOWN, GET, POST, HEAD, PUT, OPTIONS };
+
+    /**
+     * Build an in-memory HTTPRequest for offline handler dispatch (NNG
+     * RestCall tunnel, internal calls, tests). The handler sees a normal
+     * HTTPRequest — body via ReadBody(), method via GetRequestMethod() —
+     * and its WriteHeader/WriteReply output is captured for the caller.
+     */
+    static std::unique_ptr<HTTPRequest>
+    MakeInMemory(RequestMethod method, const std::string &uri,
+                 const std::string &body,
+                 const std::string &contentType = "");
+
+    /** True iff this request was created via MakeInMemory(). */
+    bool IsInMemory() const;
+
+    /** Captured response status code (in-memory mode only). */
+    int CapturedStatus() const;
+    /** Captured response body (in-memory mode only). */
+    const std::string &CapturedBody() const;
+    /** Captured response Content-Type (defaults to text/plain). */
+    std::string CapturedContentType() const;
+    /** True iff WriteReply was called on this in-memory request. */
+    bool ReplySent() const;
 
     /** Get requested URI */
     std::string GetURI() const;

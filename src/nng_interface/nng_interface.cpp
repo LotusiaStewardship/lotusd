@@ -4,17 +4,25 @@
 
 #include <array>
 #include <optional>
+#include <set>
+#include <string>
+#include <vector>
 
+#include <api/api_dispatcher.h>
+#include <api/api_util.h>
+#include <api/legacy_rpc_handler.h>
 #include <blockdb.h>
 #include <chainparams.h>
 #include <clientversion.h>
 #include <consensus/validation.h>
+#include <httpserver.h>
 #include <logging.h>
 #include <node/coin.h>
 #include <node/context.h>
 #include <node/ui_interface.h>
 #include <timedata.h>
 #include <undo.h>
+#include <util/ref.h>
 #include <util/system.h>
 #include <util/translation.h>
 #include <validation.h>
@@ -63,6 +71,17 @@ enum class NngRpcErrorCode {
     BLOCK_NOT_FOUND,
     BLOCK_DATA_CORRUPTED,
     INVALID_BLOCK_SLICE,
+    // ── HTTP-mirror tunnel errors ───────────────────────────────────────
+    // A required string field on the RestCall / typed request was empty.
+    INVALID_REQUEST,
+    // RestCall.method or rpc/<method> is not on the read-only allowlist.
+    METHOD_NOT_ALLOWED,
+    // No /api/v1/<path> route matches the call.
+    NOT_FOUND,
+    // The handler ran but threw / returned a 5xx without a body.
+    HANDLER_FAILURE,
+    // RestCall.body exceeds -maxapibodysize.
+    BODY_TOO_LARGE,
 };
 
 struct RpcResult {
@@ -87,10 +106,38 @@ std::string ErrorMsg(NngRpcErrorCode code) {
             return "Block data corrupted";
         case NngRpcErrorCode::INVALID_BLOCK_SLICE:
             return "Invalid block slice";
+        case NngRpcErrorCode::INVALID_REQUEST:
+            return "Invalid request: a required field is missing or empty";
+        case NngRpcErrorCode::METHOD_NOT_ALLOWED:
+            return "Method not allowed: this verb/path is not on the "
+                   "unauthenticated read-only surface";
+        case NngRpcErrorCode::NOT_FOUND:
+            return "No /api/v1 route matches the requested path";
+        case NngRpcErrorCode::HANDLER_FAILURE:
+            return "Handler failed to produce a response";
+        case NngRpcErrorCode::BODY_TOO_LARGE:
+            return "Request body exceeds -maxapibodysize";
         default:
             return "Unknown error";
     }
 }
+
+// Default cap on RestCall.body, matched by init.cpp's -maxapibodysize
+// help text. 1 MiB is enough for any sane JSON-RPC POST while still
+// keeping the worker pool from being trivially DoS'd by huge bodies.
+static constexpr size_t DEFAULT_MAX_API_BODY_SIZE = 1 << 20;
+
+// POST routes safe to expose unauthenticated over the NNG tunnel.
+// Only pure decoders / analyzers that take a hex/transaction blob and
+// return its parsed form — no relay, no wallet, no operator state.
+// `txs/send` and `txs/broadcast` deliberately stay HTTP-only; the
+// LegacyRpcAllowlist already covers consensus-validated broadcasts via
+// `rpc/sendrawtransaction` for clients that want them over NNG.
+static const std::set<std::string> kRestTunnelAllowedPosts = {
+    "txs/decode",
+    "txs/decoderawtransaction",
+    "scripts/decode",
+};
 
 class NngRpcServer;
 
@@ -117,6 +164,13 @@ class NngRpcServer {
     std::vector<NngRpcWorker> m_workers;
     const Consensus::Params &m_consensus;
     const NodeContext &m_node;
+    // Caller-owned context handed to the in-process API dispatcher. The
+    // live HTTP layer threads the same util::Ref through every handler
+    // (see api_server.cpp's StartAPI) so we mirror that exactly.
+    const util::Ref &m_context;
+    // Cached -maxapibodysize (resolved at Listen time so workers don't
+    // pay the gArgs lookup on every RestCall).
+    size_t m_max_body_size{DEFAULT_MAX_API_BODY_SIZE};
 
     NngRpcErrorCode GetBlock(flatbuffers::FlatBufferBuilder &builder,
                              const NngInterface::GetBlockRequest *request);
@@ -136,9 +190,32 @@ class NngRpcServer {
     NngRpcErrorCode GetMempool(flatbuffers::FlatBufferBuilder &builder,
                                const NngInterface::GetMempoolRequest *request);
 
+    // ── HTTP-mirror typed handlers ──────────────────────────────────────
+    NngRpcErrorCode
+    GetChainInfo(flatbuffers::FlatBufferBuilder &fbb,
+                 const NngInterface::GetChainInfoRequest *request);
+    NngRpcErrorCode GetTx(flatbuffers::FlatBufferBuilder &fbb,
+                          const NngInterface::GetTxRequest *request);
+    NngRpcErrorCode
+    GetAddress(flatbuffers::FlatBufferBuilder &fbb,
+               const NngInterface::GetAddressRequest *request);
+    NngRpcErrorCode GetUtxos(flatbuffers::FlatBufferBuilder &fbb,
+                             const NngInterface::GetUtxosRequest *request);
+    NngRpcErrorCode
+    GetMiningInfo(flatbuffers::FlatBufferBuilder &fbb,
+                  const NngInterface::GetMiningInfoRequest *request);
+    NngRpcErrorCode
+    GetStratumInfo(flatbuffers::FlatBufferBuilder &fbb,
+                   const NngInterface::GetStratumInfoRequest *request);
+
+    // ── Generic REST tunnel ─────────────────────────────────────────────
+    NngRpcErrorCode HandleRestCall(flatbuffers::FlatBufferBuilder &fbb,
+                                   const NngInterface::RestCall *request);
+
 public:
-    NngRpcServer(const Consensus::Params &consensus, const NodeContext &node)
-        : m_consensus(consensus), m_node(node) {}
+    NngRpcServer(const Consensus::Params &consensus, const NodeContext &node,
+                 const util::Ref &context)
+        : m_consensus(consensus), m_node(node), m_context(context) {}
 
     NngRpcErrorCode HandleMsg(flatbuffers::FlatBufferBuilder &builder,
                               nng_msg *incoming_msg);
@@ -157,11 +234,20 @@ bool NngRpcServer::Listen(const std::string &rpc_url) {
         strprintf("Failed listening on -nngrpc=%s: %%s", rpc_url);
     NNG_TRY_ERROR(nng_listen(m_sock, rpc_url.c_str(), NULL, 0),
                   listen_failure_msg.c_str());
+    // Resolve -maxapibodysize once. Negative values (or anything unparsable)
+    // disable the cap entirely; we mirror gArgs.GetArg's int64 contract here.
+    {
+        const int64_t configured =
+            gArgs.GetArg("-maxapibodysize", DEFAULT_MAX_API_BODY_SIZE);
+        m_max_body_size =
+            configured <= 0 ? 0 : static_cast<size_t>(configured);
+    }
     m_workers.resize(NUM_WORKERS);
     for (NngRpcWorker &worker : m_workers) {
         worker.Init(m_sock, this);
     }
-    LogPrintf("🔌 NNG RPC: %s\n", rpc_url);
+    LogPrintf("🔌 NNG RPC: %s (max RestCall body: %zu bytes)\n", rpc_url,
+              m_max_body_size);
     return true;
 }
 
@@ -254,6 +340,27 @@ NngRpcErrorCode NngRpcServer::HandleMsg(flatbuffers::FlatBufferBuilder &fbb,
         }
         case NngInterface::RpcRequest_GetMempoolRequest: {
             return GetMempool(fbb, rpc->rpc_as_GetMempoolRequest());
+        }
+        case NngInterface::RpcRequest_GetChainInfoRequest: {
+            return GetChainInfo(fbb, rpc->rpc_as_GetChainInfoRequest());
+        }
+        case NngInterface::RpcRequest_GetTxRequest: {
+            return GetTx(fbb, rpc->rpc_as_GetTxRequest());
+        }
+        case NngInterface::RpcRequest_GetAddressRequest: {
+            return GetAddress(fbb, rpc->rpc_as_GetAddressRequest());
+        }
+        case NngInterface::RpcRequest_GetUtxosRequest: {
+            return GetUtxos(fbb, rpc->rpc_as_GetUtxosRequest());
+        }
+        case NngInterface::RpcRequest_GetMiningInfoRequest: {
+            return GetMiningInfo(fbb, rpc->rpc_as_GetMiningInfoRequest());
+        }
+        case NngInterface::RpcRequest_GetStratumInfoRequest: {
+            return GetStratumInfo(fbb, rpc->rpc_as_GetStratumInfoRequest());
+        }
+        case NngInterface::RpcRequest_RestCall: {
+            return HandleRestCall(fbb, rpc->rpc_as_RestCall());
         }
         default:
             return NngRpcErrorCode::UNKNOWN_RPC_METHOD;
@@ -546,6 +653,338 @@ NngRpcServer::GetMempool(flatbuffers::FlatBufferBuilder &fbb,
     return NngRpcErrorCode::NO_RPC_ERROR;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// HTTP-mirror typed handlers
+// ─────────────────────────────────────────────────────────────────────────
+//
+// All six typed handlers and the generic RestCall tunnel ultimately call
+// api::DispatchApiCall, which runs the matching /api/v1/<...> route's
+// handler against an in-memory HTTPRequest and returns the captured JSON
+// (or whatever Content-Type the handler chose). This means:
+//
+//   * Logic, validation, and error envelopes match the HTTP layer 1:1.
+//   * Adding a new endpoint to the live HTTP API automatically makes it
+//     reachable over the RestCall tunnel — no schema bump needed.
+//   * Bugs are fixed in one place, never in two parallel implementations.
+//
+// The typed responses (GetChainInfoResponse, GetTxResponse, …) are thin
+// envelopes around `status_code` + raw JSON `body`. Splitting individual
+// JSON fields into typed flatbuffer fields is a follow-up and is purely
+// additive (existing clients keep parsing the JSON).
+
+namespace {
+
+// Builds a flatbuffers SubResponse from a captured API call.
+flatbuffers::Offset<NngInterface::SubResponse>
+CreateSubResponse(flatbuffers::FlatBufferBuilder &fbb,
+                  const std::string &path,
+                  const api::CapturedApiResponse &resp) {
+    return NngInterface::CreateSubResponse(
+        fbb, fbb.CreateString(path), static_cast<uint16_t>(resp.status),
+        fbb.CreateVector(reinterpret_cast<const uint8_t *>(resp.body.data()),
+                         resp.body.size()));
+}
+
+// Helper for handlers that fan out across multiple HTTP routes (chain
+// info, mining info, stratum info). Calls each (method, path) pair via
+// the in-process dispatcher and pushes a SubResponse onto `out`.
+//
+// Dispatch failures (route missing, body too large) are surfaced as
+// SubResponses with the corresponding HTTP-style status so a single
+// missing sub-route doesn't fail the whole batch.
+void DispatchAndPush(
+    flatbuffers::FlatBufferBuilder &fbb, const util::Ref &context,
+    const std::string &path,
+    std::vector<flatbuffers::Offset<NngInterface::SubResponse>> &out) {
+    api::QueryParams qp;
+    api::DispatchStatus ds;
+    auto resp = api::DispatchApiCall(context, HTTPRequest::GET, path, qp,
+                                     /*body=*/"", /*content_type=*/"", ds);
+    if (ds == api::DISPATCH_NOT_FOUND) {
+        resp.status = 404;
+        resp.content_type = "application/json";
+        resp.body = "{\"error\":\"not_found\",\"message\":\"route is not "
+                    "registered on this build\",\"status\":404}\n";
+    }
+    out.push_back(CreateSubResponse(fbb, path, resp));
+}
+
+} // namespace
+
+NngRpcErrorCode
+NngRpcServer::GetChainInfo(flatbuffers::FlatBufferBuilder &fbb,
+                           const NngInterface::GetChainInfoRequest *request) {
+    std::vector<flatbuffers::Offset<NngInterface::SubResponse>> sub;
+    // If no flag is set the request is meaningless — default to full so a
+    // bare GetChainInfoRequest still does something useful.
+    const bool any_flag = request->include_full() ||
+                          request->include_tip() ||
+                          request->include_best_block_hash() ||
+                          request->include_block_count();
+    const bool include_full = !any_flag || request->include_full();
+    if (include_full) {
+        DispatchAndPush(fbb, m_context, "chain", sub);
+    }
+    if (request->include_tip()) {
+        DispatchAndPush(fbb, m_context, "chain/tip", sub);
+    }
+    if (request->include_best_block_hash()) {
+        DispatchAndPush(fbb, m_context, "chain/best-block-hash", sub);
+    }
+    if (request->include_block_count()) {
+        DispatchAndPush(fbb, m_context, "chain/block-count", sub);
+    }
+    fbb.Finish(NngInterface::CreateGetChainInfoResponse(
+        fbb, fbb.CreateVector(sub)));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode NngRpcServer::GetTx(flatbuffers::FlatBufferBuilder &fbb,
+                                    const NngInterface::GetTxRequest *request) {
+    if (!request->txid() || request->txid()->size() == 0) {
+        return NngRpcErrorCode::INVALID_REQUEST;
+    }
+    api::QueryParams qp;
+    qp.params["txid"] = request->txid()->str();
+    qp.params["verbose"] = request->verbose() ? "true" : "false";
+    if (request->block_hash() && request->block_hash()->size() > 0) {
+        qp.params["blockhash"] = request->block_hash()->str();
+    }
+    api::DispatchStatus ds;
+    auto resp = api::DispatchApiCall(m_context, HTTPRequest::GET, "txs", qp,
+                                     /*body=*/"", /*content_type=*/"", ds);
+    if (ds == api::DISPATCH_NOT_FOUND) {
+        return NngRpcErrorCode::NOT_FOUND;
+    }
+    fbb.Finish(NngInterface::CreateGetTxResponse(
+        fbb, static_cast<uint16_t>(resp.status),
+        fbb.CreateVector(reinterpret_cast<const uint8_t *>(resp.body.data()),
+                         resp.body.size())));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode
+NngRpcServer::GetAddress(flatbuffers::FlatBufferBuilder &fbb,
+                         const NngInterface::GetAddressRequest *request) {
+    if (!request->address() || request->address()->size() == 0) {
+        return NngRpcErrorCode::INVALID_REQUEST;
+    }
+    api::QueryParams qp;
+    qp.params["address"] = request->address()->str();
+    qp.params["limit"] = std::to_string(request->limit());
+    qp.params["offset"] = std::to_string(request->offset());
+    api::DispatchStatus ds;
+    auto resp = api::DispatchApiCall(m_context, HTTPRequest::GET, "addresses",
+                                     qp, "", "", ds);
+    if (ds == api::DISPATCH_NOT_FOUND) {
+        return NngRpcErrorCode::NOT_FOUND;
+    }
+    fbb.Finish(NngInterface::CreateGetAddressResponse(
+        fbb, static_cast<uint16_t>(resp.status),
+        fbb.CreateVector(reinterpret_cast<const uint8_t *>(resp.body.data()),
+                         resp.body.size())));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode
+NngRpcServer::GetUtxos(flatbuffers::FlatBufferBuilder &fbb,
+                       const NngInterface::GetUtxosRequest *request) {
+    if (!request->address() || request->address()->size() == 0) {
+        return NngRpcErrorCode::INVALID_REQUEST;
+    }
+    api::QueryParams qp;
+    qp.params["address"] = request->address()->str();
+    qp.params["limit"] = std::to_string(request->limit());
+    qp.params["offset"] = std::to_string(request->offset());
+    api::DispatchStatus ds;
+    auto resp =
+        api::DispatchApiCall(m_context, HTTPRequest::GET, "utxos", qp,
+                             "", "", ds);
+    if (ds == api::DISPATCH_NOT_FOUND) {
+        return NngRpcErrorCode::NOT_FOUND;
+    }
+    fbb.Finish(NngInterface::CreateGetUtxosResponse(
+        fbb, static_cast<uint16_t>(resp.status),
+        fbb.CreateVector(reinterpret_cast<const uint8_t *>(resp.body.data()),
+                         resp.body.size())));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode
+NngRpcServer::GetMiningInfo(flatbuffers::FlatBufferBuilder &fbb,
+                            const NngInterface::GetMiningInfoRequest *request) {
+    std::vector<flatbuffers::Offset<NngInterface::SubResponse>> sub;
+    const bool any_flag = request->include_full() ||
+                          request->include_difficulty() ||
+                          request->include_networkhashps() ||
+                          request->include_estimatefee();
+    const bool include_full = !any_flag || request->include_full();
+    if (include_full) {
+        DispatchAndPush(fbb, m_context, "mining", sub);
+    }
+    if (request->include_difficulty()) {
+        DispatchAndPush(fbb, m_context, "mining/difficulty", sub);
+    }
+    if (request->include_networkhashps()) {
+        DispatchAndPush(fbb, m_context, "mining/networkhashps", sub);
+    }
+    if (request->include_estimatefee()) {
+        DispatchAndPush(fbb, m_context, "mining/estimatefee", sub);
+    }
+    fbb.Finish(NngInterface::CreateGetMiningInfoResponse(
+        fbb, fbb.CreateVector(sub)));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode NngRpcServer::GetStratumInfo(
+    flatbuffers::FlatBufferBuilder &fbb,
+    const NngInterface::GetStratumInfoRequest *request) {
+    std::vector<flatbuffers::Offset<NngInterface::SubResponse>> sub;
+    const auto scope = request->scope();
+    auto wants = [&](NngInterface::StratumScope what) {
+        return scope == NngInterface::StratumScope_All || scope == what;
+    };
+    if (wants(NngInterface::StratumScope_StratumInfo)) {
+        DispatchAndPush(fbb, m_context, "stratum", sub);
+    }
+    if (wants(NngInterface::StratumScope_Workers)) {
+        DispatchAndPush(fbb, m_context, "stratum/workers", sub);
+    }
+    if (wants(NngInterface::StratumScope_ShareChain)) {
+        DispatchAndPush(fbb, m_context, "sharechain", sub);
+    }
+    if (wants(NngInterface::StratumScope_ScryptChains)) {
+        DispatchAndPush(fbb, m_context, "scryptchains", sub);
+    }
+    fbb.Finish(NngInterface::CreateGetStratumInfoResponse(
+        fbb, fbb.CreateVector(sub)));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// RestCall tunnel
+// ─────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Returns true iff calling `method` `/api/v1/<path>` is on the
+// unauthenticated read-only surface that the HTTP layer already exposes.
+//
+// Policy:
+//   * GET / OPTIONS  always allowed (the HTTP server is itself unauth).
+//   * POST           must hit either:
+//                      - one of kRestTunnelAllowedPosts (pure decoders), OR
+//                      - rpc/<method> with <method> on LegacyRpcAllowlist().
+//   * everything else (PUT, DELETE, HEAD)  rejected.
+bool IsTunnelCallAllowed(HTTPRequest::RequestMethod method,
+                         const std::string &path) {
+    if (method == HTTPRequest::GET || method == HTTPRequest::OPTIONS) {
+        return true;
+    }
+    if (method != HTTPRequest::POST) {
+        return false;
+    }
+    // POST allowlist: known-safe decoders.
+    if (kRestTunnelAllowedPosts.count(path) != 0) {
+        return true;
+    }
+    // POST /rpc/<method>: defer to the existing legacy allowlist (which
+    // already covers consensus-validated broadcasts like
+    // sendrawtransaction). We only accept "rpc/<x>", not deeper paths.
+    static const std::string kRpcPrefix = "rpc/";
+    if (path.size() > kRpcPrefix.size() &&
+        path.compare(0, kRpcPrefix.size(), kRpcPrefix) == 0) {
+        const std::string method_name = path.substr(kRpcPrefix.size());
+        if (method_name.find('/') != std::string::npos) {
+            return false;
+        }
+        return api::LegacyRpcAllowlist().count(method_name) != 0;
+    }
+    return false;
+}
+
+HTTPRequest::RequestMethod ParseHttpMethod(const std::string &m) {
+    if (m == "GET") return HTTPRequest::GET;
+    if (m == "POST") return HTTPRequest::POST;
+    if (m == "OPTIONS") return HTTPRequest::OPTIONS;
+    if (m == "HEAD") return HTTPRequest::HEAD;
+    if (m == "PUT") return HTTPRequest::PUT;
+    return HTTPRequest::UNKNOWN;
+}
+
+} // namespace
+
+NngRpcErrorCode
+NngRpcServer::HandleRestCall(flatbuffers::FlatBufferBuilder &fbb,
+                             const NngInterface::RestCall *request) {
+    if (!request->method() || !request->path()) {
+        return NngRpcErrorCode::INVALID_REQUEST;
+    }
+    const HTTPRequest::RequestMethod method =
+        ParseHttpMethod(request->method()->str());
+    if (method == HTTPRequest::UNKNOWN) {
+        return NngRpcErrorCode::METHOD_NOT_ALLOWED;
+    }
+
+    // Normalize the path before policy-gating: strip leading / trailing
+    // slashes and any embedded query string. The dispatcher will re-parse
+    // the query separately from the explicit KvPair vector.
+    std::string path = request->path()->str();
+    const auto qpos = path.find('?');
+    if (qpos != std::string::npos) {
+        path = path.substr(0, qpos);
+    }
+    while (!path.empty() && path.front() == '/') {
+        path.erase(0, 1);
+    }
+    while (!path.empty() && path.back() == '/') {
+        path.pop_back();
+    }
+
+    if (!IsTunnelCallAllowed(method, path)) {
+        return NngRpcErrorCode::METHOD_NOT_ALLOWED;
+    }
+
+    api::QueryParams qp;
+    if (request->query()) {
+        for (const auto *kv : *request->query()) {
+            if (kv && kv->key()) {
+                qp.params[kv->key()->str()] =
+                    kv->value() ? kv->value()->str() : "";
+            }
+        }
+    }
+
+    std::string body;
+    if (request->body()) {
+        body.assign(reinterpret_cast<const char *>(request->body()->data()),
+                    request->body()->size());
+    }
+    const std::string content_type =
+        request->content_type() ? request->content_type()->str() : "";
+
+    api::DispatchStatus ds;
+    auto resp = api::DispatchApiCall(m_context, method, path, qp, body,
+                                     content_type, ds, m_max_body_size);
+    switch (ds) {
+        case api::DISPATCH_OK:
+            break;
+        case api::DISPATCH_NOT_FOUND:
+            return NngRpcErrorCode::NOT_FOUND;
+        case api::DISPATCH_METHOD_NOT_ALLOWED:
+            return NngRpcErrorCode::METHOD_NOT_ALLOWED;
+        case api::DISPATCH_BODY_TOO_LARGE:
+            return NngRpcErrorCode::BODY_TOO_LARGE;
+    }
+
+    fbb.Finish(NngInterface::CreateRestCallResponse(
+        fbb, static_cast<uint16_t>(resp.status),
+        fbb.CreateString(resp.content_type),
+        fbb.CreateVector(reinterpret_cast<const uint8_t *>(resp.body.data()),
+                         resp.body.size())));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
 class NngPubServer final : public CValidationInterface {
 public:
     NngPubServer(std::set<std::string> enabled_messages)
@@ -660,10 +1099,12 @@ private:
 std::unique_ptr<NngRpcServer> g_rpc_server;
 std::unique_ptr<NngPubServer> g_pub_server;
 
-bool RunRpcServer(const NodeContext &node, const Consensus::Params &consensus) {
+bool RunRpcServer(const NodeContext &node, const Consensus::Params &consensus,
+                  const util::Ref &context) {
     if (gArgs.IsArgSet("-nngrpc")) {
         std::string rpc_url = gArgs.GetArg("-nngrpc", "");
-        g_rpc_server = std::make_unique<NngRpcServer>(consensus, node);
+        g_rpc_server =
+            std::make_unique<NngRpcServer>(consensus, node, context);
         if (!g_rpc_server->Listen(rpc_url)) {
             return false;
         }
@@ -703,8 +1144,9 @@ bool RunPubServer() {
 }
 
 bool StartNngInterface(const NodeContext &node,
-                       const Consensus::Params &consensus) {
-    if (!RunRpcServer(node, consensus)) {
+                       const Consensus::Params &consensus,
+                       const util::Ref &context) {
+    if (!RunRpcServer(node, consensus, context)) {
         return false;
     }
     if (!RunPubServer()) {

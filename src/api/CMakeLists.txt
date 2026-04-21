@@ -1,4 +1,5 @@
 add_library(api
+    api_dispatcher.cpp
     api_server.cpp
     api_util.cpp
     chain_handler.cpp

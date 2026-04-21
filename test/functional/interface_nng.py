@@ -72,6 +72,7 @@ class NngInterfaceTest(BitcoinTestFramework):
             await self._test_get_block_slice_errors(rpc_sock)
             await self._test_send_tx(node, rpc_sock)
             await self._test_get_block_range(node, rpc_sock)
+            await self._test_http_mirror(node, rpc_sock)
         with pynng.Sub0() as pub_sock:
             pub_sock.dial(PUB_URL)
             await self._test_update_chain_tip(node, pub_sock)
@@ -194,6 +195,79 @@ class NngInterfaceTest(BitcoinTestFramework):
         RpcCall.AddRpc(fbb, get_mempool_request)
         rpc = RpcCall.End(fbb)
         fbb.Finish(rpc)
+        return bytes(fbb.Output())
+
+    # ── HTTP-mirror request builders ───────────────────────────────────
+
+    def _make_get_chain_info_request_fbb(self, *, full=True, tip=False,
+                                         best_block_hash=False,
+                                         block_count=False):
+        from NngInterface import RpcCall, RpcRequest, GetChainInfoRequest
+        import flatbuffers
+        fbb = flatbuffers.Builder()
+        GetChainInfoRequest.Start(fbb)
+        GetChainInfoRequest.AddIncludeFull(fbb, full)
+        GetChainInfoRequest.AddIncludeTip(fbb, tip)
+        GetChainInfoRequest.AddIncludeBestBlockHash(fbb, best_block_hash)
+        GetChainInfoRequest.AddIncludeBlockCount(fbb, block_count)
+        req = GetChainInfoRequest.End(fbb)
+        RpcCall.Start(fbb)
+        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.GetChainInfoRequest)
+        RpcCall.AddRpc(fbb, req)
+        fbb.Finish(RpcCall.End(fbb))
+        return bytes(fbb.Output())
+
+    def _make_get_tx_request_fbb(self, txid_hex, *, verbose=True,
+                                 block_hash_hex=""):
+        from NngInterface import RpcCall, RpcRequest, GetTxRequest
+        import flatbuffers
+        fbb = flatbuffers.Builder()
+        txid_off = fbb.CreateString(txid_hex)
+        bh_off = fbb.CreateString(block_hash_hex) if block_hash_hex else None
+        GetTxRequest.Start(fbb)
+        GetTxRequest.AddTxid(fbb, txid_off)
+        GetTxRequest.AddVerbose(fbb, verbose)
+        if bh_off is not None:
+            GetTxRequest.AddBlockHash(fbb, bh_off)
+        req = GetTxRequest.End(fbb)
+        RpcCall.Start(fbb)
+        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.GetTxRequest)
+        RpcCall.AddRpc(fbb, req)
+        fbb.Finish(RpcCall.End(fbb))
+        return bytes(fbb.Output())
+
+    def _make_rest_call_request_fbb(self, method, path, *, query=None,
+                                    body=b"", content_type=""):
+        from NngInterface import RpcCall, RpcRequest, RestCall, KvPair
+        import flatbuffers
+        fbb = flatbuffers.Builder()
+        method_off = fbb.CreateString(method)
+        path_off = fbb.CreateString(path)
+        ct_off = fbb.CreateString(content_type)
+        body_off = fbb.CreateByteVector(body)
+        kv_offs = []
+        for k, v in (query or {}).items():
+            k_off = fbb.CreateString(k)
+            v_off = fbb.CreateString(str(v))
+            KvPair.Start(fbb)
+            KvPair.AddKey(fbb, k_off)
+            KvPair.AddValue(fbb, v_off)
+            kv_offs.append(KvPair.End(fbb))
+        RestCall.StartQueryVector(fbb, len(kv_offs))
+        for off in reversed(kv_offs):
+            fbb.PrependUOffsetTRelative(off)
+        query_vec = fbb.EndVector()
+        RestCall.Start(fbb)
+        RestCall.AddMethod(fbb, method_off)
+        RestCall.AddPath(fbb, path_off)
+        RestCall.AddQuery(fbb, query_vec)
+        RestCall.AddBody(fbb, body_off)
+        RestCall.AddContentType(fbb, ct_off)
+        req = RestCall.End(fbb)
+        RpcCall.Start(fbb)
+        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.RestCall)
+        RpcCall.AddRpc(fbb, req)
+        fbb.Finish(RpcCall.End(fbb))
         return bytes(fbb.Output())
 
     async def _send_request(self, rpc_sock, request, *, timeout=1):
@@ -484,6 +558,121 @@ class NngInterfaceTest(BitcoinTestFramework):
         response = await self._recv_response(rpc_sock)
         response = GetBlockRangeResponse.GetBlockRangeResponse.GetRootAs(response, 0)
         assert_equal(response.BlocksLength(), 12)
+
+    async def _test_http_mirror(self, node, rpc_sock):
+        """Exercise the v2 HTTP-mirror surface: typed calls + RestCall tunnel.
+
+        Coverage target:
+          * one typed multi-route call (GetChainInfo)
+          * one typed single-route call (GetTx)
+          * RestCall GET on a vanilla /api/v1 route
+          * RestCall GET on rpc/<allowlisted> (read-only legacy RPC)
+          * RestCall POST on rpc/<allowlisted> (consensus-validated broadcast)
+          * RestCall POST on a deny-listed path -> METHOD_NOT_ALLOWED
+          * RestCall on a non-existent path -> NOT_FOUND
+        """
+        import json
+        from NngInterface import (
+            GetChainInfoResponse,
+            GetTxResponse,
+            RestCallResponse,
+            RpcResult,
+        )
+
+        # ── 1. Typed: GetChainInfoRequest with multiple sub-flags ───────
+        await self._send_request(
+            rpc_sock,
+            self._make_get_chain_info_request_fbb(
+                full=True, tip=True, best_block_hash=True, block_count=True))
+        raw = await self._recv_response(rpc_sock)
+        resp = GetChainInfoResponse.GetChainInfoResponse.GetRootAs(raw, 0)
+        assert_equal(resp.SubLength(), 4)
+        # sub[0] is /chain (full), should include "blocks" key.
+        chain_full = json.loads(bytes(resp.Sub(0).BodyAsNumpy()).decode())
+        assert 'blocks' in chain_full or 'data' in chain_full
+        # /chain/block-count should match RPC.
+        rpc_block_count = node.getblockcount()
+        for i in range(resp.SubLength()):
+            sub = resp.Sub(i)
+            if sub.Path().decode() == 'chain/block-count':
+                body = json.loads(bytes(sub.BodyAsNumpy()).decode())
+                # Handler may wrap in {data: …} or return raw int; accept either.
+                count = body.get('data', body) if isinstance(body, dict) else body
+                if isinstance(count, dict):
+                    count = count.get('block_count', count.get('count', count))
+                assert_equal(int(count), rpc_block_count)
+
+        # ── 2. Typed: GetTxRequest on the coinbase of the genesis block ─
+        genesis_hash = node.getblockhash(0)
+        coinbase_txid = node.getblock(genesis_hash, 2)['tx'][0]['txid']
+        await self._send_request(
+            rpc_sock,
+            self._make_get_tx_request_fbb(coinbase_txid, verbose=True))
+        raw = await self._recv_response(rpc_sock)
+        tx_resp = GetTxResponse.GetTxResponse.GetRootAs(raw, 0)
+        assert tx_resp.StatusCode() in (200, 404)
+        # We only care that it round-trips with valid framing here; the
+        # underlying /txs handler may not surface coinbase txs without
+        # a tx index, depending on build flags.
+
+        # ── 3. RestCall GET /chain ──────────────────────────────────────
+        await self._send_request(
+            rpc_sock,
+            self._make_rest_call_request_fbb('GET', 'chain'))
+        raw = await self._recv_response(rpc_sock)
+        rc = RestCallResponse.RestCallResponse.GetRootAs(raw, 0)
+        assert_equal(rc.StatusCode(), 200)
+        chain_body = json.loads(bytes(rc.BodyAsNumpy()).decode())
+        # Mirrors the live HTTP shape — at minimum we expect height/blocks
+        # info in there.
+        assert isinstance(chain_body, (dict, list))
+
+        # ── 4. RestCall GET /rpc/getblockchaininfo (read-only allowlist) ─
+        await self._send_request(
+            rpc_sock,
+            self._make_rest_call_request_fbb('GET', 'rpc/getblockchaininfo'))
+        raw = await self._recv_response(rpc_sock)
+        rc = RestCallResponse.RestCallResponse.GetRootAs(raw, 0)
+        assert_equal(rc.StatusCode(), 200)
+        rpc_body = json.loads(bytes(rc.BodyAsNumpy()).decode())
+        assert 'result' in rpc_body
+        assert_equal(rpc_body['result']['blocks'], rpc_block_count)
+
+        # ── 5. RestCall POST /rpc/sendrawtransaction (consensus-validated
+        #      broadcast on the allowlist; we send a known-bad tx so the
+        #      RPC errors out — the point is that the call is *accepted*
+        #      by the policy, not rejected with METHOD_NOT_ALLOWED).
+        body = json.dumps({"params": ["00"]}).encode()
+        await self._send_request(
+            rpc_sock,
+            self._make_rest_call_request_fbb(
+                'POST', 'rpc/sendrawtransaction',
+                body=body, content_type='application/json'))
+        raw = await self._recv_response(rpc_sock)
+        rc = RestCallResponse.RestCallResponse.GetRootAs(raw, 0)
+        # Policy gate accepted the call; the handler itself will reject
+        # the malformed tx — anything other than METHOD_NOT_ALLOWED at
+        # the outer layer is fine.
+        assert rc.StatusCode() in (400, 422, 500)
+
+        # ── 6. RestCall POST /txs/send -> deny list ─────────────────────
+        await self._send_request(
+            rpc_sock,
+            self._make_rest_call_request_fbb(
+                'POST', 'txs/send', body=b'{"hex":"00"}',
+                content_type='application/json'))
+        await self._recv_response(
+            rpc_sock,
+            expect_error='Method not allowed: this verb/path is not on '
+                         'the unauthenticated read-only surface')
+
+        # ── 7. RestCall on a non-existent path -> NOT_FOUND ────────────
+        await self._send_request(
+            rpc_sock,
+            self._make_rest_call_request_fbb('GET', 'definitely/not/a/route'))
+        await self._recv_response(
+            rpc_sock,
+            expect_error='No /api/v1 route matches the requested path')
 
     async def _recv_message(self, pub_sock, expected_msg_type, timeout=2):
         received_msg = await asyncio.wait_for(pub_sock.arecv_msg(), timeout=timeout)

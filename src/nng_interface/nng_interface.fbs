@@ -2,13 +2,34 @@
 
 namespace NngInterface;
 
-// Union for all RPC requests
+// Union for all RPC requests.
+//
+// IMPORTANT: union arms are positional — only ever append to this list,
+// never reorder. Existing clients (Chronik, light wallets, indexers)
+// pinned to the original 5 calls must keep working when they're rebuilt
+// against this schema.
 union RpcRequest {
+    // ── v1 (binary-optimized block/mempool fetchers) ────────────────────
     GetBlockRequest,
     GetBlockRangeRequest,
     GetBlockSliceRequest,
     GetUndoSliceRequest,
     GetMempoolRequest,
+    // ── v2 (HTTP-mirror "hot path" typed calls) ─────────────────────────
+    // Subsume the most-hit /api/v1/* JSON endpoints. Each response
+    // carries the JSON body the corresponding HTTP handler produced; the
+    // typed enum routing means clients get stable codegen and avoid the
+    // string-match path of RestCall.
+    GetChainInfoRequest,
+    GetTxRequest,
+    GetAddressRequest,
+    GetUtxosRequest,
+    GetMiningInfoRequest,
+    GetStratumInfoRequest,
+    // ── v2 (generic REST tunnel) ────────────────────────────────────────
+    // Catch-all for anything not worth a typed envelope, including the
+    // legacy JSON-RPC allowlist at /api/v1/rpc/<method>.
+    RestCall,
 }
 
 // Result of an RPC call
@@ -299,4 +320,162 @@ table GetMempoolRequest {}
 table GetMempoolResponse {
     // List of txs in the mempool
     txs: [MempoolTx];
+}
+
+// ─── HTTP-mirror typed calls ────────────────────────────────────────────
+//
+// Each typed response below carries the raw JSON body that the matching
+// /api/v1/<...> HTTP handler produced. Status code is forwarded so
+// clients can distinguish 200 / 404 / 500 without parsing JSON.
+//
+// We intentionally keep the response surface small (status + json) in
+// this first iteration — adding broken-out scalar fields later is a
+// pure flatbuffers-additive change and won't break existing clients.
+
+// Subsumes GET /chain, /chain/tip, /chain/best-block-hash,
+// /chain/block-count. Flag fields pick which sub-endpoints to call so
+// one round-trip can fetch the whole snapshot.
+table GetChainInfoRequest {
+    // GET /chain (full info: difficulty, mediantime, chainwork, …)
+    include_full: bool = true;
+    // GET /chain/tip
+    include_tip: bool = false;
+    // GET /chain/best-block-hash
+    include_best_block_hash: bool = false;
+    // GET /chain/block-count
+    include_block_count: bool = false;
+}
+
+// Container for one sub-call's response. Keyed by the route suffix
+// (e.g. "chain", "chain/tip"); body is the JSON the HTTP handler wrote.
+table SubResponse {
+    // Path suffix relative to /api/v1/, identifies the source endpoint.
+    path: string;
+    // HTTP status the handler emitted (200, 404, …).
+    status_code: uint16;
+    // Raw response body.
+    body: [ubyte];
+}
+
+table GetChainInfoResponse {
+    // One entry per requested include_* flag, in request order.
+    sub: [SubResponse];
+}
+
+// Mirrors GET /txs?txid=<hex>. The HTTP handler decides between raw and
+// decoded forms based on the `verbose` flag.
+table GetTxRequest {
+    // 64-char hex txid (required).
+    txid: string;
+    // When true (default), include the decoded JSON body. When false,
+    // the handler returns just the raw hex (faster on large txs).
+    verbose: bool = true;
+    // Optional blockhash filter (matches the JSON-RPC arg of the same
+    // name). Empty means "any block".
+    block_hash: string;
+}
+
+table GetTxResponse {
+    status_code: uint16 = 200;
+    // Raw JSON body the HTTP handler returned.
+    body: [ubyte];
+}
+
+// Mirrors GET /addresses?address=<addr>&limit=&offset=. Returns the
+// balance + paginated history payload as JSON.
+table GetAddressRequest {
+    address: string;
+    limit: int32 = 25;
+    offset: int32 = 0;
+}
+
+table GetAddressResponse {
+    status_code: uint16 = 200;
+    body: [ubyte];
+}
+
+// Mirrors GET /utxos?address=<addr>&limit=&offset=.
+table GetUtxosRequest {
+    address: string;
+    limit: int32 = 100;
+    offset: int32 = 0;
+}
+
+table GetUtxosResponse {
+    status_code: uint16 = 200;
+    body: [ubyte];
+}
+
+// Subsumes GET /mining (full block) plus the cheaper /mining/difficulty,
+// /mining/networkhashps, /mining/estimatefee endpoints.
+table GetMiningInfoRequest {
+    include_full: bool = true;
+    include_difficulty: bool = false;
+    include_networkhashps: bool = false;
+    include_estimatefee: bool = false;
+}
+
+table GetMiningInfoResponse {
+    sub: [SubResponse];
+}
+
+// Scope selector for GetStratumInfoRequest. Maps directly to the four
+// stratum visibility endpoints ported from lotused.
+enum StratumScope: uint8 {
+    All = 0,
+    StratumInfo = 1,
+    Workers = 2,
+    ShareChain = 3,
+    ScryptChains = 4,
+}
+
+table GetStratumInfoRequest {
+    scope: StratumScope = All;
+}
+
+table GetStratumInfoResponse {
+    sub: [SubResponse];
+}
+
+// ─── Generic REST tunnel ────────────────────────────────────────────────
+//
+// One key/value pair for query strings or future header lists.
+table KvPair {
+    key: string;
+    value: string;
+}
+
+// Catch-all "I want to call any /api/v1/<path>" message. The server
+// builds an in-memory HTTPRequest, invokes the matching route handler
+// from the same registration table the live HTTP layer uses, and
+// streams the captured response back in RestCallResponse.
+//
+// The server enforces the same read-only policy on this surface that
+// the unauthenticated HTTP layer already does: GET is unconditional,
+// POST is restricted to a small allowlist of pure decoders, and any
+// rpc/<method> hit must be on LegacyRpcAllowlist().
+table RestCall {
+    // "GET", "POST", or "OPTIONS" — case sensitive.
+    method: string;
+    // Route relative to /api/v1/. Examples:
+    //   "rpc/getblockchaininfo"
+    //   "overview"
+    //   "txs?txid=abcd…" (query may also be encoded in the `query`
+    //                     field; explicit kv pairs override the path).
+    path: string;
+    // Parsed URL query parameters.
+    query: [KvPair];
+    // Raw request body for POST/PUT decoders (e.g. JSON for /rpc/<method>).
+    body: [ubyte];
+    // Optional Content-Type the body is encoded as.
+    content_type: string;
+}
+
+table RestCallResponse {
+    // HTTP status code the handler emitted (200, 400, 404, 500…).
+    status_code: uint16;
+    // Content-Type the handler set, or "text/plain" if it didn't.
+    content_type: string;
+    // Raw response bytes.
+    body: [ubyte];
 }

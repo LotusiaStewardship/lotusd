@@ -1433,6 +1433,14 @@ void SetupServerArgs(NodeContext &node) {
                   "multiple message types. Available message types are: %s",
                   Join(AVAILABLE_PUB_MESSAGES, ", ")),
         ArgsManager::ALLOW_ANY, OptionsCategory::NNG_INTERFACE);
+    argsman.AddArg(
+        "-maxapibodysize=<bytes>",
+        strprintf("Maximum request body size in bytes accepted by the NNG "
+                  "RestCall tunnel. POSTs above this limit are rejected "
+                  "with NNG error BODY_TOO_LARGE. 0 disables the check. "
+                  "(default: %d)",
+                  1 << 20),
+        ArgsManager::ALLOW_ANY, OptionsCategory::NNG_INTERFACE);
 #endif
 
 #if HAVE_DECL_DAEMON
@@ -3165,7 +3173,8 @@ bool AppInitMain(Config &config, RPCServer &rpcServer,
     }
 
 #if ENABLE_NNG
-    if (!StartNngInterface(node, chainparams.GetConsensus())) {
+    if (!StartNngInterface(node, chainparams.GetConsensus(),
+                           httpRPCRequestProcessor.context)) {
         return false;
     }
 #endif

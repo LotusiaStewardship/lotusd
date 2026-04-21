@@ -248,6 +248,33 @@ void AddModuleRoute(HTTPRequest::RequestMethod method,
     AddRoute(method, prefix, handler);
 }
 
+namespace api {
+
+bool RouteExists(HTTPRequest::RequestMethod method,
+                 const std::vector<std::string> &parts) {
+    return FindRoute(method, parts) != nullptr;
+}
+
+bool RunRouteInProcess(const util::Ref &context, HTTPRequest *req,
+                       HTTPRequest::RequestMethod method,
+                       const std::vector<std::string> &parts,
+                       const QueryParams &qp) {
+    const Route *route = FindRoute(method, parts);
+    if (!route) return false;
+    try {
+        route->handler(context, req, parts, qp);
+    } catch (const std::exception &e) {
+        LogPrintf("ERROR: API in-process handler exception: %s\n", e.what());
+        // The in-memory request only honors the first WriteReply, so this
+        // is a no-op if the handler already produced a response.
+        api::WriteError(req, HTTP_INTERNAL_SERVER_ERROR, "internal_error",
+                        e.what());
+    }
+    return true;
+}
+
+} // namespace api
+
 void StartAPI(const util::Ref &context) {
     // REST API v1 init
 

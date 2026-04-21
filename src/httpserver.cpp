@@ -42,12 +42,31 @@ struct HTTPPathHandler {
 };
 
 struct HTTPRequest::Impl {
-    const httplib::Request &req;
-    httplib::Response &res;
+    // ── Live-request fields (cpp-httplib backed) ────────────────────────
+    // Pointers (not references) so we can also represent an in-memory
+    // request that has no underlying httplib::Request / Response.
+    const httplib::Request *req{nullptr};
+    httplib::Response *res{nullptr};
     std::unordered_map<std::string, std::string> extraHeaders;
     bool bodyConsumed{false};
 
-    Impl(const httplib::Request &r, httplib::Response &s) : req(r), res(s) {}
+    // ── In-memory mode ──────────────────────────────────────────────────
+    // When inMemory == true, all I/O methods on HTTPRequest read/write
+    // the buffers below instead of touching cpp-httplib. This is what the
+    // NNG RestCall tunnel and the cache background-refresh thread use to
+    // dispatch handlers without a real client connection.
+    bool inMemory{false};
+    HTTPRequest::RequestMethod imMethod{HTTPRequest::GET};
+    std::string imUri;
+    std::string imBody;
+    std::string imBodyContentType;
+    int imStatus{0};
+    std::string imResponseBody;
+    bool imReplySent{false};
+
+    Impl() = default;
+    Impl(const httplib::Request &r, httplib::Response &s)
+        : req(&r), res(&s) {}
 };
 
 // ─── Module state ───────────────────────────────────────────────────────────────
@@ -352,16 +371,70 @@ HTTPRequest::HTTPRequest(std::unique_ptr<Impl> impl)
 HTTPRequest::HTTPRequest() : m_impl(nullptr), replySent(true) {}
 
 HTTPRequest::~HTTPRequest() {
-    if (m_impl && !replySent) {
+    // In-memory requests are explicitly OK to drop without a reply — the
+    // caller reads the captured buffer via CapturedBody(). Only the live,
+    // socket-backed path needs the "unhandled request" guard.
+    if (m_impl && !m_impl->inMemory && !replySent) {
         LogPrintf("%s: Unhandled request\n", __func__);
         WriteReply(HTTP_INTERNAL_SERVER_ERROR, "Unhandled request");
     }
 }
 
+// ─── In-memory factory and accessors ────────────────────────────────────
+
+std::unique_ptr<HTTPRequest>
+HTTPRequest::MakeInMemory(RequestMethod method, const std::string &uri,
+                          const std::string &body,
+                          const std::string &contentType) {
+    auto impl = std::make_unique<Impl>();
+    impl->inMemory = true;
+    impl->imMethod = method;
+    impl->imUri = uri;
+    impl->imBody = body;
+    impl->imBodyContentType = contentType;
+    return std::make_unique<HTTPRequest>(std::move(impl));
+}
+
+bool HTTPRequest::IsInMemory() const {
+    return m_impl && m_impl->inMemory;
+}
+
+int HTTPRequest::CapturedStatus() const {
+    return m_impl ? m_impl->imStatus : 0;
+}
+
+const std::string &HTTPRequest::CapturedBody() const {
+    static const std::string empty;
+    return m_impl ? m_impl->imResponseBody : empty;
+}
+
+std::string HTTPRequest::CapturedContentType() const {
+    if (!m_impl) return "";
+    auto it = m_impl->extraHeaders.find("Content-Type");
+    if (it != m_impl->extraHeaders.end()) {
+        return it->second;
+    }
+    return "text/plain";
+}
+
+bool HTTPRequest::ReplySent() const {
+    return m_impl ? (m_impl->inMemory ? m_impl->imReplySent : replySent)
+                  : replySent;
+}
+
+// ─── Standard HTTPRequest accessors ─────────────────────────────────────
+
 std::pair<bool, std::string>
 HTTPRequest::GetHeader(const std::string &hdr) const {
-    auto it = m_impl->req.headers.find(hdr);
-    if (it != m_impl->req.headers.end()) {
+    if (m_impl && m_impl->inMemory) {
+        if (hdr == "Content-Type" && !m_impl->imBodyContentType.empty()) {
+            return {true, m_impl->imBodyContentType};
+        }
+        return {false, ""};
+    }
+    if (!m_impl || !m_impl->req) return {false, ""};
+    auto it = m_impl->req->headers.find(hdr);
+    if (it != m_impl->req->headers.end()) {
         return {true, it->second};
     }
     return {false, ""};
@@ -372,7 +445,11 @@ std::string HTTPRequest::ReadBody() {
         return "";
     }
     m_impl->bodyConsumed = true;
-    return m_impl->req.body;
+    if (m_impl->inMemory) {
+        return m_impl->imBody;
+    }
+    if (!m_impl->req) return "";
+    return m_impl->req->body;
 }
 
 void HTTPRequest::WriteHeader(const std::string &hdr,
@@ -383,27 +460,46 @@ void HTTPRequest::WriteHeader(const std::string &hdr,
 
 void HTTPRequest::WriteReply(int nStatus, const std::string &strReply) {
     if (!m_impl) { replySent = true; return; }
+    if (m_impl->inMemory) {
+        // Multiple WriteReply calls on the same in-memory request are
+        // a handler bug — quietly keep the first reply, like the live
+        // path's assertion would in debug builds, but don't crash a
+        // long-lived NNG worker.
+        if (m_impl->imReplySent) return;
+        m_impl->imStatus = nStatus;
+        m_impl->imResponseBody = strReply;
+        m_impl->imReplySent = true;
+        replySent = true;
+        return;
+    }
+    if (!m_impl->res) { replySent = true; return; }
     assert(!replySent);
     if (ShutdownRequested()) {
         m_impl->extraHeaders["Connection"] = "close";
     }
     for (const auto &kv : m_impl->extraHeaders) {
-        m_impl->res.set_header(kv.first, kv.second);
+        m_impl->res->set_header(kv.first, kv.second);
     }
-    m_impl->res.status = nStatus;
+    m_impl->res->status = nStatus;
     if (!strReply.empty()) {
         auto contentType = m_impl->extraHeaders.find("Content-Type");
         std::string ct = (contentType != m_impl->extraHeaders.end())
                              ? contentType->second
                              : "text/plain";
-        m_impl->res.set_content(strReply, ct);
+        m_impl->res->set_content(strReply, ct);
     }
     replySent = true;
 }
 
 CService HTTPRequest::GetPeer() const {
-    const auto &remote = m_impl->req.remote_addr;
-    int port = m_impl->req.remote_port;
+    if (!m_impl || m_impl->inMemory || !m_impl->req) {
+        // In-memory requests have no peer — return a zero CService so
+        // ACL checks treat them as "not from anywhere". The NNG layer
+        // bypasses the HTTP allowlist entirely so this is harmless.
+        return CService();
+    }
+    const auto &remote = m_impl->req->remote_addr;
+    int port = m_impl->req->remote_port;
     CService peer;
     if (!remote.empty()) {
         peer = LookupNumeric(remote, port);
@@ -412,8 +508,12 @@ CService HTTPRequest::GetPeer() const {
 }
 
 std::string HTTPRequest::GetURI() const {
-    const auto &path = m_impl->req.path;
-    const auto &params = m_impl->req.params;
+    if (m_impl && m_impl->inMemory) {
+        return m_impl->imUri;
+    }
+    if (!m_impl || !m_impl->req) return "";
+    const auto &path = m_impl->req->path;
+    const auto &params = m_impl->req->params;
     if (params.empty()) {
         return path;
     }
@@ -428,7 +528,11 @@ std::string HTTPRequest::GetURI() const {
 }
 
 HTTPRequest::RequestMethod HTTPRequest::GetRequestMethod() const {
-    return MethodFromString(m_impl->req.method);
+    if (m_impl && m_impl->inMemory) {
+        return m_impl->imMethod;
+    }
+    if (!m_impl || !m_impl->req) return UNKNOWN;
+    return MethodFromString(m_impl->req->method);
 }
 
 // ─── Handler registration ───────────────────────────────────────────────────────

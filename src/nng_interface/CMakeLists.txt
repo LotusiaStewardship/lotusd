@@ -46,7 +46,12 @@ include_directories("${GENFLATBUF_FOLDER}")
 # Add custom target as dependency
 add_dependencies(nng_interface nng_files)
 
-# Add required libraries to nng_interface
+# Add required libraries to nng_interface.
+#
+# `api` is required because the HTTP-mirror typed handlers and the
+# RestCall tunnel dispatch through api::DispatchApiCall and consult
+# api::LegacyRpcAllowlist for the rpc/<method> sub-surface.
 target_link_libraries(nng_interface
+    api
     nng::nng
     util)
