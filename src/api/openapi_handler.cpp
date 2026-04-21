@@ -639,6 +639,109 @@ static UniValue BuildPaths() {
         paths.pushKV("/api/v1/wallet", path);
     }
 
+    // /addresses/batch/{summary,utxos,txs}
+    {
+        auto buildBatchPath =
+            [&](const std::string &op, const std::string &summary,
+                const std::string &description, const std::string &itemRef,
+                bool itemIsArray) {
+                UniValue post(UniValue::VOBJ);
+                post.pushKV("summary", summary);
+                post.pushKV("description", description);
+                post.pushKV("operationId", op);
+                UniValue tags(UniValue::VARR);
+                tags.push_back("Address");
+                post.pushKV("tags", tags);
+
+                UniValue body(UniValue::VOBJ);
+                body.pushKV("required", true);
+                UniValue content(UniValue::VOBJ);
+                UniValue json(UniValue::VOBJ);
+                UniValue bodySchema(UniValue::VOBJ);
+                bodySchema.pushKV("type", "object");
+                UniValue bodyProps(UniValue::VOBJ);
+                UniValue addrArr(UniValue::VOBJ);
+                addrArr.pushKV("type", "array");
+                addrArr.pushKV("items", StringSchema());
+                addrArr.pushKV("maxItems", 100);
+                bodyProps.pushKV("addresses", addrArr);
+                if (op == "batchAddressTxs") {
+                    bodyProps.pushKV("limit", IntSchema());
+                    bodyProps.pushKV("offset", IntSchema());
+                }
+                bodySchema.pushKV("properties", bodyProps);
+                UniValue required(UniValue::VARR);
+                required.push_back("addresses");
+                bodySchema.pushKV("required", required);
+                json.pushKV("schema", bodySchema);
+                content.pushKV("application/json", json);
+                body.pushKV("content", content);
+                post.pushKV("requestBody", body);
+
+                UniValue respSchema(UniValue::VOBJ);
+                respSchema.pushKV("type", "object");
+                UniValue respProps(UniValue::VOBJ);
+                UniValue dataMap(UniValue::VOBJ);
+                dataMap.pushKV("type", "object");
+                if (itemIsArray) {
+                    UniValue valArr(UniValue::VOBJ);
+                    valArr.pushKV("type", "array");
+                    valArr.pushKV("items", SchemaRef(itemRef));
+                    dataMap.pushKV("additionalProperties", valArr);
+                } else {
+                    dataMap.pushKV("additionalProperties", SchemaRef(itemRef));
+                }
+                respProps.pushKV("data", dataMap);
+                respSchema.pushKV("properties", respProps);
+
+                UniValue responses(UniValue::VOBJ);
+                responses.pushKV("200",
+                                  JsonResponse("Per-address payloads keyed "
+                                               "by address",
+                                               respSchema));
+                responses.pushKV("400",
+                                  JsonResponse("Invalid request body",
+                                               SchemaRef("Error")));
+                post.pushKV("responses", responses);
+
+                UniValue path(UniValue::VOBJ);
+                path.pushKV("post", post);
+                return path;
+            };
+
+        paths.pushKV("/api/v1/addresses/batch/summary",
+                     buildBatchPath("batchAddressSummary",
+                                    "Batch address summaries",
+                                    "Returns the singleton "
+                                    "/addresses/<addr> payload for up to "
+                                    "100 addresses in a single request. "
+                                    "Unknown addresses are returned as "
+                                    "zeroed records (never 404).",
+                                    "AddressSummary",
+                                    /*itemIsArray=*/false));
+        paths.pushKV("/api/v1/addresses/batch/utxos",
+                     buildBatchPath("batchAddressUtxos",
+                                    "Batch address UTXOs",
+                                    "Returns the singleton "
+                                    "/addresses/<addr>/utxos array for up "
+                                    "to 100 addresses. The per-address "
+                                    "limit (default 50, max 500) is taken "
+                                    "from the `limit` query parameter.",
+                                    "AddressUtxo",
+                                    /*itemIsArray=*/true));
+        paths.pushKV("/api/v1/addresses/batch/txs",
+                     buildBatchPath("batchAddressTxs",
+                                    "Batch address transactions",
+                                    "Returns the singleton "
+                                    "/addresses/<addr>/txs array for up to "
+                                    "100 addresses. Per-address `limit` "
+                                    "(default 25, max 200) and `offset` "
+                                    "may be supplied either via query "
+                                    "string or via the JSON body.",
+                                    "AddressTx",
+                                    /*itemIsArray=*/true));
+    }
+
     // /health
     {
         UniValue get(UniValue::VOBJ);
@@ -887,6 +990,48 @@ static UniValue BuildSchemas() {
         props.pushKV("onetry", oneArr);
         s.pushKV("properties", props);
         schemas.pushKV("NetworkNodes", s);
+    }
+
+    // AddressSummary — single row of address_balances (matches GET
+    // /api/v1/addresses/<addr> and the batch summary payload).
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("address", StringSchema());
+        props.pushKV("balance_sats", IntSchema());
+        props.pushKV("received_sats", IntSchema());
+        props.pushKV("sent_sats", IntSchema());
+        props.pushKV("tx_count", IntSchema());
+        props.pushKV("utxo_count", IntSchema());
+        props.pushKV("first_height", IntSchema());
+        props.pushKV("last_height", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("AddressSummary", s);
+    }
+
+    // AddressUtxo — single unspent output owned by an address.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("txid", StringSchema());
+        props.pushKV("vout", IntSchema());
+        props.pushKV("value_sats", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("AddressUtxo", s);
+    }
+
+    // AddressTx — single row of address_history.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("block_height", IntSchema());
+        props.pushKV("txid", StringSchema());
+        props.pushKV("net_value", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("AddressTx", s);
     }
 
     // HealthInfo

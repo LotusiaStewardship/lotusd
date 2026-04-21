@@ -8,7 +8,12 @@
 #include <sqlite/block_tree_sqlite.h>
 #include <sqlite3.h>
 #include <sync.h>
+#include <univalue.h>
 #include <validation.h>
+
+#include <algorithm>
+#include <cstring>
+#include <unordered_set>
 
 namespace api {
 
@@ -340,6 +345,249 @@ bool HandleGetUtxos(const util::Ref &ctx, HTTPRequest *req,
     sqlite3_reset(stmt);
 
     WriteSuccess(req, result);
+    return true;
+}
+
+// ── Batch helpers ────────────────────────────────────────────────────────
+
+static constexpr size_t kBatchAddressMax = 100;
+
+// Pull the {"addresses":[...]} array out of the request body, dedupe
+// while preserving order, and bail out cleanly on size / shape errors.
+// Returns false if a response has already been written.
+static bool ReadBatchAddresses(HTTPRequest *req,
+                               std::vector<std::string> &out,
+                               UniValue *parsedBodyOut = nullptr) {
+    std::string body = req->ReadBody();
+    if (body.empty()) {
+        WriteError(req, HTTP_BAD_REQUEST, "empty_body",
+                   "Request body must contain {\"addresses\":[...]}");
+        return false;
+    }
+
+    UniValue parsed;
+    if (!parsed.read(body) || !parsed.isObject()) {
+        WriteError(req, HTTP_BAD_REQUEST, "invalid_json",
+                   "Request body must be a JSON object");
+        return false;
+    }
+
+    const UniValue &arr = find_value(parsed, "addresses");
+    if (!arr.isArray() || arr.empty()) {
+        WriteError(req, HTTP_BAD_REQUEST, "missing_addresses",
+                   "Field 'addresses' must be a non-empty array");
+        return false;
+    }
+    if (arr.size() > kBatchAddressMax) {
+        WriteError(req, HTTP_BAD_REQUEST, "too_many_addresses",
+                   "Maximum 100 addresses per batch request");
+        return false;
+    }
+
+    out.clear();
+    out.reserve(arr.size());
+    std::unordered_set<std::string> seen;
+    seen.reserve(arr.size());
+    for (size_t i = 0; i < arr.size(); ++i) {
+        const UniValue &v = arr[i];
+        if (!v.isStr()) {
+            WriteError(req, HTTP_BAD_REQUEST, "invalid_address",
+                       "All entries in 'addresses' must be strings");
+            return false;
+        }
+        const std::string &s = v.get_str();
+        if (s.empty()) {
+            WriteError(req, HTTP_BAD_REQUEST, "invalid_address",
+                       "Empty address string in batch");
+            return false;
+        }
+        if (seen.insert(s).second) {
+            out.push_back(s);
+        }
+    }
+
+    if (parsedBodyOut) *parsedBodyOut = std::move(parsed);
+    return true;
+}
+
+static bool RequireSqliteDb(HTTPRequest *req, CSqliteWrapper *&dbOut) {
+    auto *btree = dynamic_cast<CBlockTreeSqlite *>(pblocktree.get());
+    if (!btree) {
+        WriteError(req, HTTP_INTERNAL_SERVER_ERROR, "db_error",
+                   "SQLite not available");
+        return false;
+    }
+    dbOut = &btree->GetDb();
+    return true;
+}
+
+bool HandleBatchAddressSummary(const util::Ref & /*ctx*/, HTTPRequest *req,
+                               const std::vector<std::string> & /*parts*/,
+                               const QueryParams & /*qp*/) {
+    std::vector<std::string> addresses;
+    if (!ReadBatchAddresses(req, addresses)) return true;
+
+    CSqliteWrapper *db = nullptr;
+    if (!RequireSqliteDb(req, db)) return true;
+
+    sqlite3_stmt *stmt = db->Prepare(
+        "SELECT balance_sats, received_sats, sent_sats, tx_count, "
+        "utxo_count, first_height, last_height "
+        "FROM address_balances WHERE address = ?1");
+
+    UniValue results(UniValue::VOBJ);
+    for (const std::string &address : addresses) {
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+        sqlite3_bind_text(stmt, 1, address.c_str(), -1, SQLITE_TRANSIENT);
+
+        UniValue obj(UniValue::VOBJ);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            obj.pushKV("address", address);
+            obj.pushKV("balance_sats",
+                       int64_t(sqlite3_column_int64(stmt, 0)));
+            obj.pushKV("received_sats",
+                       int64_t(sqlite3_column_int64(stmt, 1)));
+            obj.pushKV("sent_sats",
+                       int64_t(sqlite3_column_int64(stmt, 2)));
+            obj.pushKV("tx_count", sqlite3_column_int(stmt, 3));
+            obj.pushKV("utxo_count", sqlite3_column_int(stmt, 4));
+            obj.pushKV("first_height", sqlite3_column_int(stmt, 5));
+            obj.pushKV("last_height", sqlite3_column_int(stmt, 6));
+        } else {
+            // Address has never been seen by the indexer — return a zeroed
+            // record rather than 404 so the caller can render a "0 XPI"
+            // wallet entry without a second probe.
+            obj.pushKV("address", address);
+            obj.pushKV("balance_sats", int64_t(0));
+            obj.pushKV("received_sats", int64_t(0));
+            obj.pushKV("sent_sats", int64_t(0));
+            obj.pushKV("tx_count", 0);
+            obj.pushKV("utxo_count", 0);
+            obj.pushKV("first_height", 0);
+            obj.pushKV("last_height", 0);
+        }
+        results.pushKV(address, obj);
+    }
+    sqlite3_reset(stmt);
+
+    UniValue resp(UniValue::VOBJ);
+    resp.pushKV("data", results);
+    WriteSuccess(req, resp);
+    return true;
+}
+
+bool HandleBatchAddressUtxos(const util::Ref & /*ctx*/, HTTPRequest *req,
+                             const std::vector<std::string> & /*parts*/,
+                             const QueryParams &qp) {
+    std::vector<std::string> addresses;
+    if (!ReadBatchAddresses(req, addresses)) return true;
+
+    int limit = qp.GetInt("limit", 50);
+    limit = std::max(1, std::min(limit, 500));
+
+    CSqliteWrapper *db = nullptr;
+    if (!RequireSqliteDb(req, db)) return true;
+
+    sqlite3_stmt *stmt = db->Prepare(
+        "SELECT txid, vout, value_sats FROM tx_outputs "
+        "WHERE address = ?1 AND spent = 0 "
+        "ORDER BY value_sats DESC LIMIT ?2");
+
+    UniValue results(UniValue::VOBJ);
+    for (const std::string &address : addresses) {
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+        sqlite3_bind_text(stmt, 1, address.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 2, limit);
+
+        UniValue arr(UniValue::VARR);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            UniValue obj(UniValue::VOBJ);
+            const uint8_t *txid_blob = static_cast<const uint8_t *>(
+                sqlite3_column_blob(stmt, 0));
+            if (txid_blob && sqlite3_column_bytes(stmt, 0) == 32) {
+                uint256 txid;
+                memcpy(txid.begin(), txid_blob, 32);
+                obj.pushKV("txid", txid.GetHex());
+            }
+            obj.pushKV("vout", sqlite3_column_int(stmt, 1));
+            obj.pushKV("value_sats",
+                       int64_t(sqlite3_column_int64(stmt, 2)));
+            arr.push_back(obj);
+        }
+        results.pushKV(address, arr);
+    }
+    sqlite3_reset(stmt);
+
+    UniValue resp(UniValue::VOBJ);
+    resp.pushKV("data", results);
+    WriteSuccess(req, resp);
+    return true;
+}
+
+bool HandleBatchAddressTxs(const util::Ref & /*ctx*/, HTTPRequest *req,
+                           const std::vector<std::string> & /*parts*/,
+                           const QueryParams &qp) {
+    std::vector<std::string> addresses;
+    UniValue body;
+    if (!ReadBatchAddresses(req, addresses, &body)) return true;
+
+    // Body fields override query string for batch txs so a single POST can
+    // carry both the addresses and the page size.
+    int limit = qp.GetInt("limit", 25);
+    int offset = qp.GetInt("offset", 0);
+    const UniValue &bodyLimit = find_value(body, "limit");
+    if (bodyLimit.isNum()) limit = bodyLimit.get_int();
+    const UniValue &bodyOffset = find_value(body, "offset");
+    if (bodyOffset.isNum()) offset = bodyOffset.get_int();
+    limit = std::max(1, std::min(limit, 200));
+    offset = std::max(0, offset);
+
+    CSqliteWrapper *db = nullptr;
+    if (!RequireSqliteDb(req, db)) return true;
+
+    sqlite3_stmt *stmt = db->Prepare(
+        "SELECT block_height, txid, net_value FROM address_history "
+        "WHERE address = ?1 ORDER BY block_height DESC "
+        "LIMIT ?2 OFFSET ?3");
+
+    UniValue results(UniValue::VOBJ);
+    for (const std::string &address : addresses) {
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+        sqlite3_bind_text(stmt, 1, address.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 2, limit);
+        sqlite3_bind_int(stmt, 3, offset);
+
+        UniValue arr(UniValue::VARR);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            UniValue obj(UniValue::VOBJ);
+            obj.pushKV("block_height", sqlite3_column_int(stmt, 0));
+
+            const uint8_t *txid_blob = static_cast<const uint8_t *>(
+                sqlite3_column_blob(stmt, 1));
+            if (txid_blob && sqlite3_column_bytes(stmt, 1) == 32) {
+                uint256 txid;
+                memcpy(txid.begin(), txid_blob, 32);
+                obj.pushKV("txid", txid.GetHex());
+            }
+
+            obj.pushKV("net_value",
+                       int64_t(sqlite3_column_int64(stmt, 2)));
+            arr.push_back(obj);
+        }
+        results.pushKV(address, arr);
+    }
+    sqlite3_reset(stmt);
+
+    UniValue resp(UniValue::VOBJ);
+    resp.pushKV("data", results);
+    UniValue pag(UniValue::VOBJ);
+    pag.pushKV("limit", limit);
+    pag.pushKV("offset", offset);
+    resp.pushKV("pagination", pag);
+    WriteSuccess(req, resp);
     return true;
 }
 

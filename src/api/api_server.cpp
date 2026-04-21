@@ -291,6 +291,12 @@ void StartAPI(const util::Ref &context) {
     AddRoute(HTTPRequest::POST,"txs/broadcast", api::HandleBroadcastTx);
     AddRoute(HTTPRequest::POST,"txs/decode",    api::HandleDecodeTx);
     AddRoute(HTTPRequest::GET, "addresses", api::HandleGetAddress,     15);
+    AddRoute(HTTPRequest::POST, "addresses/batch/summary",
+             api::HandleBatchAddressSummary);
+    AddRoute(HTTPRequest::POST, "addresses/batch/utxos",
+             api::HandleBatchAddressUtxos);
+    AddRoute(HTTPRequest::POST, "addresses/batch/txs",
+             api::HandleBatchAddressTxs);
     AddRoute(HTTPRequest::GET, "utxos",     api::HandleGetUtxos,       10);
     AddRoute(HTTPRequest::GET, "network",   api::HandleGetNetworkInfo, 30);
     AddRoute(HTTPRequest::GET, "network/peers", api::HandleGetPeers,   30);
