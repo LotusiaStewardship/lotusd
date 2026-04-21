@@ -139,6 +139,21 @@ lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://
 docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
 ```
 
+## 🛰️ REST API
+
+Each running node exposes an unauthenticated read-only REST surface
+under `/api/v1/*` plus a self-describing OpenAPI 3.1 document at
+`/api/v1/openapi.json`. The schema covers chain, blocks, txs, mempool,
+addresses (including the `addresses/batch/{summary,utxos,txs}` POST
+endpoints for light wallets), the RANK `/social/*` family, mining,
+network, the `/health` liveness probe and the JSON-RPC fallback at
+`/api/v1/rpc/<method>`. Drop the `openapi.json` URL into Swagger UI,
+Redoc or `openapi-generator` to get an up-to-date typed client.
+
+```
+$ curl -s https://your-node/api/v1/openapi.json | jq '.paths | keys'
+```
+
 ## 🌐 Community Resources
 
 - 🏠 Website: [https://lotusia.org/](https://lotusia.org/)

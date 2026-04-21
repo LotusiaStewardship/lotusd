@@ -742,6 +742,162 @@ static UniValue BuildPaths() {
                                     /*itemIsArray=*/true));
     }
 
+    // /social/* — RANK module endpoints (registered dynamically by
+    // CRankModule::RegisterRoutes; documented here so generated clients
+    // see the full surface).
+    auto buildSocialGet = [&](const std::string &op,
+                              const std::string &summary,
+                              const std::string &description,
+                              const UniValue &params,
+                              const std::string &respRef) {
+        UniValue get(UniValue::VOBJ);
+        get.pushKV("summary", summary);
+        get.pushKV("description", description);
+        get.pushKV("operationId", op);
+        UniValue tags(UniValue::VARR);
+        tags.push_back("Social");
+        get.pushKV("tags", tags);
+        if (!params.isNull() && params.isArray() && !params.empty()) {
+            get.pushKV("parameters", params);
+        }
+        UniValue responses(UniValue::VOBJ);
+        responses.pushKV("200", JsonResponse(summary, SchemaRef(respRef)));
+        get.pushKV("responses", responses);
+        UniValue path(UniValue::VOBJ);
+        path.pushKV("get", get);
+        return path;
+    };
+
+    {
+        UniValue params(UniValue::VARR);
+        params.push_back(QueryParam("page", "1-indexed page number",
+                                     "integer"));
+        params.push_back(QueryParam("pageSize", "Items per page (max 100)",
+                                     "integer"));
+        paths.pushKV("/api/v1/social/activity",
+                     buildSocialGet("getSocialActivity",
+                                    "Recent RANK votes across all profiles",
+                                    "Returns the latest RANK votes "
+                                    "in reverse-chronological order. Used "
+                                    "to power the global activity feed.",
+                                    params, "SocialActivityPage"));
+        paths.pushKV("/api/v1/social/profiles",
+                     buildSocialGet("getSocialProfiles",
+                                    "Ranked RANK profiles list",
+                                    "Returns RANK profiles sorted by "
+                                    "ranking DESC with simple page / "
+                                    "pageSize pagination.",
+                                    params, "SocialProfilesPage"));
+    }
+
+    {
+        UniValue params(UniValue::VARR);
+        params.push_back(QueryParam("q",
+                                     "Substring to match on profile_id "
+                                     "(1-64 chars; LIKE wildcards are "
+                                     "escaped server-side)",
+                                     "string", /*required=*/true));
+        params.push_back(QueryParam("platform",
+                                     "Optional platform name "
+                                     "(twitter, telegram, ...)",
+                                     "string"));
+        params.push_back(QueryParam("limit",
+                                     "Max profiles returned (1-100, "
+                                     "default 25)",
+                                     "integer"));
+        paths.pushKV("/api/v1/social/search",
+                     buildSocialGet("searchSocialProfiles",
+                                    "Search RANK profiles by handle",
+                                    "Substring search over rank_profiles."
+                                    "profile_id, optionally narrowed to "
+                                    "one platform. Results sorted by "
+                                    "ranking DESC.",
+                                    params, "SocialSearchResult"));
+    }
+
+    {
+        UniValue params(UniValue::VARR);
+        params.push_back(PathParam("platform",
+                                    "Platform name (twitter, telegram, ...)",
+                                    "string"));
+        params.push_back(PathParam("profileId",
+                                    "Platform-specific profile identifier",
+                                    "string"));
+        paths.pushKV("/api/v1/social/{platform}/{profileId}",
+                     buildSocialGet("getSocialProfile",
+                                    "RANK profile detail",
+                                    "Returns the cumulative ranking and "
+                                    "vote counts for the given profile, "
+                                    "or zeroed counters if it has never "
+                                    "been voted on.",
+                                    params, "SocialProfile"));
+
+        UniValue paramsPaged(UniValue::VARR);
+        for (size_t i = 0; i < params.size(); i++) {
+            paramsPaged.push_back(params[i]);
+        }
+        paramsPaged.push_back(QueryParam("page",
+                                          "1-indexed page number",
+                                          "integer"));
+        paramsPaged.push_back(QueryParam("pageSize",
+                                          "Items per page (max 100)",
+                                          "integer"));
+        paths.pushKV("/api/v1/social/{platform}/{profileId}/posts",
+                     buildSocialGet("getSocialProfilePosts",
+                                    "Posts ranked under a profile",
+                                    "Posts attributed to this profile, "
+                                    "sorted by ranking DESC.",
+                                    paramsPaged,
+                                    "SocialProfilePostsPage"));
+        paths.pushKV("/api/v1/social/{platform}/{profileId}/votes",
+                     buildSocialGet("getSocialProfileVotes",
+                                    "Votes received by a profile",
+                                    "Individual RANK votes received by "
+                                    "the profile, in reverse-block order.",
+                                    paramsPaged,
+                                    "SocialProfileVotesPage"));
+    }
+
+    {
+        UniValue params(UniValue::VARR);
+        params.push_back(PathParam("platform",
+                                    "Platform name", "string"));
+        params.push_back(PathParam("profileId",
+                                    "Profile identifier", "string"));
+        params.push_back(PathParam("postId",
+                                    "Platform-specific post identifier",
+                                    "string"));
+        params.push_back(QueryParam("page",
+                                     "1-indexed page number", "integer"));
+        params.push_back(QueryParam("pageSize",
+                                     "Items per page (max 100)",
+                                     "integer"));
+        paths.pushKV("/api/v1/social/{platform}/{profileId}/post/{postId}",
+                     buildSocialGet("getSocialPost",
+                                    "RANK post detail with vote feed",
+                                    "Returns the post summary plus a "
+                                    "paginated list of votes addressed "
+                                    "to this specific post.",
+                                    params, "SocialPostDetail"));
+    }
+
+    {
+        UniValue params(UniValue::VARR);
+        params.push_back(PathParam("type",
+                                    "'profiles' or 'posts'", "string"));
+        params.push_back(PathParam("direction",
+                                    "'top' or 'bottom'", "string"));
+        paths.pushKV("/api/v1/social/stats/{type}/{direction}",
+                     buildSocialGet("getSocialStats",
+                                    "Top / bottom ranked profiles or "
+                                    "posts",
+                                    "Returns up to 10 profiles or posts "
+                                    "sorted by ranking, in either "
+                                    "direction. Used by the trending "
+                                    "widgets.",
+                                    params, "SocialStatsList"));
+    }
+
     // /health
     {
         UniValue get(UniValue::VOBJ);
@@ -1032,6 +1188,218 @@ static UniValue BuildSchemas() {
         props.pushKV("net_value", IntSchema());
         s.pushKV("properties", props);
         schemas.pushKV("AddressTx", s);
+    }
+
+    // ── RANK / Social schemas ──────────────────────────────────────
+
+    // SocialVote — single row of rank_votes (used by /social/activity
+    // and per-profile /votes feeds).
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("txid", StringSchema());
+        props.pushKV("firstSeen", IntSchema());
+        props.pushKV("platform", StringSchema());
+        props.pushKV("profileId", StringSchema());
+        UniValue sentEnum(UniValue::VOBJ);
+        sentEnum.pushKV("type", "string");
+        UniValue sentVals(UniValue::VARR);
+        sentVals.push_back("positive");
+        sentVals.push_back("negative");
+        sentEnum.pushKV("enum", sentVals);
+        props.pushKV("sentiment", sentEnum);
+        props.pushKV("sats", IntSchema());
+        props.pushKV("postId", StringSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialVote", s);
+    }
+
+    // SocialActivityPage — /social/activity envelope.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        UniValue arr(UniValue::VOBJ);
+        arr.pushKV("type", "array");
+        arr.pushKV("items", SchemaRef("SocialVote"));
+        props.pushKV("votes", arr);
+        props.pushKV("numPages", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialActivityPage", s);
+    }
+
+    // SocialProfile — single row of rank_profiles.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("platform", StringSchema());
+        props.pushKV("id", StringSchema());
+        props.pushKV("ranking", IntSchema());
+        props.pushKV("votesPositive", IntSchema());
+        props.pushKV("votesNegative", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialProfile", s);
+    }
+
+    // SocialProfilesPage — /social/profiles envelope.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        UniValue arr(UniValue::VOBJ);
+        arr.pushKV("type", "array");
+        arr.pushKV("items", SchemaRef("SocialProfile"));
+        props.pushKV("profiles", arr);
+        props.pushKV("numPages", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialProfilesPage", s);
+    }
+
+    // SocialSearchResult — /social/search envelope (echoes query/platform
+    // alongside the matched profiles).
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("query", StringSchema());
+        props.pushKV("platform", StringSchema());
+        UniValue arr(UniValue::VOBJ);
+        arr.pushKV("type", "array");
+        arr.pushKV("items", SchemaRef("SocialProfile"));
+        props.pushKV("profiles", arr);
+        props.pushKV("numResults", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialSearchResult", s);
+    }
+
+    // SocialPost — row of rank_posts.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("id", StringSchema());
+        props.pushKV("ranking", IntSchema());
+        props.pushKV("votesPositive", IntSchema());
+        props.pushKV("votesNegative", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialPost", s);
+    }
+
+    // SocialProfilePostsPage — /social/{plat}/{id}/posts envelope.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        UniValue arr(UniValue::VOBJ);
+        arr.pushKV("type", "array");
+        arr.pushKV("items", SchemaRef("SocialPost"));
+        props.pushKV("posts", arr);
+        props.pushKV("numPages", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialProfilePostsPage", s);
+    }
+
+    // SocialProfilePostRef — minimal {id} reference embedded in
+    // /social/{plat}/{id}/votes responses.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("id", StringSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialProfilePostRef", s);
+    }
+
+    // SocialProfileVote — vote row used in /social/{plat}/{id}/votes.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("txid", StringSchema());
+        props.pushKV("timestamp", IntSchema());
+        UniValue sentEnum(UniValue::VOBJ);
+        sentEnum.pushKV("type", "string");
+        UniValue sentVals(UniValue::VARR);
+        sentVals.push_back("positive");
+        sentVals.push_back("negative");
+        sentEnum.pushKV("enum", sentVals);
+        props.pushKV("sentiment", sentEnum);
+        props.pushKV("sats", IntSchema());
+        props.pushKV("post", SchemaRef("SocialProfilePostRef"));
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialProfileVote", s);
+    }
+
+    // SocialProfileVotesPage — /social/{plat}/{id}/votes envelope.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        UniValue arr(UniValue::VOBJ);
+        arr.pushKV("type", "array");
+        arr.pushKV("items", SchemaRef("SocialProfileVote"));
+        props.pushKV("votes", arr);
+        props.pushKV("numPages", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialProfileVotesPage", s);
+    }
+
+    // SocialPostSummary — embedded summary block in
+    // /social/{plat}/{id}/post/{postId}.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("platform", StringSchema());
+        props.pushKV("profileId", StringSchema());
+        props.pushKV("postId", StringSchema());
+        props.pushKV("ranking", IntSchema());
+        props.pushKV("votesPositive", IntSchema());
+        props.pushKV("votesNegative", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialPostSummary", s);
+    }
+
+    // SocialPostDetail — /social/{plat}/{id}/post/{postId} envelope.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("summary", SchemaRef("SocialPostSummary"));
+        UniValue arr(UniValue::VOBJ);
+        arr.pushKV("type", "array");
+        arr.pushKV("items", SchemaRef("SocialProfileVote"));
+        props.pushKV("votes", arr);
+        props.pushKV("numPages", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialPostDetail", s);
+    }
+
+    // SocialStatsRow — single row in /social/stats responses.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        props.pushKV("platform", StringSchema());
+        props.pushKV("id", StringSchema());
+        props.pushKV("ranking", IntSchema());
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialStatsRow", s);
+    }
+
+    // SocialStatsList — /social/stats/* envelope.
+    {
+        UniValue s(UniValue::VOBJ);
+        s.pushKV("type", "object");
+        UniValue props(UniValue::VOBJ);
+        UniValue arr(UniValue::VOBJ);
+        arr.pushKV("type", "array");
+        arr.pushKV("items", SchemaRef("SocialStatsRow"));
+        props.pushKV("rows", arr);
+        s.pushKV("properties", props);
+        schemas.pushKV("SocialStatsList", s);
     }
 
     // HealthInfo
