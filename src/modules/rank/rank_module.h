@@ -82,6 +82,19 @@ private:
     bool HandleRescan(const util::Ref &ctx, HTTPRequest *req,
                       const std::vector<std::string> &parts,
                       const api::QueryParams &qp);
+
+    /**
+     * GET /api/v1/social/search
+     *   ?q=<substring>       — profile_id LIKE '%q%' (required, 1-64 chars)
+     *   &platform=<name>     — optional (twitter, telegram, ...)
+     *   &limit=<n>           — default 25, max 100
+     *
+     * Used by light wallets (BigVase) to power the RANK profile search box
+     * without falling back to a paginated /social/profiles walk.
+     */
+    bool HandleSearch(const util::Ref &ctx, HTTPRequest *req,
+                      const std::vector<std::string> &parts,
+                      const api::QueryParams &qp);
 };
 
 #endif // BITCOIN_MODULES_RANK_MODULE_H

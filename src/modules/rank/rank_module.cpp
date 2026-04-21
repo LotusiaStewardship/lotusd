@@ -1024,6 +1024,8 @@ void CRankModule::RegisterRoutes(RouteAdder addRoute) {
              std::bind(&CRankModule::HandleRescan, this, P::_1, P::_2, P::_3, P::_4));
     addRoute(HTTPRequest::POST, "social/rescan",
              std::bind(&CRankModule::HandleRescan, this, P::_1, P::_2, P::_3, P::_4));
+    addRoute(HTTPRequest::GET, "social/search",
+             std::bind(&CRankModule::HandleSearch, this, P::_1, P::_2, P::_3, P::_4));
     addRoute(HTTPRequest::GET, "social",
              std::bind(&CRankModule::HandleProfileDetail, this, P::_1, P::_2, P::_3, P::_4));
 }
@@ -1124,6 +1126,92 @@ bool CRankModule::HandleProfiles(const util::Ref &, HTTPRequest *req,
     UniValue result(UniValue::VOBJ);
     result.pushKV("profiles", profiles);
     result.pushKV("numPages", numPages);
+    api::WriteJSON(req, HTTP_OK, result);
+    return true;
+}
+
+bool CRankModule::HandleSearch(const util::Ref &, HTTPRequest *req,
+                               const std::vector<std::string> &,
+                               const api::QueryParams &qp) {
+    auto qOpt = qp.Get("q");
+    if (!qOpt || qOpt->empty()) {
+        api::WriteError(req, HTTP_BAD_REQUEST, "missing_query",
+                        "Query parameter 'q' is required");
+        return true;
+    }
+    const std::string &qstr = *qOpt;
+    if (qstr.size() > 64) {
+        api::WriteError(req, HTTP_BAD_REQUEST, "query_too_long",
+                        "Query parameter 'q' must be at most 64 characters");
+        return true;
+    }
+
+    int limit = qp.GetInt("limit", 25);
+    if (limit < 1) limit = 1;
+    if (limit > 100) limit = 100;
+
+    auto platOpt = qp.Get("platform");
+    int platId = -1;
+    if (platOpt && !platOpt->empty()) {
+        platId = PlatformId(*platOpt);
+        if (platId < 0) {
+            api::WriteError(req, HTTP_BAD_REQUEST, "invalid_platform",
+                            "Unknown platform name");
+            return true;
+        }
+    }
+
+    // Escape SQL LIKE wildcards in the user input so an attacker cannot
+    // turn a substring search into a full table scan via "%". We then
+    // wrap the escaped pattern in '%...%' for substring matching.
+    std::string esc;
+    esc.reserve(qstr.size() + 8);
+    for (char c : qstr) {
+        if (c == '%' || c == '_' || c == '\\') esc.push_back('\\');
+        esc.push_back(c);
+    }
+    const std::string pattern = "%" + esc + "%";
+
+    sqlite3_stmt *q = nullptr;
+    if (platId >= 0) {
+        q = m_db->Prepare(
+            "SELECT platform, profile_id, ranking, votes_positive, "
+            "votes_negative FROM rank_profiles "
+            "WHERE platform = ?1 AND profile_id LIKE ?2 ESCAPE '\\' "
+            "ORDER BY ranking DESC LIMIT ?3");
+        sqlite3_bind_int(q, 1, platId);
+        sqlite3_bind_text(q, 2, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(q, 3, limit);
+    } else {
+        q = m_db->Prepare(
+            "SELECT platform, profile_id, ranking, votes_positive, "
+            "votes_negative FROM rank_profiles "
+            "WHERE profile_id LIKE ?1 ESCAPE '\\' "
+            "ORDER BY ranking DESC LIMIT ?2");
+        sqlite3_bind_text(q, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(q, 2, limit);
+    }
+
+    UniValue profiles(UniValue::VARR);
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        UniValue p(UniValue::VOBJ);
+        int plat = sqlite3_column_int(q, 0);
+        p.pushKV("platform", PlatformName(plat));
+        p.pushKV("id", SafeText(q, 1));
+        p.pushKV("ranking", (int64_t)sqlite3_column_int64(q, 2));
+        p.pushKV("votesPositive", sqlite3_column_int(q, 3));
+        p.pushKV("votesNegative", sqlite3_column_int(q, 4));
+        profiles.push_back(std::move(p));
+    }
+    sqlite3_reset(q);
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("query", qstr);
+    if (platOpt && !platOpt->empty()) {
+        result.pushKV("platform", *platOpt);
+    }
+    result.pushKV("profiles", profiles);
+    result.pushKV("numResults", (int)profiles.size());
     api::WriteJSON(req, HTTP_OK, result);
     return true;
 }
