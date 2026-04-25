@@ -168,8 +168,9 @@ Consensus::CoinbaseAddresses AddressSets = {
     .firstKings =
         {
             // faithful turtle
-            "lotus_16PSJQXrnTrUbhnxPpPgf1jd16JFkWk8TdbpALVME"
-            // TODO: add hash turtle before mainnet launch
+            "lotus_16PSJQXrnTrUbhnxPpPgf1jd16JFkWk8TdbpALVME",
+            // hash turtle
+            "lotus_16PSJMAVPBd6g7rYz9d3fw8BbENqNaPdU6wSi7eC8"
         },
 };
 } // namespace RewardAddresses
