@@ -1083,6 +1083,8 @@ public:
 private:
     nng_socket m_sock;
     std::set<std::string> m_enabled_messages;
+    // Monotonic process-local epoch used by miningworkchg.
+    std::atomic<uint64_t> m_templateEpoch{1};
 
     void BroadcastMessage(const std::string msg_type,
                           const flatbuffers::FlatBufferBuilder &fbb) {
@@ -1093,43 +1095,77 @@ private:
         NNG_TRY_LOG(nng_send(m_sock, msg.data(), msg.size(), 0));
     }
 
+    void EmitMiningWorkChanged(NngInterface::MiningWorkChangeReason reason,
+                               const CBlockIndex *tip) {
+        if (!IsMessageEnabled(MSG_MININGWORKCHG) || tip == nullptr) {
+            return;
+        }
+        // This signal is intentionally small and constant-shape to keep event
+        // latency low for external stratum coordinators that refresh jobs on
+        // every tip/mempool invalidation.
+        flatbuffers::FlatBufferBuilder fbb;
+        fbb.Finish(NngInterface::CreateMiningWorkChanged(
+            fbb, reason, CreateFbsBlockHash(fbb, tip->GetBlockHash()),
+            tip->nHeight, GetTime(), m_templateEpoch.fetch_add(1)));
+        BroadcastMessage(MSG_MININGWORKCHG, fbb);
+    }
+
     void UpdatedBlockTip(const CBlockIndex *pindexNew,
                          const CBlockIndex *pindexFork,
                          bool fInitialDownload) override {
-        if (!IsMessageEnabled(MSG_UPDATEBLKTIP)) {
-            return;
+        if (IsMessageEnabled(MSG_UPDATEBLKTIP)) {
+            flatbuffers::FlatBufferBuilder fbb;
+            fbb.Finish(NngInterface::CreateUpdatedBlockTip(
+                fbb, CreateFbsBlockHash(fbb, pindexNew->GetBlockHash())));
+            BroadcastMessage(MSG_UPDATEBLKTIP, fbb);
         }
-        flatbuffers::FlatBufferBuilder fbb;
-        fbb.Finish(NngInterface::CreateUpdatedBlockTip(
-            fbb, CreateFbsBlockHash(fbb, pindexNew->GetBlockHash())));
-        BroadcastMessage(MSG_UPDATEBLKTIP, fbb);
+        EmitMiningWorkChanged(NngInterface::MiningWorkChangeReason_NEW_TIP,
+                              pindexNew);
     }
 
     void
     TransactionAddedToMempool(const CTransactionRef &ptx,
                               const std::vector<Coin> &spent_coins,
                               uint64_t mempool_sequence) override {
-        if (!IsMessageEnabled(MSG_MEMPOOLTXADD)) {
-            return;
+        if (IsMessageEnabled(MSG_MEMPOOLTXADD)) {
+            flatbuffers::FlatBufferBuilder fbb;
+            fbb.Finish(NngInterface::CreateTransactionAddedToMempool(
+                fbb, NngInterface::CreateMempoolTx(
+                         fbb, CreateFbsTxMempool(fbb, ptx, spent_coins),
+                         GetAdjustedTime())));
+            BroadcastMessage(MSG_MEMPOOLTXADD, fbb);
         }
-        flatbuffers::FlatBufferBuilder fbb;
-        fbb.Finish(NngInterface::CreateTransactionAddedToMempool(
-            fbb, NngInterface::CreateMempoolTx(
-                     fbb, CreateFbsTxMempool(fbb, ptx, spent_coins),
-                     GetAdjustedTime())));
-        BroadcastMessage(MSG_MEMPOOLTXADD, fbb);
+
+        if (IsMessageEnabled(MSG_MININGWORKCHG)) {
+            const CBlockIndex *tip = nullptr;
+            {
+                LOCK(cs_main);
+                tip = ::ChainActive().Tip();
+            }
+            EmitMiningWorkChanged(
+                NngInterface::MiningWorkChangeReason_MEMPOOL_UPDATE, tip);
+        }
     }
 
     void TransactionRemovedFromMempool(const CTransactionRef &ptx,
                                        MemPoolRemovalReason reason,
                                        uint64_t mempool_sequence) override {
-        if (!IsMessageEnabled(MSG_MEMPOOLTXREM)) {
-            return;
+        if (IsMessageEnabled(MSG_MEMPOOLTXREM)) {
+            flatbuffers::FlatBufferBuilder fbb;
+            fbb.Finish(NngInterface::CreateTransactionRemovedFromMempool(
+                fbb, CreateFbsTxId(fbb, ptx->GetId())));
+            BroadcastMessage(MSG_MEMPOOLTXREM, fbb);
         }
-        flatbuffers::FlatBufferBuilder fbb;
-        fbb.Finish(NngInterface::CreateTransactionRemovedFromMempool(
-            fbb, CreateFbsTxId(fbb, ptx->GetId())));
-        BroadcastMessage(MSG_MEMPOOLTXREM, fbb);
+
+        if (IsMessageEnabled(MSG_MININGWORKCHG)) {
+            const CBlockIndex *tip = nullptr;
+            {
+                LOCK(cs_main);
+                tip = ::ChainActive().Tip();
+            }
+            EmitMiningWorkChanged(
+                NngInterface::MiningWorkChangeReason_MEMPOOL_UPDATE, tip);
+        }
     }
 
     void BlockConnected(const std::shared_ptr<const CBlock> &block,

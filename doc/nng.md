@@ -30,7 +30,7 @@ Likewise, PubSub messages are enabled using `-nngpub=<url>`, and `-nngpubmsg=<ms
  - `blkconnected` to notify when a block connected to the chain. Flatbuffers table is `BlockConnected`.
  - `blkdisconctd` to notify when a block disconnected from the chain (e.g. reorg, invalidateblock). Flatbuffers table is `BlockDisconnected`.
  - `chainstflush` to nofity when the block database has been flushed to the disk. Flatbuffers table is `ChainStateFlushed`.
-
+ - `miningworkchg` low-latency mining/template invalidation signal for external stratum services. Flatbuffers table is `MiningWorkChanged`.
 PubSub messages have their message type prepended as the first 12 bytes (0-padded if necessary), after that the message is encoded in the corresponding flatbuffers table (again, see [nng_interface.fbs](../src/nng_interface/nng_interface.fbs)).
 
 ## Example
@@ -44,6 +44,7 @@ nngpubmsg=blkconnected
 nngpubmsg=blkdisconctd
 nngpubmsg=mempooltxadd
 nngpubmsg=mempooltxrem
+nngpubmsg=miningworkchg
 ```
 
 The same urls would then be specified in the indexer to connect the node to it.

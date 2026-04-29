@@ -41,6 +41,7 @@ class NngInterfaceTest(BitcoinTestFramework):
             "-nngpubmsg=blkconnected",
             "-nngpubmsg=blkdisconctd",
             "-nngpubmsg=chainstflush",
+            "-nngpubmsg=miningworkchg",
             # Always expire after 1h
             "-mempoolexpiry=1",
         ]]
@@ -76,6 +77,7 @@ class NngInterfaceTest(BitcoinTestFramework):
         with pynng.Sub0() as pub_sock:
             pub_sock.dial(PUB_URL)
             await self._test_update_chain_tip(node, pub_sock)
+            await self._test_mining_work_changed(node, pub_sock)
             await self._test_transaction_added_to_mempool(node, pub_sock)
             await self._test_transaction_removed_from_mempool_conflict(node, pub_sock)
             await self._test_transaction_removed_from_mempool_expiry(node, pub_sock)
@@ -635,6 +637,37 @@ class NngInterfaceTest(BitcoinTestFramework):
         msg = UpdatedBlockTip.GetRootAs(msg, 0)
         assert_equal(bytes(msg.BlockHash().Hash().Data())[::-1].hex(), hashes[0])
         pub_sock.unsubscribe('updateblktip')
+
+    async def _test_mining_work_changed(self, node, pub_sock):
+        from NngInterface.MiningWorkChanged import MiningWorkChanged
+
+        pub_sock.subscribe('miningworkchg')
+
+        # 1) Tip-driven work change.
+        hashes = node.generatetoaddress(1, self.burn_addr)
+        msg = await self._recv_message(pub_sock, 'miningworkchg')
+        evt = MiningWorkChanged.GetRootAs(msg, 0)
+        assert_equal(bytes(evt.BlockHash().Hash().Data())[::-1].hex(), hashes[0])
+        assert evt.TemplateEpoch() > 0
+        # NEW_TIP
+        assert_equal(evt.Reason(), 0)
+
+        # 2) Mempool-driven work change.
+        tx = CTransaction()
+        outpoint, value = self._get_utxo(node)
+        tx.vin.append(CTxIn(outpoint, CScript([b'\x51'])))
+        tx.vout.append(CTxOut(value - 1000, CScript([OP_HASH160, bytes(20), OP_EQUAL])))
+        pad_tx(tx)
+        node.sendrawtransaction(tx.serialize().hex())
+
+        msg2 = await self._recv_message(pub_sock, 'miningworkchg')
+        evt2 = MiningWorkChanged.GetRootAs(msg2, 0)
+        assert_equal(bytes(evt2.BlockHash().Hash().Data())[::-1].hex(), node.getbestblockhash())
+        # MEMPOOL_UPDATE
+        assert_equal(evt2.Reason(), 1)
+        assert evt2.TemplateEpoch() > evt.TemplateEpoch()
+
+        pub_sock.unsubscribe('miningworkchg')
 
     async def _test_transaction_added_to_mempool(self, node, pub_sock):
         from NngInterface.TransactionAddedToMempool import TransactionAddedToMempool

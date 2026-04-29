@@ -233,6 +233,37 @@ table ChainStateFlushed {
     block_hash: BlockHash;
 }
 
+// Why `MiningWorkChanged` was emitted.
+//
+// This enum is used in `reason` and is intentionally compact because the
+// pub/sub topic is low-latency and high-frequency under active mining.
+enum MiningWorkChangeReason: int32 {
+    // New best tip (or reorg) changed chain context for template building.
+    NEW_TIP = 0,
+    // Mempool change may alter tx selection and coinbase reward.
+    MEMPOOL_UPDATE = 1,
+    // Catch-all for operator/manual invalidation events.
+    MANUAL = 2,
+}
+
+// Low-latency signal intended for external stratum coordinators.
+//
+// `UpdatedBlockTip` remains the canonical chain-tip event. This table adds a
+// mining-focused event with explicit reason and a monotonic template epoch to
+// let external services invalidate and refresh jobs quickly.
+table MiningWorkChanged {
+    // Cause of this work-change signal.
+    reason: MiningWorkChangeReason;
+    // Current best tip hash after the change.
+    block_hash: BlockHash;
+    // Current best height after the change.
+    height: int32;
+    // Node timestamp when signal was emitted.
+    node_time: int64;
+    // Monotonic counter local to the running node process.
+    template_epoch: uint64;
+}
+
 // Fetches a single block
 table GetBlockRequest {
     // Identifier of the block; either height or hash
