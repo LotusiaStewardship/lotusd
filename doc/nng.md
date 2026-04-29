@@ -56,3 +56,29 @@ In production, use whichever fits your topology:
   permissions provide the desired access control boundary.
 - `tcp://...` when stratum runs remotely; in this case, explicitly harden bind
   addresses and network policy (firewall allowlists, private networking, etc).
+
+### Mining endpoint examples
+
+IPC mode:
+
+```
+nngrpc=ipc://datadir/nngrpc.pipe
+nngpub=ipc://datadir/nngpub.pipe
+nngpubmsg=updateblktip
+nngpubmsg=miningworkchg
+```
+
+TCP mode:
+
+```
+nngrpc=tcp://127.0.0.1:52783
+nngpub=tcp://127.0.0.1:52784
+nngpubmsg=updateblktip
+nngpubmsg=miningworkchg
+```
+
+A Stratum coordinator typically subscribes to `miningworkchg` and calls:
+- `GetMiningTemplateRequest` on startup and on each work-change event
+- `ValidateMinedBlockProposalRequest` for optional pre-submit checks
+- `SubmitMinedBlockRequest` for solved candidates
+- `GetMiningStatusRequest` for operator health/state telemetry

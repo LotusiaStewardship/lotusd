@@ -238,12 +238,14 @@ table ChainStateFlushed {
 // This enum is used in `reason` and is intentionally compact because the
 // pub/sub topic is low-latency and high-frequency under active mining.
 enum MiningWorkChangeReason: int32 {
-    // New best tip (or reorg) changed chain context for template building.
+    // New best tip on the same chain progression (non-reorg).
     NEW_TIP = 0,
+    // Best tip changed due to a reorg/fork switch.
+    REORG = 1,
     // Mempool change may alter tx selection and coinbase reward.
-    MEMPOOL_UPDATE = 1,
+    MEMPOOL_REFRESH = 2,
     // Catch-all for operator/manual invalidation events.
-    MANUAL = 2,
+    MANUAL_INVALIDATION = 3,
 }
 
 // Low-latency signal intended for external stratum coordinators.
@@ -388,6 +390,9 @@ table GetMiningTemplateResponse {
     // Height for this template.
     height: int32;
 
+    // Block header version chosen for this template.
+    version: uint32;
+
     // Compact target bits for this template.
     bits: uint32;
 
@@ -399,6 +404,9 @@ table GetMiningTemplateResponse {
 
     // Minimum valid block time for this template (MTP+1 style lower bound).
     mintime: uint64;
+
+    // Current max acceptable block time from node perspective.
+    maxtime: uint64;
 
     // Total coinbase output value available to miner (satoshis).
     coinbase_value: uint64;
@@ -460,6 +468,9 @@ table SubmitMinedBlockResponse {
 
     // Human-readable reject reason (BIP22-style when applicable).
     reject_reason: string;
+
+    // Hash of submitted candidate block.
+    block_hash: BlockHash;
 }
 
 // Validate a block proposal against current tip without requiring PoW.
@@ -485,5 +496,9 @@ table GetMiningStatusResponse {
     initial_block_download: bool;
     mempool_tx_count: uint64;
     connected_peers: uint32;
+    // Node clock (unix seconds) from GetAdjustedTime().
+    node_time: int64;
+    // Active-tip cumulative chain work as hex.
+    tip_chain_work: string;
     network: string;
 }

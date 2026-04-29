@@ -9,6 +9,7 @@
 #include <blockdb.h>
 #include <chainparams.h>
 #include <config.h>
+#include <consensus/consensus.h>
 #include <consensus/validation.h>
 #include <consensus/merkle.h>
 #include <hash.h>
@@ -871,6 +872,7 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
     NngInterface::Hash targetHash = CreateFbsHash(targetU256.begin());
 
     const uint64_t mintime = pindexPrev->GetMedianTimePast() + 1;
+    const uint64_t maxtime = GetAdjustedTime() + MAX_FUTURE_BLOCK_TIME;
 
     auto response = NngInterface::CreateGetMiningTemplateResponse(
         fbb, templateId,
@@ -878,8 +880,8 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
         fbb.CreateVector((const uint8_t *)headerStream.data(),
                          headerStream.size()),
         CreateFbsBlockHash(fbb, pblock->hashPrevBlock), pindexPrev->nHeight + 1,
-        pblock->nBits, &targetHash, pblock->GetBlockTime(),
-        mintime, coinbaseValue / SATOSHI,
+        pblock->nHeaderVersion, pblock->nBits, &targetHash,
+        pblock->GetBlockTime(), mintime, maxtime, coinbaseValue / SATOSHI,
         fbb.CreateVector((const uint8_t *)coinbaseStream.data(),
                          coinbaseStream.size()),
         fbb.CreateVector(txsFbs), fbb.CreateString(cb1), fbb.CreateString(cb2),
@@ -910,7 +912,8 @@ NngRpcErrorCode NngRpcServer::SubmitMinedBlock(
     if (block.vtx.empty() || !block.vtx[0]->IsCoinBase()) {
         auto resp = NngInterface::CreateSubmitMinedBlockResponse(
             fbb, NngInterface::MiningSubmitResult_INVALID_COINBASE, false,
-            fbb.CreateString("Block does not start with a coinbase"));
+            fbb.CreateString("Block does not start with a coinbase"),
+            CreateFbsBlockHash(fbb, BlockHash(block.GetHash())));
         fbb.Finish(resp);
         return NngRpcErrorCode::NO_RPC_ERROR;
     }
@@ -934,7 +937,8 @@ NngRpcErrorCode NngRpcServer::SubmitMinedBlock(
                            ? "duplicate-invalid"
                            : "duplicate-inconclusive");
             auto resp = NngInterface::CreateSubmitMinedBlockResponse(
-                fbb, code, false, fbb.CreateString(reason));
+                fbb, code, false, fbb.CreateString(reason),
+                CreateFbsBlockHash(fbb, BlockHash(hash)));
             fbb.Finish(resp);
             return NngRpcErrorCode::NO_RPC_ERROR;
         }
@@ -969,7 +973,8 @@ NngRpcErrorCode NngRpcServer::SubmitMinedBlock(
         result == NngInterface::MiningSubmitResult_ACCEPTED;
     const std::string reason = bip22Reason.has_value() ? *bip22Reason : "";
     auto resp = NngInterface::CreateSubmitMinedBlockResponse(
-        fbb, result, blockAccepted, fbb.CreateString(reason));
+        fbb, result, blockAccepted, fbb.CreateString(reason),
+        CreateFbsBlockHash(fbb, BlockHash(hash)));
     fbb.Finish(resp);
     return NngRpcErrorCode::NO_RPC_ERROR;
 }
@@ -1056,6 +1061,7 @@ NngRpcServer::GetMiningStatus(flatbuffers::FlatBufferBuilder &fbb,
         fbb, CreateFbsBlockHash(fbb, tip->GetBlockHash()), tip->nHeight,
         ::ChainstateActive().IsInitialBlockDownload(),
         static_cast<uint64_t>(m_node.mempool->size()), peers,
+        GetAdjustedTime(), fbb.CreateString(tip->nChainWork.GetHex()),
         fbb.CreateString(GetConfig().GetChainParams().NetworkIDString()));
     fbb.Finish(resp);
     return NngRpcErrorCode::NO_RPC_ERROR;
@@ -1119,7 +1125,11 @@ private:
                 fbb, CreateFbsBlockHash(fbb, pindexNew->GetBlockHash())));
             BroadcastMessage(MSG_UPDATEBLKTIP, fbb);
         }
-        EmitMiningWorkChanged(NngInterface::MiningWorkChangeReason_NEW_TIP,
+        const bool reorg = pindexFork != nullptr &&
+                           pindexNew != nullptr &&
+                           pindexNew->pprev != pindexFork;
+        EmitMiningWorkChanged(reorg ? NngInterface::MiningWorkChangeReason_REORG
+                                    : NngInterface::MiningWorkChangeReason_NEW_TIP,
                               pindexNew);
     }
 
@@ -1143,7 +1153,7 @@ private:
                 tip = ::ChainActive().Tip();
             }
             EmitMiningWorkChanged(
-                NngInterface::MiningWorkChangeReason_MEMPOOL_UPDATE, tip);
+                NngInterface::MiningWorkChangeReason_MEMPOOL_REFRESH, tip);
         }
     }
 
@@ -1164,7 +1174,7 @@ private:
                 tip = ::ChainActive().Tip();
             }
             EmitMiningWorkChanged(
-                NngInterface::MiningWorkChangeReason_MEMPOOL_UPDATE, tip);
+                NngInterface::MiningWorkChangeReason_MEMPOOL_REFRESH, tip);
         }
     }
 

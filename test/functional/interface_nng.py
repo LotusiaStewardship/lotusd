@@ -605,6 +605,7 @@ class NngInterfaceTest(BitcoinTestFramework):
         response = SubmitMinedBlockResponse.GetSubmitMinedBlockResponse.GetRootAs(response, 0)
         assert_equal(response.Accepted(), False)
         assert response.Result() >= 0
+        assert_equal(bytes(response.BlockHash().Hash().Data())[::-1].hex(), tiphash)
 
         # GetMiningStatus: verify tip and basic status fields are coherent.
         await self._send_request(rpc_sock, self._make_get_mining_status_request_fbs())
@@ -613,6 +614,8 @@ class NngInterfaceTest(BitcoinTestFramework):
         assert_equal(bytes(response.TipHash().Hash().Data())[::-1].hex(), tiphash)
         assert response.TipHeight() >= 0
         assert response.MempoolTxCount() >= 0
+        assert response.NodeTime() > 0
+        assert response.TipChainWork() is not None
         assert response.Network() is not None
 
     async def _recv_message(self, pub_sock, expected_msg_type, timeout=2):
@@ -663,8 +666,8 @@ class NngInterfaceTest(BitcoinTestFramework):
         msg2 = await self._recv_message(pub_sock, 'miningworkchg')
         evt2 = MiningWorkChanged.GetRootAs(msg2, 0)
         assert_equal(bytes(evt2.BlockHash().Hash().Data())[::-1].hex(), node.getbestblockhash())
-        # MEMPOOL_UPDATE
-        assert_equal(evt2.Reason(), 1)
+        # MEMPOOL_REFRESH
+        assert_equal(evt2.Reason(), 2)
         assert evt2.TemplateEpoch() > evt.TemplateEpoch()
 
         pub_sock.unsubscribe('miningworkchg')
