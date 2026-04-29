@@ -829,7 +829,9 @@ public:
     }
 
     //! @returns A reference to the on-disk UTXO set database.
-    CCoinsViewDB &CoinsDB() { return m_coins_views->m_dbview; }
+    CCoinsViewDB &CoinsDB() EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
+        return m_coins_views->m_dbview;
+    }
 
     //! @returns A reference to a wrapped view of the in-memory UTXO set that
     //!     handles disk read errors gracefully.
