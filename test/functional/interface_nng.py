@@ -72,6 +72,7 @@ class NngInterfaceTest(BitcoinTestFramework):
             await self._test_get_block_slice_errors(rpc_sock)
             await self._test_send_tx(node, rpc_sock)
             await self._test_get_block_range(node, rpc_sock)
+            await self._test_mining_rpcs(node, rpc_sock)
         with pynng.Sub0() as pub_sock:
             pub_sock.dial(PUB_URL)
             await self._test_update_chain_tip(node, pub_sock)
@@ -192,6 +193,80 @@ class NngInterfaceTest(BitcoinTestFramework):
         RpcCall.Start(fbb)
         RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.GetMempoolRequest)
         RpcCall.AddRpc(fbb, get_mempool_request)
+        rpc = RpcCall.End(fbb)
+        fbb.Finish(rpc)
+        return bytes(fbb.Output())
+
+    def _make_get_mining_template_request_fbs(self):
+        from NngInterface import (
+            RpcCall,
+            RpcRequest,
+            GetMiningTemplateRequest,
+        )
+        import flatbuffers
+        fbb = flatbuffers.Builder()
+        # Use defaults: OP_RETURN fallback script and 4/4 extranonce sizes.
+        GetMiningTemplateRequest.Start(fbb)
+        req = GetMiningTemplateRequest.End(fbb)
+        RpcCall.Start(fbb)
+        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.GetMiningTemplateRequest)
+        RpcCall.AddRpc(fbb, req)
+        rpc = RpcCall.End(fbb)
+        fbb.Finish(rpc)
+        return bytes(fbb.Output())
+
+    def _make_submit_mined_block_request_fbs(self, block_raw):
+        from NngInterface import (
+            RpcCall,
+            RpcRequest,
+            SubmitMinedBlockRequest,
+        )
+        import flatbuffers
+        fbb = flatbuffers.Builder()
+        block_vec = fbb.CreateByteVector(block_raw)
+        SubmitMinedBlockRequest.Start(fbb)
+        SubmitMinedBlockRequest.AddBlock(fbb, block_vec)
+        req = SubmitMinedBlockRequest.End(fbb)
+        RpcCall.Start(fbb)
+        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.SubmitMinedBlockRequest)
+        RpcCall.AddRpc(fbb, req)
+        rpc = RpcCall.End(fbb)
+        fbb.Finish(rpc)
+        return bytes(fbb.Output())
+
+    def _make_validate_mined_block_proposal_request_fbs(self, block_raw):
+        from NngInterface import (
+            RpcCall,
+            RpcRequest,
+            ValidateMinedBlockProposalRequest,
+        )
+        import flatbuffers
+        fbb = flatbuffers.Builder()
+        block_vec = fbb.CreateByteVector(block_raw)
+        ValidateMinedBlockProposalRequest.Start(fbb)
+        ValidateMinedBlockProposalRequest.AddBlock(fbb, block_vec)
+        req = ValidateMinedBlockProposalRequest.End(fbb)
+        RpcCall.Start(fbb)
+        RpcCall.AddRpcType(
+            fbb, RpcRequest.RpcRequest.ValidateMinedBlockProposalRequest)
+        RpcCall.AddRpc(fbb, req)
+        rpc = RpcCall.End(fbb)
+        fbb.Finish(rpc)
+        return bytes(fbb.Output())
+
+    def _make_get_mining_status_request_fbs(self):
+        from NngInterface import (
+            RpcCall,
+            RpcRequest,
+            GetMiningStatusRequest,
+        )
+        import flatbuffers
+        fbb = flatbuffers.Builder()
+        GetMiningStatusRequest.Start(fbb)
+        req = GetMiningStatusRequest.End(fbb)
+        RpcCall.Start(fbb)
+        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.GetMiningStatusRequest)
+        RpcCall.AddRpc(fbb, req)
         rpc = RpcCall.End(fbb)
         fbb.Finish(rpc)
         return bytes(fbb.Output())
@@ -484,6 +559,59 @@ class NngInterfaceTest(BitcoinTestFramework):
         response = await self._recv_response(rpc_sock)
         response = GetBlockRangeResponse.GetBlockRangeResponse.GetRootAs(response, 0)
         assert_equal(response.BlocksLength(), 12)
+
+    async def _test_mining_rpcs(self, node, rpc_sock):
+        from NngInterface import (
+            GetMiningTemplateResponse,
+            SubmitMinedBlockResponse,
+            ValidateMinedBlockProposalResponse,
+            GetMiningStatusResponse,
+        )
+
+        # GetMiningTemplate: returns a coherent template payload with both
+        # raw block/header bytes and stratum helper fields.
+        await self._send_request(rpc_sock, self._make_get_mining_template_request_fbs())
+        response = await self._recv_response(rpc_sock)
+        response = GetMiningTemplateResponse.GetMiningTemplateResponse.GetRootAs(response, 0)
+        assert response.TemplateId() > 0
+        assert response.BlockLength() > 0
+        assert response.HeaderLength() > 0
+        assert response.CoinbaseTxLength() > 0
+        assert_equal(response.PrevHashStratum().__len__(), 64)
+        assert_equal(response.NbitsStratum().__len__(), 8)
+        assert_equal(response.NtimeStratum().__len__(), 12)
+
+        # ValidateMinedBlockProposal: feed known on-chain block bytes to hit a
+        # deterministic duplicate*/inconclusive result path.
+        tiphash = node.getbestblockhash()
+        tipraw = bytes.fromhex(node.getblock(tiphash, 0))
+        await self._send_request(
+            rpc_sock,
+            self._make_validate_mined_block_proposal_request_fbs(tipraw),
+        )
+        response = await self._recv_response(rpc_sock)
+        response = ValidateMinedBlockProposalResponse.GetValidateMinedBlockProposalResponse.GetRootAs(response, 0)
+        assert response.Result() >= 0
+
+        # SubmitMinedBlock: submitting existing tip should be duplicate-ish and
+        # must not be marked accepted.
+        await self._send_request(
+            rpc_sock,
+            self._make_submit_mined_block_request_fbs(tipraw),
+        )
+        response = await self._recv_response(rpc_sock)
+        response = SubmitMinedBlockResponse.GetSubmitMinedBlockResponse.GetRootAs(response, 0)
+        assert_equal(response.Accepted(), False)
+        assert response.Result() >= 0
+
+        # GetMiningStatus: verify tip and basic status fields are coherent.
+        await self._send_request(rpc_sock, self._make_get_mining_status_request_fbs())
+        response = await self._recv_response(rpc_sock)
+        response = GetMiningStatusResponse.GetMiningStatusResponse.GetRootAs(response, 0)
+        assert_equal(bytes(response.TipHash().Hash().Data())[::-1].hex(), tiphash)
+        assert response.TipHeight() >= 0
+        assert response.MempoolTxCount() >= 0
+        assert response.Network() is not None
 
     async def _recv_message(self, pub_sock, expected_msg_type, timeout=2):
         received_msg = await asyncio.wait_for(pub_sock.arecv_msg(), timeout=timeout)

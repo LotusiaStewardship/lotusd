@@ -2,14 +2,25 @@
 
 This allows external indexers to be built efficiently using an easy to use NNG interface.
 
-RPC messages are enabled using `-nngrpc=<url>`, where `<url>` should start with tcp:// for a TCP bind, and with ipc:// for a named pipe file.
+RPC messages are enabled using `-nngrpc=<url>`, where `<url>` may be:
+- `tcp://...` for TCP bind/listen
+- `ipc://...` for local named pipe/socket
+
 Available RPC calls currently are:
  - `GetBlockRequest` to get an individual block
  - `GetBlockRangeRequest` to get a range of blocks
  - `GetBlockSliceRequest` to get a slice of a block
  - `GetUndoSliceRequest` to get a slice of the block undo data
  - `GetMempoolRequest` to get the node's mempool
+ - `GetMiningTemplateRequest` to fetch a native mining template optimized for external Stratum coordinators
+ - `SubmitMinedBlockRequest` to submit a solved block candidate from an external coordinator
+ - `ValidateMinedBlockProposalRequest` to pre-validate a candidate without requiring PoW (proposal semantics)
+ - `GetMiningStatusRequest` to fetch chain/mempool/high-level mining status fields
 
+The mining RPC additions are designed for external pooled-mining services and
+carry both consensus-level payloads (raw block/header bytes) and stratum-
+oriented convenience fields (coinbase split, merkle branches, endian-specific
+hex fields).
 Serialization of the objects transferred and further details are in [nng_interface.fbs](../src/nng_interface/nng_interface.fbs).
 
 Likewise, PubSub messages are enabled using `-nngpub=<url>`, and `-nngpubmsg=<msg>`, where `<msg>` is the message to be enabled (can be supplied more than once) and must be one of:
@@ -36,3 +47,11 @@ nngpubmsg=mempooltxrem
 ```
 
 The same urls would then be specified in the indexer to connect the node to it.
+
+For external stratum services, the exact same transport modes are supported.
+In production, use whichever fits your topology:
+
+- `ipc://...` when stratum and lotusd run on the same host and local filesystem
+  permissions provide the desired access control boundary.
+- `tcp://...` when stratum runs remotely; in this case, explicitly harden bind
+  addresses and network policy (firewall allowlists, private networking, etc).

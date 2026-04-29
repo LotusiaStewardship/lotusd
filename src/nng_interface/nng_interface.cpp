@@ -3,17 +3,27 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <array>
+#include <atomic>
 #include <optional>
 
 #include <blockdb.h>
 #include <chainparams.h>
+#include <config.h>
 #include <consensus/validation.h>
+#include <consensus/merkle.h>
+#include <hash.h>
 #include <logging.h>
+#include <miner.h>
+#include <net.h>
 #include <node/coin.h>
 #include <node/context.h>
 #include <node/ui_interface.h>
+#include <streams.h>
 #include <timedata.h>
 #include <undo.h>
+#include <univalue.h>
+#include <util/strencodings.h>
+#include <util/time.h>
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
@@ -61,8 +71,10 @@ enum class NngRpcErrorCode {
     BLOCK_NOT_FOUND,
     BLOCK_DATA_CORRUPTED,
     INVALID_BLOCK_SLICE,
+    INVALID_MINING_REQUEST,
+    MINING_TEMPLATE_BUILD_FAILED,
+    MINING_SUBMIT_DECODE_FAILED,
 };
-
 struct RpcResult {
     NngRpcErrorCode error_code;
     std::vector<uint8_t> data = std::vector<uint8_t>();
@@ -85,6 +97,12 @@ std::string ErrorMsg(NngRpcErrorCode code) {
             return "Block data corrupted";
         case NngRpcErrorCode::INVALID_BLOCK_SLICE:
             return "Invalid block slice";
+        case NngRpcErrorCode::INVALID_MINING_REQUEST:
+            return "Invalid mining request";
+        case NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED:
+            return "Failed to build mining template";
+        case NngRpcErrorCode::MINING_SUBMIT_DECODE_FAILED:
+            return "Failed to decode mined block";
         default:
             return "Unknown error";
     }
@@ -133,6 +151,22 @@ class NngRpcServer {
 
     NngRpcErrorCode GetMempool(flatbuffers::FlatBufferBuilder &builder,
                                const NngInterface::GetMempoolRequest *request);
+
+    NngRpcErrorCode
+    GetMiningTemplate(flatbuffers::FlatBufferBuilder &builder,
+                      const NngInterface::GetMiningTemplateRequest *request);
+
+    NngRpcErrorCode
+    SubmitMinedBlock(flatbuffers::FlatBufferBuilder &builder,
+                     const NngInterface::SubmitMinedBlockRequest *request);
+
+    NngRpcErrorCode ValidateMinedBlockProposal(
+        flatbuffers::FlatBufferBuilder &builder,
+        const NngInterface::ValidateMinedBlockProposalRequest *request);
+
+    NngRpcErrorCode
+    GetMiningStatus(flatbuffers::FlatBufferBuilder &builder,
+                    const NngInterface::GetMiningStatusRequest *request);
 
 public:
     NngRpcServer(const Consensus::Params &consensus, const NodeContext &node)
@@ -252,6 +286,22 @@ NngRpcErrorCode NngRpcServer::HandleMsg(flatbuffers::FlatBufferBuilder &fbb,
         }
         case NngInterface::RpcRequest_GetMempoolRequest: {
             return GetMempool(fbb, rpc->rpc_as_GetMempoolRequest());
+        }
+        case NngInterface::RpcRequest_GetMiningTemplateRequest: {
+            return GetMiningTemplate(fbb,
+                                     rpc->rpc_as_GetMiningTemplateRequest());
+        }
+        case NngInterface::RpcRequest_SubmitMinedBlockRequest: {
+            return SubmitMinedBlock(fbb,
+                                    rpc->rpc_as_SubmitMinedBlockRequest());
+        }
+        case NngInterface::RpcRequest_ValidateMinedBlockProposalRequest: {
+            return ValidateMinedBlockProposal(
+                fbb, rpc->rpc_as_ValidateMinedBlockProposalRequest());
+        }
+        case NngInterface::RpcRequest_GetMiningStatusRequest: {
+            return GetMiningStatus(fbb,
+                                   rpc->rpc_as_GetMiningStatusRequest());
         }
         default:
             return NngRpcErrorCode::UNKNOWN_RPC_METHOD;
@@ -433,6 +483,187 @@ CreateFbsBlock(flatbuffers::FlatBufferBuilder &fbb, const CBlock &block,
         pindex->nDataPos, pindex->nUndoPos);
 }
 
+/**
+ * Convert a uint256 hash to canonical stratum hex encoding used by mining
+ * clients: each 32-bit word is byte-reversed while preserving word order.
+ */
+static std::string HashToStratumHex(const uint256 &hash) {
+    const uint8_t *data = hash.begin();
+    std::string result;
+    result.reserve(64);
+    for (int i = 0; i < 32; i += 4) {
+        for (int j = 3; j >= 0; j--) {
+            result += strprintf("%02x", data[i + j]);
+        }
+    }
+    return result;
+}
+
+/** Convert a 32-bit integer to little-endian hex as used by Stratum params. */
+static std::string Uint32ToStratumHex(uint32_t val) {
+    uint8_t buf[4];
+    buf[0] = val & 0xff;
+    buf[1] = (val >> 8) & 0xff;
+    buf[2] = (val >> 16) & 0xff;
+    buf[3] = (val >> 24) & 0xff;
+    return HexStr(Span<const uint8_t>(buf, 4));
+}
+
+/** Convert raw bytes to lowercase hex preserving byte order. */
+static std::string BytesToHex(const uint8_t *data, size_t len) {
+    return HexStr(Span<const uint8_t>(data, len));
+}
+
+/**
+ * Compute merkle branches for the coinbase (tx index 0), suitable for
+ * Stratum-style coinbase-first merkle root reconstruction.
+ */
+static std::vector<uint256> ComputeMerkleBranches(const CBlock &block) {
+    std::vector<uint256> branches;
+    std::vector<uint256> leaves;
+    for (const auto &tx : block.vtx) {
+        leaves.push_back(tx->GetHash());
+    }
+    if (leaves.size() <= 1) {
+        return branches;
+    }
+
+    std::vector<uint256> level = leaves;
+    size_t index = 0;
+    while (level.size() > 1) {
+        size_t siblingIdx = index ^ 1;
+        if (siblingIdx < level.size()) {
+            branches.push_back(level[siblingIdx]);
+        } else {
+            branches.push_back(level[index]);
+        }
+
+        std::vector<uint256> nextLevel;
+        for (size_t i = 0; i < level.size(); i += 2) {
+            uint256 left = level[i];
+            uint256 right = (i + 1 < level.size()) ? level[i + 1] : left;
+            nextLevel.push_back(Hash(left, right));
+        }
+        level = std::move(nextLevel);
+        index /= 2;
+    }
+    return branches;
+}
+
+/**
+ * Split coinbase into coinbase1/coinbase2 for stratum extranonce insertion.
+ *
+ * The output is deterministic and updates scriptSig compact-size encoding to
+ * account for reserved extranonce bytes.
+ */
+static std::pair<std::string, std::string>
+SplitCoinbase(const CTransaction &coinbaseTx, size_t extranonce1Size,
+              size_t extranonce2Size) {
+    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+    ss << coinbaseTx;
+    std::vector<uint8_t> raw((const uint8_t *)ss.data(),
+                             (const uint8_t *)ss.data() + ss.size());
+
+    size_t pos = 0;
+    pos += 4;  // version
+    pos += 1;  // vin count (coinbase always one input)
+    pos += 36; // prevout
+
+    size_t scriptSigLenPos = pos;
+
+    uint64_t origScriptSigLen = 0;
+    int varintBytes = 0;
+    if (raw[pos] < 0xfd) {
+        origScriptSigLen = raw[pos];
+        varintBytes = 1;
+    } else if (raw[pos] == 0xfd) {
+        origScriptSigLen = raw[pos + 1] | (raw[pos + 2] << 8);
+        varintBytes = 3;
+    } else {
+        origScriptSigLen = raw[pos + 1] | (raw[pos + 2] << 8) |
+                           (raw[pos + 3] << 16) |
+                           ((uint64_t)raw[pos + 4] << 24);
+        varintBytes = 5;
+    }
+    pos += varintBytes;
+
+    size_t scriptSigStart = pos;
+    size_t scriptSigEnd = pos + origScriptSigLen;
+
+    uint64_t extranonceSpace = extranonce1Size + extranonce2Size;
+    uint64_t newScriptSigLen = origScriptSigLen + extranonceSpace;
+
+    std::vector<uint8_t> newVarint;
+    if (newScriptSigLen < 0xfd) {
+        newVarint.push_back((uint8_t)newScriptSigLen);
+    } else if (newScriptSigLen <= 0xffff) {
+        newVarint.push_back(0xfd);
+        newVarint.push_back(newScriptSigLen & 0xff);
+        newVarint.push_back((newScriptSigLen >> 8) & 0xff);
+    } else {
+        newVarint.push_back(0xfe);
+        newVarint.push_back(newScriptSigLen & 0xff);
+        newVarint.push_back((newScriptSigLen >> 8) & 0xff);
+        newVarint.push_back((newScriptSigLen >> 16) & 0xff);
+        newVarint.push_back((newScriptSigLen >> 24) & 0xff);
+    }
+
+    std::vector<uint8_t> cb1Data;
+    cb1Data.insert(cb1Data.end(), raw.begin(), raw.begin() + scriptSigLenPos);
+    cb1Data.insert(cb1Data.end(), newVarint.begin(), newVarint.end());
+    cb1Data.insert(cb1Data.end(), raw.begin() + scriptSigStart,
+                   raw.begin() + scriptSigEnd);
+
+    std::vector<uint8_t> cb2Data(raw.begin() + scriptSigEnd, raw.end());
+    return {HexStr(cb1Data), HexStr(cb2Data)};
+}
+
+/**
+ * BIP22-inspired mapping used by mining submit/proposal responses.
+ *
+ * `reason == std::nullopt` means acceptance (JSON null in BIP22 terms).
+ */
+static NngInterface::MiningSubmitResult MapMiningSubmitReason(
+    const std::optional<std::string> &reasonOpt) {
+    if (!reasonOpt.has_value()) {
+        return NngInterface::MiningSubmitResult_ACCEPTED;
+    }
+    const std::string &reason = *reasonOpt;
+    if (reason == "duplicate") {
+        return NngInterface::MiningSubmitResult_DUPLICATE;
+    }
+    if (reason == "duplicate-invalid") {
+        return NngInterface::MiningSubmitResult_DUPLICATE_INVALID;
+    }
+    if (reason == "duplicate-inconclusive") {
+        return NngInterface::MiningSubmitResult_DUPLICATE_INCONCLUSIVE;
+    }
+    if (reason == "inconclusive" || reason == "inconclusive-not-best-prevblk") {
+        return NngInterface::MiningSubmitResult_INCONCLUSIVE;
+    }
+    return NngInterface::MiningSubmitResult_REJECTED;
+}
+
+class NngSubmitBlockStateCatcher final : public CValidationInterface {
+public:
+    uint256 hash;
+    bool found;
+    BlockValidationState state;
+
+    explicit NngSubmitBlockStateCatcher(const uint256 &hashIn)
+        : hash(hashIn), found(false), state() {}
+
+protected:
+    void BlockChecked(const CBlock &block,
+                      const BlockValidationState &stateIn) override {
+        if (block.GetHash() != hash) {
+            return;
+        }
+        found = true;
+        state = stateIn;
+    }
+};
+
 NngRpcErrorCode
 NngRpcServer::GetBlock(flatbuffers::FlatBufferBuilder &fbb,
                        const NngInterface::GetBlockRequest *request) {
@@ -541,6 +772,292 @@ NngRpcServer::GetMempool(flatbuffers::FlatBufferBuilder &fbb,
     }
     fbb.Finish(
         NngInterface::CreateGetMempoolResponse(fbb, fbb.CreateVector(txs_fbs)));
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode NngRpcServer::GetMiningTemplate(
+    flatbuffers::FlatBufferBuilder &fbb,
+    const NngInterface::GetMiningTemplateRequest *request) {
+    const Config &config = GetConfig();
+    const CChainParams &chainparams = config.GetChainParams();
+
+    LOCK(cs_main);
+    CBlockIndex *pindexPrev = ::ChainActive().Tip();
+    if (!pindexPrev) {
+        return NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED;
+    }
+
+    CScript coinbaseScript;
+    if (request && request->coinbase_script()) {
+        const auto &scriptBytes = *request->coinbase_script();
+        if (scriptBytes.size() > 0) {
+            std::vector<uint8_t> scriptVec(scriptBytes.begin(),
+                                           scriptBytes.end());
+            coinbaseScript = CScript(scriptVec.begin(), scriptVec.end());
+        }
+    }
+    if (coinbaseScript.empty()) {
+        // Keep behavior predictable for pure-template callers: this mirrors
+        // getblocktemplate's scriptDummy behavior and avoids address parsing
+        // policy decisions in the NNG layer.
+        coinbaseScript = CScript() << OP_RETURN;
+    }
+
+    std::unique_ptr<CBlockTemplate> pblocktemplate;
+    try {
+        pblocktemplate = BlockAssembler(config, *m_node.mempool)
+                             .CreateNewBlock(coinbaseScript);
+    } catch (const std::exception &e) {
+        LogPrintf("NNG mining template build failed: %s\n", e.what());
+        return NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED;
+    }
+    if (!pblocktemplate) {
+        return NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED;
+    }
+
+    CBlock *pblock = &pblocktemplate->block;
+    UpdateTime(pblock, chainparams, pindexPrev);
+    pblock->nNonce = 0;
+    pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
+
+    CDataStream blockStream(SER_NETWORK, PROTOCOL_VERSION);
+    blockStream << *pblock;
+    CDataStream headerStream(SER_NETWORK, PROTOCOL_VERSION);
+    headerStream << pblock->GetBlockHeader();
+    CDataStream coinbaseStream(SER_NETWORK, PROTOCOL_VERSION);
+    coinbaseStream << *pblock->vtx[0];
+
+    Amount coinbaseValue = Amount::zero();
+    for (const auto &out : pblock->vtx[0]->vout) {
+        coinbaseValue += out.nValue;
+    }
+
+    const uint32_t en1Size = request ? request->extranonce1_size() : 4;
+    const uint32_t en2Size = request ? request->extranonce2_size() : 4;
+    auto [cb1, cb2] = SplitCoinbase(*pblock->vtx[0], en1Size, en2Size);
+
+    std::vector<flatbuffers::Offset<flatbuffers::String>> branchesFbs;
+    for (const auto &branch : ComputeMerkleBranches(*pblock)) {
+        branchesFbs.push_back(fbb.CreateString(branch.GetHex()));
+    }
+
+    std::vector<flatbuffers::Offset<NngInterface::MiningTemplateTx>> txsFbs;
+    const bool includeTxs = request ? request->include_transactions() : true;
+    if (includeTxs) {
+        for (size_t i = 1; i < pblock->vtx.size(); ++i) {
+            CDataStream txStream(SER_NETWORK, PROTOCOL_VERSION);
+            txStream << *pblock->vtx[i];
+            Amount fee = Amount::zero();
+            int64_t sigops = 0;
+            if (i < pblocktemplate->entries.size()) {
+                fee = pblocktemplate->entries[i].fees;
+                sigops = pblocktemplate->entries[i].sigOpCount;
+            }
+            txsFbs.push_back(NngInterface::CreateMiningTemplateTx(
+                fbb,
+                fbb.CreateVector((const uint8_t *)txStream.data(),
+                                 txStream.size()),
+                CreateFbsTxId(fbb, pblock->vtx[i]->GetId()),
+                fee / SATOSHI, sigops));
+        }
+    }
+
+    static std::atomic<uint64_t> s_templateId{1};
+    const uint64_t templateId = s_templateId.fetch_add(1);
+
+    arith_uint256 targetArith;
+    targetArith.SetCompact(pblock->nBits);
+    const uint256 targetU256 = ArithToUint256(targetArith);
+    NngInterface::Hash targetHash = CreateFbsHash(targetU256.begin());
+
+    const uint64_t mintime = pindexPrev->GetMedianTimePast() + 1;
+
+    auto response = NngInterface::CreateGetMiningTemplateResponse(
+        fbb, templateId,
+        fbb.CreateVector((const uint8_t *)blockStream.data(), blockStream.size()),
+        fbb.CreateVector((const uint8_t *)headerStream.data(),
+                         headerStream.size()),
+        CreateFbsBlockHash(fbb, pblock->hashPrevBlock), pindexPrev->nHeight + 1,
+        pblock->nBits, &targetHash, pblock->GetBlockTime(),
+        mintime, coinbaseValue / SATOSHI,
+        fbb.CreateVector((const uint8_t *)coinbaseStream.data(),
+                         coinbaseStream.size()),
+        fbb.CreateVector(txsFbs), fbb.CreateString(cb1), fbb.CreateString(cb2),
+        fbb.CreateVector(branchesFbs),
+        fbb.CreateString(HashToStratumHex(pblock->hashPrevBlock)),
+        fbb.CreateString(Uint32ToStratumHex(pblock->nBits)),
+        fbb.CreateString(BytesToHex(pblock->vTime.data(), pblock->vTime.size())));
+    fbb.Finish(response);
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode NngRpcServer::SubmitMinedBlock(
+    flatbuffers::FlatBufferBuilder &fbb,
+    const NngInterface::SubmitMinedBlockRequest *request) {
+    if (!request || !request->block()) {
+        return NngRpcErrorCode::INVALID_MINING_REQUEST;
+    }
+
+    CBlock block;
+    try {
+        std::vector<uint8_t> raw(request->block()->begin(), request->block()->end());
+        CDataStream ss(raw, SER_NETWORK, PROTOCOL_VERSION);
+        ss >> block;
+    } catch (...) {
+        return NngRpcErrorCode::MINING_SUBMIT_DECODE_FAILED;
+    }
+
+    if (block.vtx.empty() || !block.vtx[0]->IsCoinBase()) {
+        auto resp = NngInterface::CreateSubmitMinedBlockResponse(
+            fbb, NngInterface::MiningSubmitResult_INVALID_COINBASE, false,
+            fbb.CreateString("Block does not start with a coinbase"));
+        fbb.Finish(resp);
+        return NngRpcErrorCode::NO_RPC_ERROR;
+    }
+
+    const Config &config = GetConfig();
+    const uint256 hash = block.GetHash();
+    {
+        LOCK(cs_main);
+        const CBlockIndex *pindex = LookupBlockIndex(BlockHash(hash));
+        if (pindex) {
+            NngInterface::MiningSubmitResult code =
+                pindex->IsValid(BlockValidity::SCRIPTS)
+                    ? NngInterface::MiningSubmitResult_DUPLICATE
+                    : (pindex->nStatus.isInvalid()
+                           ? NngInterface::MiningSubmitResult_DUPLICATE_INVALID
+                           : NngInterface::MiningSubmitResult_DUPLICATE_INCONCLUSIVE);
+            std::string reason =
+                code == NngInterface::MiningSubmitResult_DUPLICATE
+                    ? "duplicate"
+                    : (code == NngInterface::MiningSubmitResult_DUPLICATE_INVALID
+                           ? "duplicate-invalid"
+                           : "duplicate-inconclusive");
+            auto resp = NngInterface::CreateSubmitMinedBlockResponse(
+                fbb, code, false, fbb.CreateString(reason));
+            fbb.Finish(resp);
+            return NngRpcErrorCode::NO_RPC_ERROR;
+        }
+    }
+
+    bool new_block = false;
+    auto blockptr = std::make_shared<CBlock>(std::move(block));
+    auto sc = std::make_shared<NngSubmitBlockStateCatcher>(hash);
+    RegisterSharedValidationInterface(sc);
+    bool accepted = m_node.chainman->ProcessNewBlock(config, blockptr,
+                                                      /* fForceProcessing */ true,
+                                                      &new_block);
+    UnregisterSharedValidationInterface(sc);
+
+    std::optional<std::string> bip22Reason = std::string("inconclusive");
+    if (!new_block && accepted) {
+        bip22Reason = std::string("duplicate");
+    } else if (sc->found) {
+        if (sc->state.IsValid()) {
+            bip22Reason = std::nullopt;
+        } else if (sc->state.IsInvalid()) {
+            std::string reject = sc->state.GetRejectReason();
+            bip22Reason = reject.empty() ? std::optional<std::string>("rejected")
+                                         : std::optional<std::string>(reject);
+        } else {
+            bip22Reason = std::string("inconclusive");
+        }
+    }
+
+    const auto result = MapMiningSubmitReason(bip22Reason);
+    const bool blockAccepted =
+        result == NngInterface::MiningSubmitResult_ACCEPTED;
+    const std::string reason = bip22Reason.has_value() ? *bip22Reason : "";
+    auto resp = NngInterface::CreateSubmitMinedBlockResponse(
+        fbb, result, blockAccepted, fbb.CreateString(reason));
+    fbb.Finish(resp);
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode NngRpcServer::ValidateMinedBlockProposal(
+    flatbuffers::FlatBufferBuilder &fbb,
+    const NngInterface::ValidateMinedBlockProposalRequest *request) {
+    if (!request || !request->block()) {
+        return NngRpcErrorCode::INVALID_MINING_REQUEST;
+    }
+
+    CBlock block;
+    try {
+        std::vector<uint8_t> raw(request->block()->begin(), request->block()->end());
+        CDataStream ss(raw, SER_NETWORK, PROTOCOL_VERSION);
+        ss >> block;
+    } catch (...) {
+        return NngRpcErrorCode::MINING_SUBMIT_DECODE_FAILED;
+    }
+
+    const Config &config = GetConfig();
+    const CChainParams &chainparams = config.GetChainParams();
+
+    std::optional<std::string> bip22Reason = std::nullopt;
+    {
+        LOCK(cs_main);
+        const uint256 hash = block.GetHash();
+        const CBlockIndex *pindex = LookupBlockIndex(BlockHash(hash));
+        if (pindex) {
+            if (pindex->IsValid(BlockValidity::SCRIPTS)) {
+                bip22Reason = std::string("duplicate");
+            } else if (pindex->nStatus.isInvalid()) {
+                bip22Reason = std::string("duplicate-invalid");
+            } else {
+                bip22Reason = std::string("duplicate-inconclusive");
+            }
+        } else {
+            CBlockIndex *const pindexPrev = ::ChainActive().Tip();
+            if (!pindexPrev || block.hashPrevBlock != pindexPrev->GetBlockHash()) {
+                bip22Reason = std::string("inconclusive-not-best-prevblk");
+            } else {
+                BlockValidationState state;
+                TestBlockValidity(state, chainparams, block, pindexPrev,
+                                  BlockValidationOptions(config)
+                                      .withCheckPoW(false)
+                                      .withCheckMerkleRoot(true));
+                if (state.IsValid()) {
+                    bip22Reason = std::nullopt;
+                } else if (state.IsInvalid()) {
+                    std::string reject = state.GetRejectReason();
+                    bip22Reason = reject.empty()
+                                      ? std::optional<std::string>("rejected")
+                                      : std::optional<std::string>(reject);
+                } else {
+                    bip22Reason = std::string("inconclusive");
+                }
+            }
+        }
+    }
+
+    const auto result = MapMiningSubmitReason(bip22Reason);
+    auto resp = NngInterface::CreateValidateMinedBlockProposalResponse(
+        fbb, result, result == NngInterface::MiningSubmitResult_ACCEPTED,
+        fbb.CreateString(bip22Reason.has_value() ? *bip22Reason : ""));
+    fbb.Finish(resp);
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
+NngRpcErrorCode
+NngRpcServer::GetMiningStatus(flatbuffers::FlatBufferBuilder &fbb,
+                              const NngInterface::GetMiningStatusRequest *request) {
+    LOCK(cs_main);
+    const CBlockIndex *tip = ::ChainActive().Tip();
+    if (!tip) {
+        return NngRpcErrorCode::BLOCK_NOT_FOUND;
+    }
+
+    uint32_t peers = 0;
+    if (m_node.connman) {
+        peers = m_node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL);
+    }
+
+    auto resp = NngInterface::CreateGetMiningStatusResponse(
+        fbb, CreateFbsBlockHash(fbb, tip->GetBlockHash()), tip->nHeight,
+        ::ChainstateActive().IsInitialBlockDownload(),
+        static_cast<uint64_t>(m_node.mempool->size()), peers,
+        fbb.CreateString(GetConfig().GetChainParams().NetworkIDString()));
+    fbb.Finish(resp);
     return NngRpcErrorCode::NO_RPC_ERROR;
 }
 
