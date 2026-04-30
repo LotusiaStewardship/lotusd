@@ -361,6 +361,10 @@ table GetMiningTemplateRequest {
     // getblocktemplate-like behavior for template-only callers.
     coinbase_script: [ubyte];
 
+    // Optional aux bytes appended to the coinbase input scriptSig.
+    // Intended for operator/pool identity tags (coinbaseaux-style semantics).
+    coinbase_identity: [ubyte];
+
     // Number of bytes reserved for extranonce1 in stratum coinbase splitting.
     // External stratum servers may set this to their session en1 size.
     extranonce1_size: uint32 = 4;

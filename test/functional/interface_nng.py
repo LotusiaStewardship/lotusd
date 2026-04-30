@@ -199,7 +199,7 @@ class NngInterfaceTest(BitcoinTestFramework):
         fbb.Finish(rpc)
         return bytes(fbb.Output())
 
-    def _make_get_mining_template_request_fbs(self):
+    def _make_get_mining_template_request_fbs(self, coinbase_identity=None):
         from NngInterface import (
             RpcCall,
             RpcRequest,
@@ -207,8 +207,13 @@ class NngInterfaceTest(BitcoinTestFramework):
         )
         import flatbuffers
         fbb = flatbuffers.Builder()
+        identity_vec = None
+        if coinbase_identity is not None:
+            identity_vec = fbb.CreateByteVector(coinbase_identity)
         # Use defaults: OP_RETURN fallback script and 4/4 extranonce sizes.
         GetMiningTemplateRequest.Start(fbb)
+        if identity_vec is not None:
+            GetMiningTemplateRequest.AddCoinbaseIdentity(fbb, identity_vec)
         req = GetMiningTemplateRequest.End(fbb)
         RpcCall.Start(fbb)
         RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.GetMiningTemplateRequest)
@@ -582,6 +587,16 @@ class NngInterfaceTest(BitcoinTestFramework):
         assert_equal(response.PrevHashStratum().__len__(), 64)
         assert_equal(response.NbitsStratum().__len__(), 8)
         assert_equal(response.NtimeStratum().__len__(), 12)
+
+        # Identity bytes should appear in coinbase scriptSig-related split data.
+        identity = b"lotusia-pool"
+        await self._send_request(
+            rpc_sock,
+            self._make_get_mining_template_request_fbs(identity),
+        )
+        response_with_identity = await self._recv_response(rpc_sock)
+        response_with_identity = GetMiningTemplateResponse.GetMiningTemplateResponse.GetRootAs(response_with_identity, 0)
+        assert identity.hex() in response_with_identity.Coinbase1()
 
         # ValidateMinedBlockProposal: feed known on-chain block bytes to hit a
         # deterministic duplicate*/inconclusive result path.

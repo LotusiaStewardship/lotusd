@@ -805,6 +805,12 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
         coinbaseScript = CScript() << OP_RETURN;
     }
 
+    std::vector<uint8_t> coinbaseIdentity;
+    if (request && request->coinbase_identity()) {
+        const auto &identityBytes = *request->coinbase_identity();
+        coinbaseIdentity.assign(identityBytes.begin(), identityBytes.end());
+    }
+
     std::unique_ptr<CBlockTemplate> pblocktemplate;
     try {
         pblocktemplate = BlockAssembler(config, *m_node.mempool)
@@ -818,6 +824,25 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
     }
 
     CBlock *pblock = &pblocktemplate->block;
+
+    if (!coinbaseIdentity.empty()) {
+        CMutableTransaction coinbaseTx(*pblock->vtx[0]);
+        coinbaseTx.vin[0].scriptSig << coinbaseIdentity;
+
+        const uint32_t en1Size = request ? request->extranonce1_size() : 4;
+        const uint32_t en2Size = request ? request->extranonce2_size() : 4;
+        const uint64_t projectedScriptSigSize =
+            coinbaseTx.vin[0].scriptSig.size() + en1Size + en2Size;
+        if (projectedScriptSigSize > MAX_COINBASE_SCRIPTSIG_SIZE) {
+            return NngRpcErrorCode::INVALID_MINING_REQUEST;
+        }
+
+        pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));
+        if (!pblocktemplate->entries.empty()) {
+            pblocktemplate->entries[0].tx = pblock->vtx[0];
+        }
+    }
+
     UpdateTime(pblock, chainparams, pindexPrev);
     pblock->nNonce = 0;
     pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
@@ -836,6 +861,11 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
 
     const uint32_t en1Size = request ? request->extranonce1_size() : 4;
     const uint32_t en2Size = request ? request->extranonce2_size() : 4;
+    const uint64_t projectedScriptSigSize =
+        pblock->vtx[0]->vin[0].scriptSig.size() + en1Size + en2Size;
+    if (projectedScriptSigSize > MAX_COINBASE_SCRIPTSIG_SIZE) {
+        return NngRpcErrorCode::INVALID_MINING_REQUEST;
+    }
     auto [cb1, cb2] = SplitCoinbase(*pblock->vtx[0], en1Size, en2Size);
 
     std::vector<flatbuffers::Offset<flatbuffers::String>> branchesFbs;
