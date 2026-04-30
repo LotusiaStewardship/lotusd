@@ -41,7 +41,7 @@ class NngInterfaceTest(BitcoinTestFramework):
             "-nngpubmsg=blkconnected",
             "-nngpubmsg=blkdisconctd",
             "-nngpubmsg=chainstflush",
-            "-nngpubmsg=miningworkchg",
+            "-nngpubmsg=miningwrkchg",
             # Always expire after 1h
             "-mempoolexpiry=1",
         ]]
@@ -644,11 +644,11 @@ class NngInterfaceTest(BitcoinTestFramework):
     async def _test_mining_work_changed(self, node, pub_sock):
         from NngInterface.MiningWorkChanged import MiningWorkChanged
 
-        pub_sock.subscribe('miningworkchg')
+        pub_sock.subscribe('miningwrkchg')
 
         # 1) Tip-driven work change.
         hashes = node.generatetoaddress(1, self.burn_addr)
-        msg = await self._recv_message(pub_sock, 'miningworkchg')
+        msg = await self._recv_message(pub_sock, 'miningwrkchg')
         evt = MiningWorkChanged.GetRootAs(msg, 0)
         assert_equal(bytes(evt.BlockHash().Hash().Data())[::-1].hex(), hashes[0])
         assert evt.TemplateEpoch() > 0
@@ -663,14 +663,14 @@ class NngInterfaceTest(BitcoinTestFramework):
         pad_tx(tx)
         node.sendrawtransaction(tx.serialize().hex())
 
-        msg2 = await self._recv_message(pub_sock, 'miningworkchg')
+        msg2 = await self._recv_message(pub_sock, 'miningwrkchg')
         evt2 = MiningWorkChanged.GetRootAs(msg2, 0)
         assert_equal(bytes(evt2.BlockHash().Hash().Data())[::-1].hex(), node.getbestblockhash())
         # MEMPOOL_REFRESH
         assert_equal(evt2.Reason(), 2)
         assert evt2.TemplateEpoch() > evt.TemplateEpoch()
 
-        pub_sock.unsubscribe('miningworkchg')
+        pub_sock.unsubscribe('miningwrkchg')
 
     async def _test_transaction_added_to_mempool(self, node, pub_sock):
         from NngInterface.TransactionAddedToMempool import TransactionAddedToMempool

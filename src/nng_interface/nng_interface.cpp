@@ -16,8 +16,10 @@
 #include <logging.h>
 #include <miner.h>
 #include <net.h>
+#include <policy/policy.h>
 #include <node/coin.h>
 #include <node/context.h>
+#include <node/transaction.h>
 #include <node/ui_interface.h>
 #include <streams.h>
 #include <timedata.h>
@@ -133,7 +135,7 @@ class NngRpcServer {
     nng_socket m_sock;
     std::vector<NngRpcWorker> m_workers;
     const Consensus::Params &m_consensus;
-    const NodeContext &m_node;
+    NodeContext &m_node;
 
     NngRpcErrorCode GetBlock(flatbuffers::FlatBufferBuilder &builder,
                              const NngInterface::GetBlockRequest *request);
@@ -169,8 +171,12 @@ class NngRpcServer {
     GetMiningStatus(flatbuffers::FlatBufferBuilder &builder,
                     const NngInterface::GetMiningStatusRequest *request);
 
+    NngRpcErrorCode SendRawTransaction(
+        flatbuffers::FlatBufferBuilder &builder,
+        const NngInterface::SendRawTransactionRequest *request);
+
 public:
-    NngRpcServer(const Consensus::Params &consensus, const NodeContext &node)
+    NngRpcServer(const Consensus::Params &consensus, NodeContext &node)
         : m_consensus(consensus), m_node(node) {}
 
     NngRpcErrorCode HandleMsg(flatbuffers::FlatBufferBuilder &builder,
@@ -303,6 +309,10 @@ NngRpcErrorCode NngRpcServer::HandleMsg(flatbuffers::FlatBufferBuilder &fbb,
         case NngInterface::RpcRequest_GetMiningStatusRequest: {
             return GetMiningStatus(fbb,
                                    rpc->rpc_as_GetMiningStatusRequest());
+        }
+        case NngInterface::RpcRequest_SendRawTransactionRequest: {
+            return SendRawTransaction(fbb,
+                                      rpc->rpc_as_SendRawTransactionRequest());
         }
         default:
             return NngRpcErrorCode::UNKNOWN_RPC_METHOD;
@@ -1043,6 +1053,71 @@ NngRpcErrorCode NngRpcServer::ValidateMinedBlockProposal(
     return NngRpcErrorCode::NO_RPC_ERROR;
 }
 
+NngRpcErrorCode NngRpcServer::SendRawTransaction(
+    flatbuffers::FlatBufferBuilder &fbb,
+    const NngInterface::SendRawTransactionRequest *request) {
+    if (!request || !request->raw_tx()) {
+        return NngRpcErrorCode::INVALID_MINING_REQUEST;
+    }
+
+    CMutableTransaction mtx;
+    try {
+        std::vector<uint8_t> raw(request->raw_tx()->begin(), request->raw_tx()->end());
+        CDataStream ss(raw, SER_NETWORK, PROTOCOL_VERSION);
+        ss >> mtx;
+    } catch (...) {
+        TxId zeroTxid{};
+        auto resp = NngInterface::CreateSendRawTransactionResponse(
+            fbb, NngInterface::SendRawTransactionResult_DESERIALIZATION_ERROR,
+            false, CreateFbsTxId(fbb, zeroTxid),
+            fbb.CreateString("decode-failed"));
+        fbb.Finish(resp);
+        return NngRpcErrorCode::NO_RPC_ERROR;
+    }
+
+    CTransactionRef tx(MakeTransactionRef(std::move(mtx)));
+    const uint64_t maxFeeRateSatPerKb = request->max_fee_rate();
+    Amount max_raw_tx_fee = DEFAULT_MAX_RAW_TX_FEE_RATE.GetFee(GetVirtualTransactionSize(*tx));
+    if (maxFeeRateSatPerKb > 0) {
+        const CFeeRate configured(int64_t(maxFeeRateSatPerKb) * Amount::satoshi());
+        max_raw_tx_fee = configured.GetFee(GetVirtualTransactionSize(*tx));
+    }
+
+    std::string err_string;
+    const Config &config = GetConfig();
+    TransactionError err = BroadcastTransaction(
+        m_node, config, tx, err_string, max_raw_tx_fee, request->relay(),
+        request->wait_callback());
+
+    NngInterface::SendRawTransactionResult result =
+        NngInterface::SendRawTransactionResult_MEMPOOL_ERROR;
+    switch (err) {
+        case TransactionError::OK:
+            result = NngInterface::SendRawTransactionResult_ACCEPTED;
+            break;
+        case TransactionError::ALREADY_IN_CHAIN:
+            result = NngInterface::SendRawTransactionResult_ALREADY_IN_CHAIN;
+            break;
+        case TransactionError::MAX_FEE_EXCEEDED:
+            result = NngInterface::SendRawTransactionResult_MAX_FEE_EXCEEDED;
+            break;
+        case TransactionError::MISSING_INPUTS:
+        case TransactionError::MEMPOOL_REJECTED:
+            result = NngInterface::SendRawTransactionResult_MEMPOOL_REJECTED;
+            break;
+        case TransactionError::MEMPOOL_ERROR:
+        default:
+            result = NngInterface::SendRawTransactionResult_MEMPOOL_ERROR;
+            break;
+    }
+
+    auto resp = NngInterface::CreateSendRawTransactionResponse(
+        fbb, result, err == TransactionError::OK, CreateFbsTxId(fbb, tx->GetId()),
+        fbb.CreateString(err_string));
+    fbb.Finish(resp);
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
 NngRpcErrorCode
 NngRpcServer::GetMiningStatus(flatbuffers::FlatBufferBuilder &fbb,
                               const NngInterface::GetMiningStatusRequest *request) {
@@ -1089,7 +1164,7 @@ public:
 private:
     nng_socket m_sock;
     std::set<std::string> m_enabled_messages;
-    // Monotonic process-local epoch used by miningworkchg.
+    // Monotonic process-local epoch used by miningwrkchg.
     std::atomic<uint64_t> m_templateEpoch{1};
 
     void BroadcastMessage(const std::string msg_type,
@@ -1103,7 +1178,7 @@ private:
 
     void EmitMiningWorkChanged(NngInterface::MiningWorkChangeReason reason,
                                const CBlockIndex *tip) {
-        if (!IsMessageEnabled(MSG_MININGWORKCHG) || tip == nullptr) {
+        if (!IsMessageEnabled(MSG_MININGWRKCHG) || tip == nullptr) {
             return;
         }
         // This signal is intentionally small and constant-shape to keep event
@@ -1113,7 +1188,7 @@ private:
         fbb.Finish(NngInterface::CreateMiningWorkChanged(
             fbb, reason, CreateFbsBlockHash(fbb, tip->GetBlockHash()),
             tip->nHeight, GetTime(), m_templateEpoch.fetch_add(1)));
-        BroadcastMessage(MSG_MININGWORKCHG, fbb);
+        BroadcastMessage(MSG_MININGWRKCHG, fbb);
     }
 
     void UpdatedBlockTip(const CBlockIndex *pindexNew,
@@ -1146,7 +1221,7 @@ private:
             BroadcastMessage(MSG_MEMPOOLTXADD, fbb);
         }
 
-        if (IsMessageEnabled(MSG_MININGWORKCHG)) {
+        if (IsMessageEnabled(MSG_MININGWRKCHG)) {
             const CBlockIndex *tip = nullptr;
             {
                 LOCK(cs_main);
@@ -1167,7 +1242,7 @@ private:
             BroadcastMessage(MSG_MEMPOOLTXREM, fbb);
         }
 
-        if (IsMessageEnabled(MSG_MININGWORKCHG)) {
+        if (IsMessageEnabled(MSG_MININGWRKCHG)) {
             const CBlockIndex *tip = nullptr;
             {
                 LOCK(cs_main);
@@ -1221,7 +1296,7 @@ private:
 std::unique_ptr<NngRpcServer> g_rpc_server;
 std::unique_ptr<NngPubServer> g_pub_server;
 
-bool RunRpcServer(const NodeContext &node, const Consensus::Params &consensus) {
+bool RunRpcServer(NodeContext &node, const Consensus::Params &consensus) {
     if (gArgs.IsArgSet("-nngrpc")) {
         std::string rpc_url = gArgs.GetArg("-nngrpc", "");
         g_rpc_server = std::make_unique<NngRpcServer>(consensus, node);
@@ -1263,7 +1338,7 @@ bool RunPubServer() {
     return true;
 }
 
-bool StartNngInterface(const NodeContext &node,
+bool StartNngInterface(NodeContext &node,
                        const Consensus::Params &consensus) {
     if (!RunRpcServer(node, consensus)) {
         return false;
