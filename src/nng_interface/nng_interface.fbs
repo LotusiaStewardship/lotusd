@@ -1,4 +1,5 @@
 // Copyright (c) 2021 The Logos Foundation
+// Copyright (c) 2024 The Lotusia Stewardship
 
 namespace NngInterface;
 
@@ -13,7 +14,6 @@ union RpcRequest {
     SubmitMinedBlockRequest,
     ValidateMinedBlockProposalRequest,
     GetMiningStatusRequest,
-    SendRawTransactionRequest,
 }
 
 // Result of an RPC call
@@ -504,28 +504,3 @@ table GetMiningStatusResponse {
     network: string;
 }
 
-// Submit a signed raw transaction to mempool relay surface.
-table SendRawTransactionRequest {
-    // Raw serialized transaction bytes.
-    raw_tx: [ubyte];
-    // Max fee rate in sat/kB. 0 keeps node default policy.
-    max_fee_rate: uint64 = 0;
-    relay: bool = true;
-    wait_callback: bool = true;
-}
-
-enum SendRawTransactionResult: int32 {
-    ACCEPTED = 0,
-    ALREADY_IN_CHAIN = 1,
-    MEMPOOL_REJECTED = 2,
-    MEMPOOL_ERROR = 3,
-    MAX_FEE_EXCEEDED = 4,
-    DESERIALIZATION_ERROR = 5,
-}
-
-table SendRawTransactionResponse {
-    result: SendRawTransactionResult;
-    accepted: bool;
-    txid: TxId;
-    reject_reason: string;
-}

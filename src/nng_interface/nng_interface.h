@@ -22,6 +22,6 @@ const std::vector<std::string> AVAILABLE_PUB_MESSAGES = {
     MSG_MININGWRKCHG,
 };
 
-bool StartNngInterface(NodeContext &node,
+bool StartNngInterface(const NodeContext &node,
                        const Consensus::Params &consensus);
 void StopNngInterface();
