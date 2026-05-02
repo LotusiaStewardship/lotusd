@@ -158,14 +158,6 @@ class NngRpcServer {
                       const NngInterface::GetMiningTemplateRequest *request);
 
     NngRpcErrorCode
-    SubmitMinedBlock(flatbuffers::FlatBufferBuilder &builder,
-                     const NngInterface::SubmitMinedBlockRequest *request);
-
-    NngRpcErrorCode ValidateMinedBlockProposal(
-        flatbuffers::FlatBufferBuilder &builder,
-        const NngInterface::ValidateMinedBlockProposalRequest *request);
-
-    NngRpcErrorCode
     GetMiningStatus(flatbuffers::FlatBufferBuilder &builder,
                     const NngInterface::GetMiningStatusRequest *request);
 
@@ -292,14 +284,6 @@ NngRpcErrorCode NngRpcServer::HandleMsg(flatbuffers::FlatBufferBuilder &fbb,
         case NngInterface::RpcRequest_GetMiningTemplateRequest: {
             return GetMiningTemplate(fbb,
                                      rpc->rpc_as_GetMiningTemplateRequest());
-        }
-        case NngInterface::RpcRequest_SubmitMinedBlockRequest: {
-            return SubmitMinedBlock(fbb,
-                                    rpc->rpc_as_SubmitMinedBlockRequest());
-        }
-        case NngInterface::RpcRequest_ValidateMinedBlockProposalRequest: {
-            return ValidateMinedBlockProposal(
-                fbb, rpc->rpc_as_ValidateMinedBlockProposalRequest());
         }
         case NngInterface::RpcRequest_GetMiningStatusRequest: {
             return GetMiningStatus(fbb,
@@ -620,52 +604,6 @@ SplitCoinbase(const CTransaction &coinbaseTx, size_t extranonce1Size,
     return {HexStr(cb1Data), HexStr(cb2Data)};
 }
 
-/**
- * BIP22-inspired mapping used by mining submit/proposal responses.
- *
- * `reason == std::nullopt` means acceptance (JSON null in BIP22 terms).
- */
-static NngInterface::MiningSubmitResult MapMiningSubmitReason(
-    const std::optional<std::string> &reasonOpt) {
-    if (!reasonOpt.has_value()) {
-        return NngInterface::MiningSubmitResult_ACCEPTED;
-    }
-    const std::string &reason = *reasonOpt;
-    if (reason == "duplicate") {
-        return NngInterface::MiningSubmitResult_DUPLICATE;
-    }
-    if (reason == "duplicate-invalid") {
-        return NngInterface::MiningSubmitResult_DUPLICATE_INVALID;
-    }
-    if (reason == "duplicate-inconclusive") {
-        return NngInterface::MiningSubmitResult_DUPLICATE_INCONCLUSIVE;
-    }
-    if (reason == "inconclusive" || reason == "inconclusive-not-best-prevblk") {
-        return NngInterface::MiningSubmitResult_INCONCLUSIVE;
-    }
-    return NngInterface::MiningSubmitResult_REJECTED;
-}
-
-class NngSubmitBlockStateCatcher final : public CValidationInterface {
-public:
-    uint256 hash;
-    bool found;
-    BlockValidationState state;
-
-    explicit NngSubmitBlockStateCatcher(const uint256 &hashIn)
-        : hash(hashIn), found(false), state() {}
-
-protected:
-    void BlockChecked(const CBlock &block,
-                      const BlockValidationState &stateIn) override {
-        if (block.GetHash() != hash) {
-            return;
-        }
-        found = true;
-        state = stateIn;
-    }
-};
-
 NngRpcErrorCode
 NngRpcServer::GetBlock(flatbuffers::FlatBufferBuilder &fbb,
                        const NngInterface::GetBlockRequest *request) {
@@ -921,156 +859,6 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
         fbb.CreateString(Uint32ToStratumHex(pblock->nBits)),
         fbb.CreateString(BytesToHex(pblock->vTime.data(), pblock->vTime.size())));
     fbb.Finish(response);
-    return NngRpcErrorCode::NO_RPC_ERROR;
-}
-
-NngRpcErrorCode NngRpcServer::SubmitMinedBlock(
-    flatbuffers::FlatBufferBuilder &fbb,
-    const NngInterface::SubmitMinedBlockRequest *request) {
-    if (!request || !request->block()) {
-        return NngRpcErrorCode::INVALID_MINING_REQUEST;
-    }
-
-    CBlock block;
-    try {
-        std::vector<uint8_t> raw(request->block()->begin(), request->block()->end());
-        CDataStream ss(raw, SER_NETWORK, PROTOCOL_VERSION);
-        ss >> block;
-    } catch (...) {
-        return NngRpcErrorCode::MINING_SUBMIT_DECODE_FAILED;
-    }
-
-    if (block.vtx.empty() || !block.vtx[0]->IsCoinBase()) {
-        auto resp = NngInterface::CreateSubmitMinedBlockResponse(
-            fbb, NngInterface::MiningSubmitResult_INVALID_COINBASE, false,
-            fbb.CreateString("Block does not start with a coinbase"),
-            CreateFbsBlockHash(fbb, BlockHash(block.GetHash())));
-        fbb.Finish(resp);
-        return NngRpcErrorCode::NO_RPC_ERROR;
-    }
-
-    const Config &config = GetConfig();
-    const uint256 hash = block.GetHash();
-    {
-        LOCK(cs_main);
-        const CBlockIndex *pindex = LookupBlockIndex(BlockHash(hash));
-        if (pindex) {
-            NngInterface::MiningSubmitResult code =
-                pindex->IsValid(BlockValidity::SCRIPTS)
-                    ? NngInterface::MiningSubmitResult_DUPLICATE
-                    : (pindex->nStatus.isInvalid()
-                           ? NngInterface::MiningSubmitResult_DUPLICATE_INVALID
-                           : NngInterface::MiningSubmitResult_DUPLICATE_INCONCLUSIVE);
-            std::string reason =
-                code == NngInterface::MiningSubmitResult_DUPLICATE
-                    ? "duplicate"
-                    : (code == NngInterface::MiningSubmitResult_DUPLICATE_INVALID
-                           ? "duplicate-invalid"
-                           : "duplicate-inconclusive");
-            auto resp = NngInterface::CreateSubmitMinedBlockResponse(
-                fbb, code, false, fbb.CreateString(reason),
-                CreateFbsBlockHash(fbb, BlockHash(hash)));
-            fbb.Finish(resp);
-            return NngRpcErrorCode::NO_RPC_ERROR;
-        }
-    }
-
-    bool new_block = false;
-    auto blockptr = std::make_shared<CBlock>(std::move(block));
-    auto sc = std::make_shared<NngSubmitBlockStateCatcher>(hash);
-    RegisterSharedValidationInterface(sc);
-    bool accepted = m_node.chainman->ProcessNewBlock(config, blockptr,
-                                                      /* fForceProcessing */ true,
-                                                      &new_block);
-    UnregisterSharedValidationInterface(sc);
-
-    std::optional<std::string> bip22Reason = std::string("inconclusive");
-    if (!new_block && accepted) {
-        bip22Reason = std::string("duplicate");
-    } else if (sc->found) {
-        if (sc->state.IsValid()) {
-            bip22Reason = std::nullopt;
-        } else if (sc->state.IsInvalid()) {
-            std::string reject = sc->state.GetRejectReason();
-            bip22Reason = reject.empty() ? std::optional<std::string>("rejected")
-                                         : std::optional<std::string>(reject);
-        } else {
-            bip22Reason = std::string("inconclusive");
-        }
-    }
-
-    const auto result = MapMiningSubmitReason(bip22Reason);
-    const bool blockAccepted =
-        result == NngInterface::MiningSubmitResult_ACCEPTED;
-    const std::string reason = bip22Reason.has_value() ? *bip22Reason : "";
-    auto resp = NngInterface::CreateSubmitMinedBlockResponse(
-        fbb, result, blockAccepted, fbb.CreateString(reason),
-        CreateFbsBlockHash(fbb, BlockHash(hash)));
-    fbb.Finish(resp);
-    return NngRpcErrorCode::NO_RPC_ERROR;
-}
-
-NngRpcErrorCode NngRpcServer::ValidateMinedBlockProposal(
-    flatbuffers::FlatBufferBuilder &fbb,
-    const NngInterface::ValidateMinedBlockProposalRequest *request) {
-    if (!request || !request->block()) {
-        return NngRpcErrorCode::INVALID_MINING_REQUEST;
-    }
-
-    CBlock block;
-    try {
-        std::vector<uint8_t> raw(request->block()->begin(), request->block()->end());
-        CDataStream ss(raw, SER_NETWORK, PROTOCOL_VERSION);
-        ss >> block;
-    } catch (...) {
-        return NngRpcErrorCode::MINING_SUBMIT_DECODE_FAILED;
-    }
-
-    const Config &config = GetConfig();
-    const CChainParams &chainparams = config.GetChainParams();
-
-    std::optional<std::string> bip22Reason = std::nullopt;
-    {
-        LOCK(cs_main);
-        const uint256 hash = block.GetHash();
-        const CBlockIndex *pindex = LookupBlockIndex(BlockHash(hash));
-        if (pindex) {
-            if (pindex->IsValid(BlockValidity::SCRIPTS)) {
-                bip22Reason = std::string("duplicate");
-            } else if (pindex->nStatus.isInvalid()) {
-                bip22Reason = std::string("duplicate-invalid");
-            } else {
-                bip22Reason = std::string("duplicate-inconclusive");
-            }
-        } else {
-            CBlockIndex *const pindexPrev = ::ChainActive().Tip();
-            if (!pindexPrev || block.hashPrevBlock != pindexPrev->GetBlockHash()) {
-                bip22Reason = std::string("inconclusive-not-best-prevblk");
-            } else {
-                BlockValidationState state;
-                TestBlockValidity(state, chainparams, block, pindexPrev,
-                                  BlockValidationOptions(config)
-                                      .withCheckPoW(false)
-                                      .withCheckMerkleRoot(true));
-                if (state.IsValid()) {
-                    bip22Reason = std::nullopt;
-                } else if (state.IsInvalid()) {
-                    std::string reject = state.GetRejectReason();
-                    bip22Reason = reject.empty()
-                                      ? std::optional<std::string>("rejected")
-                                      : std::optional<std::string>(reject);
-                } else {
-                    bip22Reason = std::string("inconclusive");
-                }
-            }
-        }
-    }
-
-    const auto result = MapMiningSubmitReason(bip22Reason);
-    auto resp = NngInterface::CreateValidateMinedBlockProposalResponse(
-        fbb, result, result == NngInterface::MiningSubmitResult_ACCEPTED,
-        fbb.CreateString(bip22Reason.has_value() ? *bip22Reason : ""));
-    fbb.Finish(resp);
     return NngRpcErrorCode::NO_RPC_ERROR;
 }
 
