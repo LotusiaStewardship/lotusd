@@ -503,37 +503,54 @@ static std::string BytesToHex(const uint8_t *data, size_t len) {
 /**
  * Compute merkle branches for the coinbase (tx index 0), suitable for
  * Stratum-style coinbase-first merkle root reconstruction.
+ *
+ * Uses Lotus merkle leaf format: SHA256d(tx_hash || tx_id)
+ * Uses Lotus merkle tree construction: odd levels padded with uint256()
  */
 static std::vector<uint256> ComputeMerkleBranches(const CBlock &block) {
-    std::vector<uint256> branches;
+    // Compute leaves using Lotus leaf hash format
     std::vector<uint256> leaves;
+    leaves.reserve(block.vtx.size());
     for (const auto &tx : block.vtx) {
-        leaves.push_back(tx->GetHash());
-    }
-    if (leaves.size() <= 1) {
-        return branches;
+        CHashWriter leaf_hash(SER_GETHASH, 0);
+        leaf_hash << tx->GetHash();
+        leaf_hash << tx->GetId();
+        leaves.push_back(leaf_hash.GetHash());
     }
 
-    std::vector<uint256> level = leaves;
-    size_t index = 0;
-    while (level.size() > 1) {
-        size_t siblingIdx = index ^ 1;
-        if (siblingIdx < level.size()) {
-            branches.push_back(level[siblingIdx]);
+    if (leaves.empty()) {
+        return {};
+    }
+
+    // Compute merkle branch for position 0 (coinbase tx)
+    // This implements the same algorithm as MerkleComputation in merkle_tests.cpp
+    // but optimized for the coinbase-only case
+    std::vector<uint256> branch;
+    uint32_t index = 0;
+
+    while (leaves.size() > 1) {
+        // Determine sibling index and collect branch element
+        uint32_t siblingIdx = index ^ 1;
+        if (siblingIdx < leaves.size()) {
+            branch.push_back(leaves[siblingIdx]);
         } else {
-            branches.push_back(level[index]);
+            // Odd level: Lotus pads with uint256() (zero hash), not duplication
+            branch.push_back(uint256());
         }
 
+        // Build next level
         std::vector<uint256> nextLevel;
-        for (size_t i = 0; i < level.size(); i += 2) {
-            uint256 left = level[i];
-            uint256 right = (i + 1 < level.size()) ? level[i + 1] : left;
+        nextLevel.reserve((leaves.size() + 1) / 2);
+        for (size_t i = 0; i < leaves.size(); i += 2) {
+            uint256 left = leaves[i];
+            // Lotus: pad odd levels with uint256(), don't duplicate last element
+            uint256 right = (i + 1 < leaves.size()) ? leaves[i + 1] : uint256();
             nextLevel.push_back(Hash(left, right));
         }
-        level = std::move(nextLevel);
+        leaves = std::move(nextLevel);
         index /= 2;
     }
-    return branches;
+    return branch;
 }
 
 /**
@@ -763,12 +780,14 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
 
     CBlock *pblock = &pblocktemplate->block;
 
+    // Extract extranonce sizes early for consistent use throughout
+    const uint32_t en1Size = request ? request->extranonce1_size() : 4;
+    const uint32_t en2Size = request ? request->extranonce2_size() : 4;
+
     if (!coinbaseIdentity.empty()) {
         CMutableTransaction coinbaseTx(*pblock->vtx[0]);
         coinbaseTx.vin[0].scriptSig << coinbaseIdentity;
 
-        const uint32_t en1Size = request ? request->extranonce1_size() : 4;
-        const uint32_t en2Size = request ? request->extranonce2_size() : 4;
         const uint64_t projectedScriptSigSize =
             coinbaseTx.vin[0].scriptSig.size() + en1Size + en2Size;
         if (projectedScriptSigSize > MAX_COINBASE_SCRIPTSIG_SIZE) {
@@ -783,6 +802,48 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
 
     UpdateTime(pblock, chainparams, pindexPrev);
     pblock->nNonce = 0;
+
+    // Split coinbase BEFORE computing merkle root, using the original coinbase
+    // (without extranonce placeholder adjustment). SplitCoinbase will adjust
+    // the varint to account for extranonce space.
+    const uint64_t projectedScriptSigSize =
+        pblock->vtx[0]->vin[0].scriptSig.size() + en1Size + en2Size;
+    if (projectedScriptSigSize > MAX_COINBASE_SCRIPTSIG_SIZE) {
+        return NngRpcErrorCode::INVALID_MINING_REQUEST;
+    }
+    auto [cb1, cb2] = SplitCoinbase(*pblock->vtx[0], en1Size, en2Size);
+
+    // Construct a temporary coinbase that matches what stratum-server will
+    // reconstruct: coinbase1 || extranonce1 || extranonce2 || coinbase2.
+    // We use placeholder bytes (0x00) for extranonce since the actual values
+    // are miner-specific and don't affect the merkle root.
+    std::vector<uint256> merkleBranches;
+    {
+        // Parse coinbase1 to get the adjusted coinbase structure
+        std::vector<uint8_t> cb1Raw = ParseHex(cb1);
+        std::vector<uint8_t> cb2Raw = ParseHex(cb2);
+        
+        // Construct reconstructed coinbase: cb1 + placeholder_en1 + placeholder_en2 + cb2
+        std::vector<uint8_t> reconstructedRaw;
+        reconstructedRaw.reserve(cb1Raw.size() + en1Size + en2Size + cb2Raw.size());
+        reconstructedRaw.insert(reconstructedRaw.end(), cb1Raw.begin(), cb1Raw.end());
+        reconstructedRaw.insert(reconstructedRaw.end(), en1Size + en2Size, 0x00); // placeholder extranonce
+        reconstructedRaw.insert(reconstructedRaw.end(), cb2Raw.begin(), cb2Raw.end());
+        
+        // Deserialize reconstructed coinbase
+        CDataStream reconstructedSs(reconstructedRaw, SER_NETWORK, PROTOCOL_VERSION);
+        CTransaction reconstructedCoinbase(deserialize, reconstructedSs);
+        
+        // Create a temporary block with the reconstructed coinbase for merkle computation
+        CBlock tempBlock = *pblock;
+        tempBlock.vtx[0] = MakeTransactionRef(reconstructedCoinbase);
+        
+        // Compute merkle root and branches from reconstructed coinbase
+        tempBlock.hashMerkleRoot = BlockMerkleRoot(tempBlock);
+        merkleBranches = ComputeMerkleBranches(tempBlock);
+    }
+    
+    // Set the merkle root on the original block (for serialization)
     pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
 
     CDataStream blockStream(SER_NETWORK, PROTOCOL_VERSION);
@@ -797,17 +858,8 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
         coinbaseValue += out.nValue;
     }
 
-    const uint32_t en1Size = request ? request->extranonce1_size() : 4;
-    const uint32_t en2Size = request ? request->extranonce2_size() : 4;
-    const uint64_t projectedScriptSigSize =
-        pblock->vtx[0]->vin[0].scriptSig.size() + en1Size + en2Size;
-    if (projectedScriptSigSize > MAX_COINBASE_SCRIPTSIG_SIZE) {
-        return NngRpcErrorCode::INVALID_MINING_REQUEST;
-    }
-    auto [cb1, cb2] = SplitCoinbase(*pblock->vtx[0], en1Size, en2Size);
-
     std::vector<flatbuffers::Offset<flatbuffers::String>> branchesFbs;
-    for (const auto &branch : ComputeMerkleBranches(*pblock)) {
+    for (const auto &branch : merkleBranches) {
         branchesFbs.push_back(fbb.CreateString(branch.GetHex()));
     }
 
