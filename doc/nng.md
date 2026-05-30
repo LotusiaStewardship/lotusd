@@ -13,8 +13,6 @@ Available RPC calls currently are:
  - `GetUndoSliceRequest` to get a slice of the block undo data
  - `GetMempoolRequest` to get the node's mempool
  - `GetMiningTemplateRequest` to fetch a native mining template optimized for external Stratum coordinators
- - `SubmitMinedBlockRequest` to submit a solved block candidate from an external coordinator
- - `ValidateMinedBlockProposalRequest` to pre-validate a candidate without requiring PoW (proposal semantics)
  - `GetMiningStatusRequest` to fetch chain/mempool/high-level mining status fields
 
 The mining RPC additions are designed for external pooled-mining services and
@@ -30,7 +28,7 @@ Likewise, PubSub messages are enabled using `-nngpub=<url>`, and `-nngpubmsg=<ms
  - `blkconnected` to notify when a block connected to the chain. Flatbuffers table is `BlockConnected`.
  - `blkdisconctd` to notify when a block disconnected from the chain (e.g. reorg, invalidateblock). Flatbuffers table is `BlockDisconnected`.
  - `chainstflush` to nofity when the block database has been flushed to the disk. Flatbuffers table is `ChainStateFlushed`.
- - `miningworkchg` low-latency mining/template invalidation signal for external stratum services. Flatbuffers table is `MiningWorkChanged`.
+ - `miningwrkchg` low-latency mining/template invalidation signal for external stratum services. Flatbuffers table is `MiningWorkChanged`.
 PubSub messages have their message type prepended as the first 12 bytes (0-padded if necessary), after that the message is encoded in the corresponding flatbuffers table (again, see [nng_interface.fbs](../src/nng_interface/nng_interface.fbs)).
 
 ## Example
@@ -44,7 +42,7 @@ nngpubmsg=blkconnected
 nngpubmsg=blkdisconctd
 nngpubmsg=mempooltxadd
 nngpubmsg=mempooltxrem
-nngpubmsg=miningworkchg
+nngpubmsg=miningwrkchg
 ```
 
 The same urls would then be specified in the indexer to connect the node to it.
@@ -65,7 +63,7 @@ IPC mode:
 nngrpc=ipc://datadir/nngrpc.pipe
 nngpub=ipc://datadir/nngpub.pipe
 nngpubmsg=updateblktip
-nngpubmsg=miningworkchg
+nngpubmsg=miningwrkchg
 ```
 
 TCP mode:
@@ -74,11 +72,11 @@ TCP mode:
 nngrpc=tcp://127.0.0.1:52783
 nngpub=tcp://127.0.0.1:52784
 nngpubmsg=updateblktip
-nngpubmsg=miningworkchg
+nngpubmsg=miningwrkchg
 ```
 
-A Stratum coordinator typically subscribes to `miningworkchg` and calls:
+A Stratum coordinator typically subscribes to `miningwrkchg` and calls:
 - `GetMiningTemplateRequest` on startup and on each work-change event
-- `ValidateMinedBlockProposalRequest` for optional pre-submit checks
-- `SubmitMinedBlockRequest` for solved candidates
 - `GetMiningStatusRequest` for operator health/state telemetry
+
+Solved blocks are submitted via the JSON-RPC `submitblock` endpoint instead.

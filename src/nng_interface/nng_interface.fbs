@@ -11,8 +11,6 @@ union RpcRequest {
     GetUndoSliceRequest,
     GetMempoolRequest,
     GetMiningTemplateRequest,
-    SubmitMinedBlockRequest,
-    ValidateMinedBlockProposalRequest,
     GetMiningStatusRequest,
 }
 
@@ -443,54 +441,6 @@ table GetMiningTemplateResponse {
     ntime_stratum: string;
 }
 
-// Result categories for submit/proposal validation used by mining RPCs.
-enum MiningSubmitResult: int32 {
-    ACCEPTED = 0,
-    DUPLICATE = 1,
-    DUPLICATE_INVALID = 2,
-    DUPLICATE_INCONCLUSIVE = 3,
-    INCONCLUSIVE = 4,
-    REJECTED = 5,
-    DESERIALIZATION_ERROR = 6,
-    INVALID_BLOCK = 7,
-    INVALID_COINBASE = 8,
-    INVALID_PREV_BLOCK = 9,
-}
-
-// Submit a candidate solved block to chainstate.
-table SubmitMinedBlockRequest {
-    // Raw serialized block bytes.
-    block: [ubyte];
-}
-
-// Result of SubmitMinedBlockRequest.
-table SubmitMinedBlockResponse {
-    // High-level result category.
-    result: MiningSubmitResult;
-
-    // True iff the block was accepted as a new block.
-    accepted: bool;
-
-    // Human-readable reject reason (BIP22-style when applicable).
-    reject_reason: string;
-
-    // Hash of submitted candidate block.
-    block_hash: BlockHash;
-}
-
-// Validate a block proposal against current tip without requiring PoW.
-// This mirrors getblocktemplate("proposal") style checking.
-table ValidateMinedBlockProposalRequest {
-    // Raw serialized block bytes.
-    block: [ubyte];
-}
-
-// Result of ValidateMinedBlockProposalRequest.
-table ValidateMinedBlockProposalResponse {
-    result: MiningSubmitResult;
-    valid: bool;
-    reject_reason: string;
-}
 
 // Fetch lightweight node mining status for external coordinators.
 table GetMiningStatusRequest {}

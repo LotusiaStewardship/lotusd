@@ -222,44 +222,6 @@ class NngInterfaceTest(BitcoinTestFramework):
         fbb.Finish(rpc)
         return bytes(fbb.Output())
 
-    def _make_submit_mined_block_request_fbs(self, block_raw):
-        from NngInterface import (
-            RpcCall,
-            RpcRequest,
-            SubmitMinedBlockRequest,
-        )
-        import flatbuffers
-        fbb = flatbuffers.Builder()
-        block_vec = fbb.CreateByteVector(block_raw)
-        SubmitMinedBlockRequest.Start(fbb)
-        SubmitMinedBlockRequest.AddBlock(fbb, block_vec)
-        req = SubmitMinedBlockRequest.End(fbb)
-        RpcCall.Start(fbb)
-        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.SubmitMinedBlockRequest)
-        RpcCall.AddRpc(fbb, req)
-        rpc = RpcCall.End(fbb)
-        fbb.Finish(rpc)
-        return bytes(fbb.Output())
-
-    def _make_validate_mined_block_proposal_request_fbs(self, block_raw):
-        from NngInterface import (
-            RpcCall,
-            RpcRequest,
-            ValidateMinedBlockProposalRequest,
-        )
-        import flatbuffers
-        fbb = flatbuffers.Builder()
-        block_vec = fbb.CreateByteVector(block_raw)
-        ValidateMinedBlockProposalRequest.Start(fbb)
-        ValidateMinedBlockProposalRequest.AddBlock(fbb, block_vec)
-        req = ValidateMinedBlockProposalRequest.End(fbb)
-        RpcCall.Start(fbb)
-        RpcCall.AddRpcType(
-            fbb, RpcRequest.RpcRequest.ValidateMinedBlockProposalRequest)
-        RpcCall.AddRpc(fbb, req)
-        rpc = RpcCall.End(fbb)
-        fbb.Finish(rpc)
-        return bytes(fbb.Output())
 
     def _make_get_mining_status_request_fbs(self):
         from NngInterface import (
@@ -570,8 +532,6 @@ class NngInterfaceTest(BitcoinTestFramework):
     async def _test_mining_rpcs(self, node, rpc_sock):
         from NngInterface import (
             GetMiningTemplateResponse,
-            SubmitMinedBlockResponse,
-            ValidateMinedBlockProposalResponse,
             GetMiningStatusResponse,
         )
 
@@ -598,31 +558,8 @@ class NngInterfaceTest(BitcoinTestFramework):
         response_with_identity = GetMiningTemplateResponse.GetMiningTemplateResponse.GetRootAs(response_with_identity, 0)
         assert identity.hex() in response_with_identity.Coinbase1()
 
-        # ValidateMinedBlockProposal: feed known on-chain block bytes to hit a
-        # deterministic duplicate*/inconclusive result path.
-        tiphash = node.getbestblockhash()
-        tipraw = bytes.fromhex(node.getblock(tiphash, 0))
-        await self._send_request(
-            rpc_sock,
-            self._make_validate_mined_block_proposal_request_fbs(tipraw),
-        )
-        response = await self._recv_response(rpc_sock)
-        response = ValidateMinedBlockProposalResponse.GetValidateMinedBlockProposalResponse.GetRootAs(response, 0)
-        assert response.Result() >= 0
-
-        # SubmitMinedBlock: submitting existing tip should be duplicate-ish and
-        # must not be marked accepted.
-        await self._send_request(
-            rpc_sock,
-            self._make_submit_mined_block_request_fbs(tipraw),
-        )
-        response = await self._recv_response(rpc_sock)
-        response = SubmitMinedBlockResponse.GetSubmitMinedBlockResponse.GetRootAs(response, 0)
-        assert_equal(response.Accepted(), False)
-        assert response.Result() >= 0
-        assert_equal(bytes(response.BlockHash().Hash().Data())[::-1].hex(), tiphash)
-
         # GetMiningStatus: verify tip and basic status fields are coherent.
+        tiphash = node.getbestblockhash()
         await self._send_request(rpc_sock, self._make_get_mining_status_request_fbs())
         response = await self._recv_response(rpc_sock)
         response = GetMiningStatusResponse.GetMiningStatusResponse.GetRootAs(response, 0)
