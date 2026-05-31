@@ -11,7 +11,6 @@ union RpcRequest {
     GetUndoSliceRequest,
     GetMempoolRequest,
     GetMiningTemplateRequest,
-    GetMiningStatusRequest,
 }
 
 // Result of an RPC call
@@ -439,22 +438,5 @@ table GetMiningTemplateResponse {
 
     // 6-byte Lotus time field as little-endian hex (12 chars).
     ntime_stratum: string;
-}
-
-
-// Fetch lightweight node mining status for external coordinators.
-table GetMiningStatusRequest {}
-
-table GetMiningStatusResponse {
-    tip_hash: BlockHash;
-    tip_height: int32;
-    initial_block_download: bool;
-    mempool_tx_count: uint64;
-    connected_peers: uint32;
-    // Node clock (unix seconds) from GetAdjustedTime().
-    node_time: int64;
-    // Active-tip cumulative chain work as hex.
-    tip_chain_work: string;
-    network: string;
 }
 

@@ -74,7 +74,6 @@ enum class NngRpcErrorCode {
     INVALID_BLOCK_SLICE,
     INVALID_MINING_REQUEST,
     MINING_TEMPLATE_BUILD_FAILED,
-    MINING_SUBMIT_DECODE_FAILED,
 };
 struct RpcResult {
     NngRpcErrorCode error_code;
@@ -102,8 +101,6 @@ std::string ErrorMsg(NngRpcErrorCode code) {
             return "Invalid mining request";
         case NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED:
             return "Failed to build mining template";
-        case NngRpcErrorCode::MINING_SUBMIT_DECODE_FAILED:
-            return "Failed to decode mined block";
         default:
             return "Unknown error";
     }
@@ -156,11 +153,6 @@ class NngRpcServer {
     NngRpcErrorCode
     GetMiningTemplate(flatbuffers::FlatBufferBuilder &builder,
                       const NngInterface::GetMiningTemplateRequest *request);
-
-    NngRpcErrorCode
-    GetMiningStatus(flatbuffers::FlatBufferBuilder &builder,
-                    const NngInterface::GetMiningStatusRequest *request);
-
 
 public:
     NngRpcServer(const Consensus::Params &consensus, const NodeContext &node)
@@ -284,10 +276,6 @@ NngRpcErrorCode NngRpcServer::HandleMsg(flatbuffers::FlatBufferBuilder &fbb,
         case NngInterface::RpcRequest_GetMiningTemplateRequest: {
             return GetMiningTemplate(fbb,
                                      rpc->rpc_as_GetMiningTemplateRequest());
-        }
-        case NngInterface::RpcRequest_GetMiningStatusRequest: {
-            return GetMiningStatus(fbb,
-                                   rpc->rpc_as_GetMiningStatusRequest());
         }
         default:
             return NngRpcErrorCode::UNKNOWN_RPC_METHOD;
@@ -470,19 +458,12 @@ CreateFbsBlock(flatbuffers::FlatBufferBuilder &fbb, const CBlock &block,
 }
 
 /**
- * Convert a uint256 hash to canonical stratum hex encoding used by mining
- * clients: each 32-bit word is byte-reversed while preserving word order.
+ * Convert a uint256 hash to little-endian hex as used by Stratum mining
+ * protocol for prevhash.  Lotus uses little-endian uint256 internally, so the
+ * raw bytes from hash.begin() are already in the correct byte order.
  */
 static std::string HashToStratumHex(const uint256 &hash) {
-    const uint8_t *data = hash.begin();
-    std::string result;
-    result.reserve(64);
-    for (int i = 0; i < 32; i += 4) {
-        for (int j = 3; j >= 0; j--) {
-            result += strprintf("%02x", data[i + j]);
-        }
-    }
-    return result;
+    return HexStr(Span<const uint8_t>(hash.begin(), 32));
 }
 
 /** Convert a 32-bit integer to little-endian hex as used by Stratum params. */
@@ -493,11 +474,6 @@ static std::string Uint32ToStratumHex(uint32_t val) {
     buf[2] = (val >> 16) & 0xff;
     buf[3] = (val >> 24) & 0xff;
     return HexStr(Span<const uint8_t>(buf, 4));
-}
-
-/** Convert raw bytes to lowercase hex preserving byte order. */
-static std::string BytesToHex(const uint8_t *data, size_t len) {
-    return HexStr(Span<const uint8_t>(data, len));
 }
 
 /**
@@ -574,21 +550,13 @@ SplitCoinbase(const CTransaction &coinbaseTx, size_t extranonce1Size,
 
     size_t scriptSigLenPos = pos;
 
-    uint64_t origScriptSigLen = 0;
-    int varintBytes = 0;
-    if (raw[pos] < 0xfd) {
-        origScriptSigLen = raw[pos];
-        varintBytes = 1;
-    } else if (raw[pos] == 0xfd) {
-        origScriptSigLen = raw[pos + 1] | (raw[pos + 2] << 8);
-        varintBytes = 3;
-    } else {
-        origScriptSigLen = raw[pos + 1] | (raw[pos + 2] << 8) |
-                           (raw[pos + 3] << 16) |
-                           ((uint64_t)raw[pos + 4] << 24);
-        varintBytes = 5;
-    }
-    pos += varintBytes;
+    CDataStream varintStream(
+        reinterpret_cast<const char *>(raw.data()) + pos,
+        reinterpret_cast<const char *>(raw.data()) + raw.size(),
+        SER_NETWORK, PROTOCOL_VERSION);
+    size_t before = varintStream.size();
+    uint64_t origScriptSigLen = ReadVarInt<CDataStream, VarIntMode::DEFAULT, uint64_t>(varintStream);
+    pos += before - varintStream.size();
 
     size_t scriptSigStart = pos;
     size_t scriptSigEnd = pos + origScriptSigLen;
@@ -596,20 +564,12 @@ SplitCoinbase(const CTransaction &coinbaseTx, size_t extranonce1Size,
     uint64_t extranonceSpace = extranonce1Size + extranonce2Size;
     uint64_t newScriptSigLen = origScriptSigLen + extranonceSpace;
 
-    std::vector<uint8_t> newVarint;
-    if (newScriptSigLen < 0xfd) {
-        newVarint.push_back((uint8_t)newScriptSigLen);
-    } else if (newScriptSigLen <= 0xffff) {
-        newVarint.push_back(0xfd);
-        newVarint.push_back(newScriptSigLen & 0xff);
-        newVarint.push_back((newScriptSigLen >> 8) & 0xff);
-    } else {
-        newVarint.push_back(0xfe);
-        newVarint.push_back(newScriptSigLen & 0xff);
-        newVarint.push_back((newScriptSigLen >> 8) & 0xff);
-        newVarint.push_back((newScriptSigLen >> 16) & 0xff);
-        newVarint.push_back((newScriptSigLen >> 24) & 0xff);
-    }
+    CDataStream newVarintStream(SER_NETWORK, PROTOCOL_VERSION);
+    WriteVarInt<CDataStream, VarIntMode::DEFAULT>(newVarintStream, newScriptSigLen);
+    std::vector<uint8_t> newVarint(
+        reinterpret_cast<const uint8_t *>(newVarintStream.data()),
+        reinterpret_cast<const uint8_t *>(newVarintStream.data()) +
+            newVarintStream.size());
 
     std::vector<uint8_t> cb1Data;
     cb1Data.insert(cb1Data.end(), raw.begin(), raw.begin() + scriptSigLenPos);
@@ -909,32 +869,8 @@ NngRpcErrorCode NngRpcServer::GetMiningTemplate(
         fbb.CreateVector(branchesFbs),
         fbb.CreateString(HashToStratumHex(pblock->hashPrevBlock)),
         fbb.CreateString(Uint32ToStratumHex(pblock->nBits)),
-        fbb.CreateString(BytesToHex(pblock->vTime.data(), pblock->vTime.size())));
+        fbb.CreateString(HexStr(Span<const uint8_t>(pblock->vTime.data(), pblock->vTime.size()))));
     fbb.Finish(response);
-    return NngRpcErrorCode::NO_RPC_ERROR;
-}
-
-NngRpcErrorCode
-NngRpcServer::GetMiningStatus(flatbuffers::FlatBufferBuilder &fbb,
-                              const NngInterface::GetMiningStatusRequest *request) {
-    LOCK(cs_main);
-    const CBlockIndex *tip = ::ChainActive().Tip();
-    if (!tip) {
-        return NngRpcErrorCode::BLOCK_NOT_FOUND;
-    }
-
-    uint32_t peers = 0;
-    if (m_node.connman) {
-        peers = m_node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL);
-    }
-
-    auto resp = NngInterface::CreateGetMiningStatusResponse(
-        fbb, CreateFbsBlockHash(fbb, tip->GetBlockHash()), tip->nHeight,
-        ::ChainstateActive().IsInitialBlockDownload(),
-        static_cast<uint64_t>(m_node.mempool->size()), peers,
-        GetAdjustedTime(), fbb.CreateString(tip->nChainWork.GetHex()),
-        fbb.CreateString(GetConfig().GetChainParams().NetworkIDString()));
-    fbb.Finish(resp);
     return NngRpcErrorCode::NO_RPC_ERROR;
 }
 
