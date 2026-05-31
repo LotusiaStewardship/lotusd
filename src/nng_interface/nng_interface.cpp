@@ -3,17 +3,28 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <array>
+#include <atomic>
 #include <optional>
 
 #include <blockdb.h>
 #include <chainparams.h>
+#include <config.h>
+#include <consensus/consensus.h>
 #include <consensus/validation.h>
+#include <consensus/merkle.h>
+#include <hash.h>
 #include <logging.h>
+#include <miner.h>
+#include <net.h>
 #include <node/coin.h>
 #include <node/context.h>
 #include <node/ui_interface.h>
+#include <streams.h>
 #include <timedata.h>
 #include <undo.h>
+#include <univalue.h>
+#include <util/strencodings.h>
+#include <util/time.h>
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
@@ -61,8 +72,9 @@ enum class NngRpcErrorCode {
     BLOCK_NOT_FOUND,
     BLOCK_DATA_CORRUPTED,
     INVALID_BLOCK_SLICE,
+    INVALID_MINING_REQUEST,
+    MINING_TEMPLATE_BUILD_FAILED,
 };
-
 struct RpcResult {
     NngRpcErrorCode error_code;
     std::vector<uint8_t> data = std::vector<uint8_t>();
@@ -85,6 +97,10 @@ std::string ErrorMsg(NngRpcErrorCode code) {
             return "Block data corrupted";
         case NngRpcErrorCode::INVALID_BLOCK_SLICE:
             return "Invalid block slice";
+        case NngRpcErrorCode::INVALID_MINING_REQUEST:
+            return "Invalid mining request";
+        case NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED:
+            return "Failed to build mining template";
         default:
             return "Unknown error";
     }
@@ -133,6 +149,10 @@ class NngRpcServer {
 
     NngRpcErrorCode GetMempool(flatbuffers::FlatBufferBuilder &builder,
                                const NngInterface::GetMempoolRequest *request);
+
+    NngRpcErrorCode
+    GetMiningTemplate(flatbuffers::FlatBufferBuilder &builder,
+                      const NngInterface::GetMiningTemplateRequest *request);
 
 public:
     NngRpcServer(const Consensus::Params &consensus, const NodeContext &node)
@@ -252,6 +272,10 @@ NngRpcErrorCode NngRpcServer::HandleMsg(flatbuffers::FlatBufferBuilder &fbb,
         }
         case NngInterface::RpcRequest_GetMempoolRequest: {
             return GetMempool(fbb, rpc->rpc_as_GetMempoolRequest());
+        }
+        case NngInterface::RpcRequest_GetMiningTemplateRequest: {
+            return GetMiningTemplate(fbb,
+                                     rpc->rpc_as_GetMiningTemplateRequest());
         }
         default:
             return NngRpcErrorCode::UNKNOWN_RPC_METHOD;
@@ -433,6 +457,130 @@ CreateFbsBlock(flatbuffers::FlatBufferBuilder &fbb, const CBlock &block,
         pindex->nDataPos, pindex->nUndoPos);
 }
 
+/**
+ * Convert a uint256 hash to little-endian hex as used by Stratum mining
+ * protocol for prevhash.  Lotus uses little-endian uint256 internally, so the
+ * raw bytes from hash.begin() are already in the correct byte order.
+ */
+static std::string HashToStratumHex(const uint256 &hash) {
+    return HexStr(Span<const uint8_t>(hash.begin(), 32));
+}
+
+/** Convert a 32-bit integer to little-endian hex as used by Stratum params. */
+static std::string Uint32ToStratumHex(uint32_t val) {
+    uint8_t buf[4];
+    buf[0] = val & 0xff;
+    buf[1] = (val >> 8) & 0xff;
+    buf[2] = (val >> 16) & 0xff;
+    buf[3] = (val >> 24) & 0xff;
+    return HexStr(Span<const uint8_t>(buf, 4));
+}
+
+/**
+ * Compute merkle branches for the coinbase (tx index 0), suitable for
+ * Stratum-style coinbase-first merkle root reconstruction.
+ *
+ * Uses Lotus merkle leaf format: SHA256d(tx_hash || tx_id)
+ * Uses Lotus merkle tree construction: odd levels padded with uint256()
+ */
+static std::vector<uint256> ComputeMerkleBranches(const CBlock &block) {
+    // Compute leaves using Lotus leaf hash format
+    std::vector<uint256> leaves;
+    leaves.reserve(block.vtx.size());
+    for (const auto &tx : block.vtx) {
+        CHashWriter leaf_hash(SER_GETHASH, 0);
+        leaf_hash << tx->GetHash();
+        leaf_hash << tx->GetId();
+        leaves.push_back(leaf_hash.GetHash());
+    }
+
+    if (leaves.empty()) {
+        return {};
+    }
+
+    // Compute merkle branch for position 0 (coinbase tx)
+    // This implements the same algorithm as MerkleComputation in merkle_tests.cpp
+    // but optimized for the coinbase-only case
+    std::vector<uint256> branch;
+    uint32_t index = 0;
+
+    while (leaves.size() > 1) {
+        // Determine sibling index and collect branch element
+        uint32_t siblingIdx = index ^ 1;
+        if (siblingIdx < leaves.size()) {
+            branch.push_back(leaves[siblingIdx]);
+        } else {
+            // Odd level: Lotus pads with uint256() (zero hash), not duplication
+            branch.push_back(uint256());
+        }
+
+        // Build next level
+        std::vector<uint256> nextLevel;
+        nextLevel.reserve((leaves.size() + 1) / 2);
+        for (size_t i = 0; i < leaves.size(); i += 2) {
+            uint256 left = leaves[i];
+            // Lotus: pad odd levels with uint256(), don't duplicate last element
+            uint256 right = (i + 1 < leaves.size()) ? leaves[i + 1] : uint256();
+            nextLevel.push_back(Hash(left, right));
+        }
+        leaves = std::move(nextLevel);
+        index /= 2;
+    }
+    return branch;
+}
+
+/**
+ * Split coinbase into coinbase1/coinbase2 for stratum extranonce insertion.
+ *
+ * The output is deterministic and updates scriptSig compact-size encoding to
+ * account for reserved extranonce bytes.
+ */
+static std::pair<std::string, std::string>
+SplitCoinbase(const CTransaction &coinbaseTx, size_t extranonce1Size,
+              size_t extranonce2Size) {
+    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+    ss << coinbaseTx;
+    std::vector<uint8_t> raw((const uint8_t *)ss.data(),
+                             (const uint8_t *)ss.data() + ss.size());
+
+    size_t pos = 0;
+    pos += 4;  // version
+    pos += 1;  // vin count (coinbase always one input)
+    pos += 36; // prevout
+
+    size_t scriptSigLenPos = pos;
+
+    CDataStream varintStream(
+        reinterpret_cast<const char *>(raw.data()) + pos,
+        reinterpret_cast<const char *>(raw.data()) + raw.size(),
+        SER_NETWORK, PROTOCOL_VERSION);
+    size_t before = varintStream.size();
+    uint64_t origScriptSigLen = ReadVarInt<CDataStream, VarIntMode::DEFAULT, uint64_t>(varintStream);
+    pos += before - varintStream.size();
+
+    size_t scriptSigStart = pos;
+    size_t scriptSigEnd = pos + origScriptSigLen;
+
+    uint64_t extranonceSpace = extranonce1Size + extranonce2Size;
+    uint64_t newScriptSigLen = origScriptSigLen + extranonceSpace;
+
+    CDataStream newVarintStream(SER_NETWORK, PROTOCOL_VERSION);
+    WriteVarInt<CDataStream, VarIntMode::DEFAULT>(newVarintStream, newScriptSigLen);
+    std::vector<uint8_t> newVarint(
+        reinterpret_cast<const uint8_t *>(newVarintStream.data()),
+        reinterpret_cast<const uint8_t *>(newVarintStream.data()) +
+            newVarintStream.size());
+
+    std::vector<uint8_t> cb1Data;
+    cb1Data.insert(cb1Data.end(), raw.begin(), raw.begin() + scriptSigLenPos);
+    cb1Data.insert(cb1Data.end(), newVarint.begin(), newVarint.end());
+    cb1Data.insert(cb1Data.end(), raw.begin() + scriptSigStart,
+                   raw.begin() + scriptSigEnd);
+
+    std::vector<uint8_t> cb2Data(raw.begin() + scriptSigEnd, raw.end());
+    return {HexStr(cb1Data), HexStr(cb2Data)};
+}
+
 NngRpcErrorCode
 NngRpcServer::GetBlock(flatbuffers::FlatBufferBuilder &fbb,
                        const NngInterface::GetBlockRequest *request) {
@@ -544,6 +692,188 @@ NngRpcServer::GetMempool(flatbuffers::FlatBufferBuilder &fbb,
     return NngRpcErrorCode::NO_RPC_ERROR;
 }
 
+NngRpcErrorCode NngRpcServer::GetMiningTemplate(
+    flatbuffers::FlatBufferBuilder &fbb,
+    const NngInterface::GetMiningTemplateRequest *request) {
+    const Config &config = GetConfig();
+    const CChainParams &chainparams = config.GetChainParams();
+
+    LOCK(cs_main);
+    CBlockIndex *pindexPrev = ::ChainActive().Tip();
+    if (!pindexPrev) {
+        return NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED;
+    }
+
+    CScript coinbaseScript;
+    if (request && request->coinbase_script()) {
+        const auto &scriptBytes = *request->coinbase_script();
+        if (scriptBytes.size() > 0) {
+            std::vector<uint8_t> scriptVec(scriptBytes.begin(),
+                                           scriptBytes.end());
+            coinbaseScript = CScript(scriptVec.begin(), scriptVec.end());
+        }
+    }
+    if (coinbaseScript.empty()) {
+        // Keep behavior predictable for pure-template callers: this mirrors
+        // getblocktemplate's scriptDummy behavior and avoids address parsing
+        // policy decisions in the NNG layer.
+        coinbaseScript = CScript() << OP_RETURN;
+    }
+
+    std::vector<uint8_t> coinbaseIdentity;
+    if (request && request->coinbase_identity()) {
+        const auto &identityBytes = *request->coinbase_identity();
+        coinbaseIdentity.assign(identityBytes.begin(), identityBytes.end());
+    }
+
+    std::unique_ptr<CBlockTemplate> pblocktemplate;
+    try {
+        pblocktemplate = BlockAssembler(config, *m_node.mempool)
+                             .CreateNewBlock(coinbaseScript);
+    } catch (const std::exception &e) {
+        LogPrintf("NNG mining template build failed: %s\n", e.what());
+        return NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED;
+    }
+    if (!pblocktemplate) {
+        return NngRpcErrorCode::MINING_TEMPLATE_BUILD_FAILED;
+    }
+
+    CBlock *pblock = &pblocktemplate->block;
+
+    // Extract extranonce sizes early for consistent use throughout
+    const uint32_t en1Size = request ? request->extranonce1_size() : 4;
+    const uint32_t en2Size = request ? request->extranonce2_size() : 4;
+
+    if (!coinbaseIdentity.empty()) {
+        CMutableTransaction coinbaseTx(*pblock->vtx[0]);
+        coinbaseTx.vin[0].scriptSig << coinbaseIdentity;
+
+        const uint64_t projectedScriptSigSize =
+            coinbaseTx.vin[0].scriptSig.size() + en1Size + en2Size;
+        if (projectedScriptSigSize > MAX_COINBASE_SCRIPTSIG_SIZE) {
+            return NngRpcErrorCode::INVALID_MINING_REQUEST;
+        }
+
+        pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));
+        if (!pblocktemplate->entries.empty()) {
+            pblocktemplate->entries[0].tx = pblock->vtx[0];
+        }
+    }
+
+    UpdateTime(pblock, chainparams, pindexPrev);
+    pblock->nNonce = 0;
+
+    // Split coinbase BEFORE computing merkle root, using the original coinbase
+    // (without extranonce placeholder adjustment). SplitCoinbase will adjust
+    // the varint to account for extranonce space.
+    const uint64_t projectedScriptSigSize =
+        pblock->vtx[0]->vin[0].scriptSig.size() + en1Size + en2Size;
+    if (projectedScriptSigSize > MAX_COINBASE_SCRIPTSIG_SIZE) {
+        return NngRpcErrorCode::INVALID_MINING_REQUEST;
+    }
+    auto [cb1, cb2] = SplitCoinbase(*pblock->vtx[0], en1Size, en2Size);
+
+    // Construct a temporary coinbase that matches what stratum-server will
+    // reconstruct: coinbase1 || extranonce1 || extranonce2 || coinbase2.
+    // We use placeholder bytes (0x00) for extranonce since the actual values
+    // are miner-specific and don't affect the merkle root.
+    std::vector<uint256> merkleBranches;
+    {
+        // Parse coinbase1 to get the adjusted coinbase structure
+        std::vector<uint8_t> cb1Raw = ParseHex(cb1);
+        std::vector<uint8_t> cb2Raw = ParseHex(cb2);
+        
+        // Construct reconstructed coinbase: cb1 + placeholder_en1 + placeholder_en2 + cb2
+        std::vector<uint8_t> reconstructedRaw;
+        reconstructedRaw.reserve(cb1Raw.size() + en1Size + en2Size + cb2Raw.size());
+        reconstructedRaw.insert(reconstructedRaw.end(), cb1Raw.begin(), cb1Raw.end());
+        reconstructedRaw.insert(reconstructedRaw.end(), en1Size + en2Size, 0x00); // placeholder extranonce
+        reconstructedRaw.insert(reconstructedRaw.end(), cb2Raw.begin(), cb2Raw.end());
+        
+        // Deserialize reconstructed coinbase
+        CDataStream reconstructedSs(reconstructedRaw, SER_NETWORK, PROTOCOL_VERSION);
+        CTransaction reconstructedCoinbase(deserialize, reconstructedSs);
+        
+        // Create a temporary block with the reconstructed coinbase for merkle computation
+        CBlock tempBlock = *pblock;
+        tempBlock.vtx[0] = MakeTransactionRef(reconstructedCoinbase);
+        
+        // Compute merkle root and branches from reconstructed coinbase
+        tempBlock.hashMerkleRoot = BlockMerkleRoot(tempBlock);
+        merkleBranches = ComputeMerkleBranches(tempBlock);
+    }
+    
+    // Set the merkle root on the original block (for serialization)
+    pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
+
+    CDataStream blockStream(SER_NETWORK, PROTOCOL_VERSION);
+    blockStream << *pblock;
+    CDataStream headerStream(SER_NETWORK, PROTOCOL_VERSION);
+    headerStream << pblock->GetBlockHeader();
+    CDataStream coinbaseStream(SER_NETWORK, PROTOCOL_VERSION);
+    coinbaseStream << *pblock->vtx[0];
+
+    Amount coinbaseValue = Amount::zero();
+    for (const auto &out : pblock->vtx[0]->vout) {
+        coinbaseValue += out.nValue;
+    }
+
+    std::vector<flatbuffers::Offset<flatbuffers::String>> branchesFbs;
+    for (const auto &branch : merkleBranches) {
+        branchesFbs.push_back(fbb.CreateString(branch.GetHex()));
+    }
+
+    std::vector<flatbuffers::Offset<NngInterface::MiningTemplateTx>> txsFbs;
+    const bool includeTxs = request ? request->include_transactions() : true;
+    if (includeTxs) {
+        for (size_t i = 1; i < pblock->vtx.size(); ++i) {
+            CDataStream txStream(SER_NETWORK, PROTOCOL_VERSION);
+            txStream << *pblock->vtx[i];
+            Amount fee = Amount::zero();
+            int64_t sigops = 0;
+            if (i < pblocktemplate->entries.size()) {
+                fee = pblocktemplate->entries[i].fees;
+                sigops = pblocktemplate->entries[i].sigOpCount;
+            }
+            txsFbs.push_back(NngInterface::CreateMiningTemplateTx(
+                fbb,
+                fbb.CreateVector((const uint8_t *)txStream.data(),
+                                 txStream.size()),
+                CreateFbsTxId(fbb, pblock->vtx[i]->GetId()),
+                fee / SATOSHI, sigops));
+        }
+    }
+
+    static std::atomic<uint64_t> s_templateId{1};
+    const uint64_t templateId = s_templateId.fetch_add(1);
+
+    arith_uint256 targetArith;
+    targetArith.SetCompact(pblock->nBits);
+    const uint256 targetU256 = ArithToUint256(targetArith);
+    NngInterface::Hash targetHash = CreateFbsHash(targetU256.begin());
+
+    const uint64_t mintime = pindexPrev->GetMedianTimePast() + 1;
+    const uint64_t maxtime = GetAdjustedTime() + MAX_FUTURE_BLOCK_TIME;
+
+    auto response = NngInterface::CreateGetMiningTemplateResponse(
+        fbb, templateId,
+        fbb.CreateVector((const uint8_t *)blockStream.data(), blockStream.size()),
+        fbb.CreateVector((const uint8_t *)headerStream.data(),
+                         headerStream.size()),
+        CreateFbsBlockHash(fbb, pblock->hashPrevBlock), pindexPrev->nHeight + 1,
+        pblock->nHeaderVersion, pblock->nBits, &targetHash,
+        pblock->GetBlockTime(), mintime, maxtime, coinbaseValue / SATOSHI,
+        fbb.CreateVector((const uint8_t *)coinbaseStream.data(),
+                         coinbaseStream.size()),
+        fbb.CreateVector(txsFbs), fbb.CreateString(cb1), fbb.CreateString(cb2),
+        fbb.CreateVector(branchesFbs),
+        fbb.CreateString(HashToStratumHex(pblock->hashPrevBlock)),
+        fbb.CreateString(Uint32ToStratumHex(pblock->nBits)),
+        fbb.CreateString(HexStr(Span<const uint8_t>(pblock->vTime.data(), pblock->vTime.size()))));
+    fbb.Finish(response);
+    return NngRpcErrorCode::NO_RPC_ERROR;
+}
+
 class NngPubServer final : public CValidationInterface {
 public:
     NngPubServer(std::set<std::string> enabled_messages)
@@ -566,6 +896,8 @@ public:
 private:
     nng_socket m_sock;
     std::set<std::string> m_enabled_messages;
+    // Monotonic process-local epoch used by miningwrkchg.
+    std::atomic<uint64_t> m_templateEpoch{1};
 
     void BroadcastMessage(const std::string msg_type,
                           const flatbuffers::FlatBufferBuilder &fbb) {
@@ -576,43 +908,81 @@ private:
         NNG_TRY_LOG(nng_send(m_sock, msg.data(), msg.size(), 0));
     }
 
+    void EmitMiningWorkChanged(NngInterface::MiningWorkChangeReason reason,
+                               const CBlockIndex *tip) {
+        if (!IsMessageEnabled(MSG_MININGWRKCHG) || tip == nullptr) {
+            return;
+        }
+        // This signal is intentionally small and constant-shape to keep event
+        // latency low for external stratum coordinators that refresh jobs on
+        // every tip/mempool invalidation.
+        flatbuffers::FlatBufferBuilder fbb;
+        fbb.Finish(NngInterface::CreateMiningWorkChanged(
+            fbb, reason, CreateFbsBlockHash(fbb, tip->GetBlockHash()),
+            tip->nHeight, GetTime(), m_templateEpoch.fetch_add(1)));
+        BroadcastMessage(MSG_MININGWRKCHG, fbb);
+    }
+
     void UpdatedBlockTip(const CBlockIndex *pindexNew,
                          const CBlockIndex *pindexFork,
                          bool fInitialDownload) override {
-        if (!IsMessageEnabled(MSG_UPDATEBLKTIP)) {
-            return;
+        if (IsMessageEnabled(MSG_UPDATEBLKTIP)) {
+            flatbuffers::FlatBufferBuilder fbb;
+            fbb.Finish(NngInterface::CreateUpdatedBlockTip(
+                fbb, CreateFbsBlockHash(fbb, pindexNew->GetBlockHash())));
+            BroadcastMessage(MSG_UPDATEBLKTIP, fbb);
         }
-        flatbuffers::FlatBufferBuilder fbb;
-        fbb.Finish(NngInterface::CreateUpdatedBlockTip(
-            fbb, CreateFbsBlockHash(fbb, pindexNew->GetBlockHash())));
-        BroadcastMessage(MSG_UPDATEBLKTIP, fbb);
+        const bool reorg = pindexFork != nullptr &&
+                           pindexNew != nullptr &&
+                           pindexNew->pprev != pindexFork;
+        EmitMiningWorkChanged(reorg ? NngInterface::MiningWorkChangeReason_REORG
+                                    : NngInterface::MiningWorkChangeReason_NEW_TIP,
+                              pindexNew);
     }
 
     void
     TransactionAddedToMempool(const CTransactionRef &ptx,
                               const std::vector<Coin> &spent_coins,
                               uint64_t mempool_sequence) override {
-        if (!IsMessageEnabled(MSG_MEMPOOLTXADD)) {
-            return;
+        if (IsMessageEnabled(MSG_MEMPOOLTXADD)) {
+            flatbuffers::FlatBufferBuilder fbb;
+            fbb.Finish(NngInterface::CreateTransactionAddedToMempool(
+                fbb, NngInterface::CreateMempoolTx(
+                         fbb, CreateFbsTxMempool(fbb, ptx, spent_coins),
+                         GetAdjustedTime())));
+            BroadcastMessage(MSG_MEMPOOLTXADD, fbb);
         }
-        flatbuffers::FlatBufferBuilder fbb;
-        fbb.Finish(NngInterface::CreateTransactionAddedToMempool(
-            fbb, NngInterface::CreateMempoolTx(
-                     fbb, CreateFbsTxMempool(fbb, ptx, spent_coins),
-                     GetAdjustedTime())));
-        BroadcastMessage(MSG_MEMPOOLTXADD, fbb);
+
+        if (IsMessageEnabled(MSG_MININGWRKCHG)) {
+            const CBlockIndex *tip = nullptr;
+            {
+                LOCK(cs_main);
+                tip = ::ChainActive().Tip();
+            }
+            EmitMiningWorkChanged(
+                NngInterface::MiningWorkChangeReason_MEMPOOL_REFRESH, tip);
+        }
     }
 
     void TransactionRemovedFromMempool(const CTransactionRef &ptx,
                                        MemPoolRemovalReason reason,
                                        uint64_t mempool_sequence) override {
-        if (!IsMessageEnabled(MSG_MEMPOOLTXREM)) {
-            return;
+        if (IsMessageEnabled(MSG_MEMPOOLTXREM)) {
+            flatbuffers::FlatBufferBuilder fbb;
+            fbb.Finish(NngInterface::CreateTransactionRemovedFromMempool(
+                fbb, CreateFbsTxId(fbb, ptx->GetId())));
+            BroadcastMessage(MSG_MEMPOOLTXREM, fbb);
         }
-        flatbuffers::FlatBufferBuilder fbb;
-        fbb.Finish(NngInterface::CreateTransactionRemovedFromMempool(
-            fbb, CreateFbsTxId(fbb, ptx->GetId())));
-        BroadcastMessage(MSG_MEMPOOLTXREM, fbb);
+
+        if (IsMessageEnabled(MSG_MININGWRKCHG)) {
+            const CBlockIndex *tip = nullptr;
+            {
+                LOCK(cs_main);
+                tip = ::ChainActive().Tip();
+            }
+            EmitMiningWorkChanged(
+                NngInterface::MiningWorkChangeReason_MEMPOOL_REFRESH, tip);
+        }
     }
 
     void BlockConnected(const std::shared_ptr<const CBlock> &block,
