@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  TZ: Etc/UTC
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            -t buster-backports cmake \
+            build-essential autoconf automake curl gperf git \
+            libtool ninja-build patch pkg-config python3
+
+      - name: Build depends
+        run: make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
+
+      - name: Configure and build
+        run: |
+          mkdir build && cd build
+          cmake -GNinja .. \
+            -DBASEPREFIX=/home/runner/work/lotusd/lotusd/depends \
+            -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
+            -DENABLE_REDUCE_EXPORTS=ON \
+            -DENABLE_STATIC_LIBSTDCXX=ON \
+            -DENABLE_GLIBC_BACK_COMPAT=ON \
+            -DCLIENT_VERSION_IS_RELEASE=ON \
+            -DENABLE_CLANG_TIDY=OFF
+          ninja
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure -j$(nproc)
+
+  docker:
+    name: Docker build check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build lotus image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus
+          push: false
+          load: true
+          tags: lotus:ci
+
+      - name: Build lotus-qt image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus-qt
+          push: false
+          load: true
+          tags: lotus-qt:ci
