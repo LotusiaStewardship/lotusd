@@ -37,17 +37,20 @@ COPY . .
 # Build dependencies using the depends system
 RUN make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
 
-# Build all binaries using the depends toolchain
+# Build all binaries using the depends toolchain, then install and strip debug
+# symbols (matching gitian's install-debug target) to minimize binary size.
 RUN mkdir build && cd build && \
     cmake -GNinja .. \
       -DBASEPREFIX=/lotus-source/depends \
       -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
+      -DBUILD_BITCOIN_QT=OFF \
       -DENABLE_REDUCE_EXPORTS=ON \
       -DENABLE_STATIC_LIBSTDCXX=ON \
       -DENABLE_GLIBC_BACK_COMPAT=ON \
       -DCLIENT_VERSION_IS_RELEASE=ON \
-      -DENABLE_CLANG_TIDY=OFF && \
-    ninja lotusd lotus-cli lotus-tx lotus-wallet lotus-seeder && \
+      -DENABLE_CLANG_TIDY=OFF \
+      -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
+    ninja install-debug && \
     ninja security-check && \
     ninja symbol-check
 
@@ -71,12 +74,13 @@ RUN apt-get update && apt-get install -y \
 # Create directory structure
 RUN mkdir -p /opt/lotus/bin /root/.lotus
 
-# Copy all built binaries from builder stage
-COPY --from=builder /lotus-source/build/src/lotusd /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/lotus-cli /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/lotus-tx /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/lotus-wallet /opt/lotus/bin/
-COPY --from=builder /lotus-source/build/src/seeder/lotus-seeder /opt/lotus/bin/
+# Copy installed (stripped) binaries from builder stage.
+# Debug symbols were split out by ninja install-debug.
+COPY --from=builder /opt/lotus/bin/lotusd /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-cli /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-tx /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-seeder /opt/lotus/bin/
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*

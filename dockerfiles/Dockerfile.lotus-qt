@@ -48,6 +48,7 @@ RUN mkdir build && cd build && \
       -DCLIENT_VERSION_IS_RELEASE=ON \
       -DENABLE_CLANG_TIDY=OFF && \
     ninja lotus-qt && \
+    strip src/qt/lotus-qt && \
     ninja security-check && \
     ninja symbol-check
 
