@@ -223,23 +223,6 @@ class NngInterfaceTest(BitcoinTestFramework):
         return bytes(fbb.Output())
 
 
-    def _make_get_mining_status_request_fbs(self):
-        from NngInterface import (
-            RpcCall,
-            RpcRequest,
-            GetMiningStatusRequest,
-        )
-        import flatbuffers
-        fbb = flatbuffers.Builder()
-        GetMiningStatusRequest.Start(fbb)
-        req = GetMiningStatusRequest.End(fbb)
-        RpcCall.Start(fbb)
-        RpcCall.AddRpcType(fbb, RpcRequest.RpcRequest.GetMiningStatusRequest)
-        RpcCall.AddRpc(fbb, req)
-        rpc = RpcCall.End(fbb)
-        fbb.Finish(rpc)
-        return bytes(fbb.Output())
-
     async def _send_request(self, rpc_sock, request, *, timeout=1):
         await asyncio.wait_for(rpc_sock.asend(request), timeout=timeout)
 
@@ -532,7 +515,6 @@ class NngInterfaceTest(BitcoinTestFramework):
     async def _test_mining_rpcs(self, node, rpc_sock):
         from NngInterface import (
             GetMiningTemplateResponse,
-            GetMiningStatusResponse,
         )
 
         # GetMiningTemplate: returns a coherent template payload with both
@@ -557,18 +539,6 @@ class NngInterfaceTest(BitcoinTestFramework):
         response_with_identity = await self._recv_response(rpc_sock)
         response_with_identity = GetMiningTemplateResponse.GetMiningTemplateResponse.GetRootAs(response_with_identity, 0)
         assert identity.hex() in response_with_identity.Coinbase1()
-
-        # GetMiningStatus: verify tip and basic status fields are coherent.
-        tiphash = node.getbestblockhash()
-        await self._send_request(rpc_sock, self._make_get_mining_status_request_fbs())
-        response = await self._recv_response(rpc_sock)
-        response = GetMiningStatusResponse.GetMiningStatusResponse.GetRootAs(response, 0)
-        assert_equal(bytes(response.TipHash().Hash().Data())[::-1].hex(), tiphash)
-        assert response.TipHeight() >= 0
-        assert response.MempoolTxCount() >= 0
-        assert response.NodeTime() > 0
-        assert response.TipChainWork() is not None
-        assert response.Network() is not None
 
     async def _recv_message(self, pub_sock, expected_msg_type, timeout=2):
         received_msg = await asyncio.wait_for(pub_sock.arecv_msg(), timeout=timeout)

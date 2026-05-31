@@ -13,7 +13,6 @@ Available RPC calls currently are:
  - `GetUndoSliceRequest` to get a slice of the block undo data
  - `GetMempoolRequest` to get the node's mempool
  - `GetMiningTemplateRequest` to fetch a native mining template optimized for external Stratum coordinators
- - `GetMiningStatusRequest` to fetch chain/mempool/high-level mining status fields
 
 The mining RPC additions are designed for external pooled-mining services and
 carry both consensus-level payloads (raw block/header bytes) and stratum-
@@ -77,6 +76,5 @@ nngpubmsg=miningwrkchg
 
 A Stratum coordinator typically subscribes to `miningwrkchg` and calls:
 - `GetMiningTemplateRequest` on startup and on each work-change event
-- `GetMiningStatusRequest` for operator health/state telemetry
 
 Solved blocks are submitted via the JSON-RPC `submitblock` endpoint instead.
