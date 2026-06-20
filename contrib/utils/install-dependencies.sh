@@ -95,9 +95,10 @@ BACKPORTS=(
   shellcheck
 )
 
-echo "deb http://deb.debian.org/debian buster-backports main" | tee -a /etc/apt/sources.list
+echo "deb http://archive.debian.org/debian buster-backports main" | tee -a /etc/apt/sources.list
+echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get -t buster-backports install -y $(join_by ' ' "${BACKPORTS[@]}")
+DEBIAN_FRONTEND=noninteractive apt-get -t buster-backports install -y -o Acquire::Check-Valid-Until=false $(join_by ' ' "${BACKPORTS[@]}")
 
 
 # Install llvm-8 and clang-10
