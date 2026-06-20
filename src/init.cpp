@@ -1350,8 +1350,8 @@ void SetupServerArgs(NodeContext &node) {
 
 std::string LicenseInfo() {
     const std::string URL_SOURCE_CODE =
-        "<https://github.com/LogosFoundation/lotusd>";
-    const std::string URL_WEBSITE = "<https://www.givelotus.org>";
+        "<https://github.com/LotusiaStewardship/lotusd>";
+    const std::string URL_WEBSITE = "<https://www.lotusia.org>";
 
     return CopyrightHolders(strprintf(_("Copyright (C) %i-%i").translated, 2009,
                                       COPYRIGHT_YEAR) +

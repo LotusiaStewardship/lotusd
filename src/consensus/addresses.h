@@ -146,15 +146,15 @@ Consensus::CoinbaseAddresses AddressSets = {
         {
             "lotus_16PSJJYp3YkVyctW8LRbp6UhbsrQMJghL3jjze3b7",
         },
-    .judges = 
+    .judges =
         {
             "lotus_16PSJMaps9sQg7aBQgyY1RdHb2fZYdmWhQPbgus75"
         },
-    .ruth = 
+    .ruth =
         {
             "lotus_16PSJPi88MtH34Ti3dZza4MFRF9XUVd3fKc6Ec3TV"
         },
-    .firstSamuel = 
+    .firstSamuel =
         {
             "lotus_16PSJKi4ucDByLHn3mTQaBijiNZmczAdALVDGS53V"
         },
@@ -168,9 +168,7 @@ Consensus::CoinbaseAddresses AddressSets = {
     .firstKings =
         {
             // faithful turtle
-            "lotus_16PSJQXrnTrUbhnxPpPgf1jd16JFkWk8TdbpALVME",
-            // hash turtle
-            "lotus_16PSJMAVPBd6g7rYz9d3fw8BbENqNaPdU6wSi7eC8"
+            "lotus_16PSJQXrnTrUbhnxPpPgf1jd16JFkWk8TdbpALVME"
         },
 };
 } // namespace RewardAddresses
