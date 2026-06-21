@@ -126,10 +126,12 @@ def main():
         sys.exit(1)
     g = sys.stdout
     indir = sys.argv[1]
+    g.write('#include "chainparams.h"\n')
+    g.write('\n')
     g.write('#ifndef BITCOIN_CHAINPARAMSSEEDS_H\n')
     g.write('#define BITCOIN_CHAINPARAMSSEEDS_H\n')
     g.write('/**\n')
-    g.write(' * List of fixed seed nodes for the bitcoin network\n')
+    g.write(' * List of fixed seed nodes for the Lotus network\n')
     g.write(' * @{} by contrib/seeds/generate-seeds.py\n'.format('generated'))
     g.write(' *\n')
     g.write(' * Each line contains a 16-byte IPv6 address and a port.\n')
@@ -141,7 +143,7 @@ def main():
     g.write('\n')
     with open(os.path.join(indir, 'nodes_test.txt'), 'r', encoding="utf8") as f:
         process_nodes(g, f, 'pnSeed6_test', 11605)
-    g.write('#endif // BITCOIN_CHAINPARAMSSEEDS_H\n')
+    g.write('#endif // BITCOIN_CHAINPARAMSSEEDS_H')
 
 
 if __name__ == '__main__':
