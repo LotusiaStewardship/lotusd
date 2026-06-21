@@ -66,7 +66,7 @@ struct Params {
     /** Unit time used for MTP activation of 2026-06-21T08:24:00.000Z protocol
      * upgrade */
     int firstKingsActivationTime;
-    /** Unit time used for MTP activation of 2026-12-21T15:03:00.000Z protocol
+    /** Unit time used for MTP activation of 2026-12-21T20:50:00.000Z protocol
      * upgrade */
     int secondKingsActivationTime;
 
