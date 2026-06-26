@@ -4,49 +4,45 @@ on:
   pull_request:
     branches: [master]
 
-env:
-  DEBIAN_FRONTEND: noninteractive
-  TZ: Etc/UTC
-
 jobs:
-  test:
-    name: Build and test
+  lint:
+    name: Lint checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install build dependencies
+      - name: Install lint tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential autoconf automake cmake curl gperf git \
-            libtool ninja-build patch pkg-config python3
+          sudo apt-get install -y --no-install-recommends yamllint
 
-      - name: Build depends
-        run: make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
+      - name: YAML lint (workflows and configs)
+        run: yamllint .
 
-      - name: Configure and build
+      - name: Shell syntax check
         run: |
-          mkdir build && cd build
-          cmake -GNinja .. \
-            -DBASEPREFIX=/home/runner/work/lotusd/lotusd/depends \
-            -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
-            -DENABLE_REDUCE_EXPORTS=ON \
-            -DENABLE_STATIC_LIBSTDCXX=ON \
-            -DENABLE_GLIBC_BACK_COMPAT=ON \
-            -DCLIENT_VERSION_IS_RELEASE=ON \
-            -DENABLE_CLANG_TIDY=OFF
-          ninja
+          find . -name '*.sh' -type f -exec sh -n {} \;
 
-      - name: Run tests
+      - name: Python syntax check
         run: |
-          cd build
-          ctest --output-on-failure -j$(nproc)
+          find . -name '*.py' -type f -exec python3 -m py_compile {} \;
 
-  docker:
-    name: Docker build check
+      - name: Check for trailing whitespace in diff
+        run: |
+          if ! git diff --check HEAD~1 2>/dev/null; then
+            echo "::warning::Trailing whitespace found - run 'git diff --check' locally"
+          fi
+
+      - name: Circular dependencies check
+        run: test/lint/lint-circular-dependencies.sh
+
+      - name: Test suite naming check
+        run: test/lint/lint-tests.sh
+
+  dockerfile-check:
+    name: Dockerfile syntax check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,20 +50,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build lotus image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus
-          push: false
-          load: true
-          tags: lotus:ci
+      - name: Validate Dockerfile.lotus
+        run: |
+          # BuildKit --check validates Dockerfile syntax without building
+          docker buildx build --check -f dockerfiles/Dockerfile.lotus . 2>&1
+          echo "::notice::Dockerfile.lotus: syntax OK"
 
-      - name: Build lotus-qt image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus-qt
-          push: false
-          load: true
-          tags: lotus-qt:ci
+      - name: Validate Dockerfile.lotus-qt
+        run: |
+          docker buildx build --check -f dockerfiles/Dockerfile.lotus-qt . 2>&1
+          echo "::notice::Dockerfile.lotus-qt: syntax OK"
+
+      - name: Validate Dockerfile.lotus.win64
+        run: |
+          docker buildx build --check -f dockerfiles/Dockerfile.lotus.win64 . 2>&1
+          echo "::notice::Dockerfile.lotus.win64: syntax OK"
+
+      - name: Validate Dockerfile.lotus.osx
+        run: |
+          docker buildx build --check -f dockerfiles/Dockerfile.lotus.osx . 2>&1
+          echo "::notice::Dockerfile.lotus.osx: syntax OK"

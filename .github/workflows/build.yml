@@ -14,11 +14,120 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-lotus:
-    name: Build lotus core
+  # ──────────────────────────────────────────────
+  # Linux core (x86_64, ARM, AArch64)
+  # ──────────────────────────────────────────────
+  build-linux:
+    name: Linux (${{ matrix.target.arch }})
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - arch: x86_64-linux-gnu
+            toolchain: Linux64.cmake
+            cross_pkgs: ""
+            extra_cmake: "-DBUILD_BITCOIN_QT=OFF -DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
+          - arch: arm-linux-gnueabihf
+            toolchain: LinuxARM.cmake
+            cross_pkgs: "g++-arm-linux-gnueabihf gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf"
+            extra_cmake: "-DBUILD_BITCOIN_QT=OFF -DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON -DSECP256K1_USE_ASM=OFF"
+          - arch: aarch64-linux-gnu
+            toolchain: LinuxAArch64.cmake
+            cross_pkgs: "g++-aarch64-linux-gnu gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu"
+            extra_cmake: "-DBUILD_BITCOIN_QT=OFF -DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: owner
+        name: Set repository owner (lowercase)
+        run: |
+          REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}
+          echo "REPO_OWNER_LC=$REPO_OWNER_LC" >> $GITHUB_OUTPUT
+          echo "REPO_OWNER_LC=$REPO_OWNER_LC" >> $GITHUB_ENV
+
+      - id: version
+        name: Extract version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ inputs.version }}
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build Docker image (${{ matrix.target.arch }})
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus
+          build-args: |
+            HOST_TARGET=${{ matrix.target.arch }}
+            TOOLCHAIN_FILE=${{ matrix.target.toolchain }}
+            CROSS_PACKAGES=${{ matrix.target.cross_pkgs }}
+            EXTRA_CMAKE_FLAGS=${{ matrix.target.extra_cmake }}
+          push: true
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-${{ matrix.target.arch }}:${{ steps.version.outputs.VERSION }}
+
+      - name: Extract binaries
+        run: |
+          mkdir -p artifacts/${{ matrix.target.arch }}
+          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-${{ matrix.target.arch }}:${{ steps.version.outputs.VERSION }})
+          docker cp $container_id:/opt/lotus/bin/. artifacts/${{ matrix.target.arch }}/
+          docker cp $container_id:/opt/lotus/debug/. artifacts/${{ matrix.target.arch }}/ 2>/dev/null || true
+          docker rm $container_id
+
+      - name: Package binaries
+        run: |
+          cd artifacts/${{ matrix.target.arch }}
+          tar -czvf ../../lotus-$VERSION-${{ matrix.target.arch }}.tar.gz \
+            lotusd lotus-cli lotus-tx lotus-wallet lotus-seeder
+
+      - name: Package debug symbols
+        run: |
+          cd artifacts/${{ matrix.target.arch }}
+          if ls *.dbg 2>/dev/null; then
+            tar -czvf ../../lotus-$VERSION-${{ matrix.target.arch }}-debug.tar.gz *.dbg
+          fi
+
+      - name: Upload artifact (binaries)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-${{ matrix.target.arch }}
+          path: lotus-$VERSION-${{ matrix.target.arch }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload artifact (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-${{ matrix.target.arch }}-debug
+          path: lotus-$VERSION-${{ matrix.target.arch }}-debug.tar.gz
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────
+  # Windows (x86_64)
+  # ──────────────────────────────────────────────
+  build-win64:
+    name: Windows (x86_64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       packages: write
 
     steps:
@@ -52,17 +161,171 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-      - name: Build and push lotus Docker image
+      - name: Build Windows Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: dockerfiles/Dockerfile.lotus
+          file: dockerfiles/Dockerfile.lotus.win64
           push: true
           tags: |
-            ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus:${{ steps.version.outputs.VERSION }}
-            ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus:latest
+            ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-win64:${{ steps.version.outputs.VERSION }}
 
-      - name: Build and push lotus-qt Docker image
+      - name: Extract Windows binaries and installer
+        run: |
+          mkdir -p artifacts/win64
+          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-win64:${{ steps.version.outputs.VERSION }})
+          docker cp $container_id:/opt/lotus/bin/. artifacts/win64/
+          docker cp $container_id:/opt/lotus/debug/. artifacts/win64/ 2>/dev/null || true
+          # Extract NSIS installer and rename to gitian-convention name
+          docker cp $container_id:/opt/lotus/lotus-*.exe artifacts/win64/ 2>/dev/null || true
+          for f in artifacts/win64/lotus-*.exe; do
+            if [ -f "$f" ] && [ "$(basename "$f")" != "lotus-qt.exe" ]; then
+              mv "$f" "artifacts/win64/lotus-$VERSION-win64-setup-unsigned.exe"
+            fi
+          done
+          docker rm $container_id
+
+      - name: Package Windows binaries (zip)
+        run: |
+          cd artifacts/win64
+          zip ../../lotus-$VERSION-x86_64-w64-mingw32.zip \
+            lotusd.exe lotus-cli.exe lotus-tx.exe lotus-wallet.exe lotus-qt.exe 2>/dev/null || \
+          zip ../../lotus-$VERSION-x86_64-w64-mingw32.zip \
+            lotusd.exe lotus-cli.exe lotus-tx.exe lotus-wallet.exe
+
+      - name: Package Windows debug symbols (zip)
+        run: |
+          cd artifacts/win64
+          if ls *.dbg 2>/dev/null; then
+            zip ../../lotus-$VERSION-x86_64-w64-mingw32-debug.zip *.dbg
+          fi
+
+      - name: Upload artifact (binaries)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-win64
+          path: |
+            lotus-$VERSION-x86_64-w64-mingw32.zip
+            lotus-$VERSION-x86_64-w64-mingw32-debug.zip
+            lotus-$VERSION-win64-setup-unsigned.exe
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────
+  # macOS (x86_64)
+  # ──────────────────────────────────────────────
+  build-osx:
+    name: macOS (x86_64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: owner
+        name: Set repository owner (lowercase)
+        run: |
+          REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}
+          echo "REPO_OWNER_LC=$REPO_OWNER_LC" >> $GITHUB_OUTPUT
+          echo "REPO_OWNER_LC=$REPO_OWNER_LC" >> $GITHUB_ENV
+
+      - id: version
+        name: Extract version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ inputs.version }}
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build macOS Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.lotus.osx
+          push: true
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-osx:${{ steps.version.outputs.VERSION }}
+
+      - name: Extract macOS binaries and disk image
+        run: |
+          mkdir -p artifacts/osx
+          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-osx:${{ steps.version.outputs.VERSION }})
+          docker cp $container_id:/opt/lotus/bin/. artifacts/osx/
+          docker cp $container_id:/opt/lotus/lotus-unsigned.dmg artifacts/osx/ 2>/dev/null && \
+            mv artifacts/osx/lotus-unsigned.dmg artifacts/osx/lotus-$VERSION-osx-unsigned.dmg || true
+          docker rm $container_id
+
+      - name: Package macOS binaries
+        run: |
+          cd artifacts/osx
+          tar -czvf ../../lotus-$VERSION-x86_64-apple-darwin16.tar.gz \
+            lotusd lotus-cli lotus-tx lotus-wallet
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-osx
+          path: |
+            lotus-$VERSION-x86_64-apple-darwin16.tar.gz
+            lotus-$VERSION-osx-unsigned.dmg
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────
+  # Qt GUI (Linux x86_64)
+  # ──────────────────────────────────────────────
+  build-qt:
+    name: Qt GUI (Linux x86_64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: owner
+        name: Set repository owner (lowercase)
+        run: |
+          REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}
+          echo "REPO_OWNER_LC=$REPO_OWNER_LC" >> $GITHUB_OUTPUT
+          echo "REPO_OWNER_LC=$REPO_OWNER_LC" >> $GITHUB_ENV
+
+      - id: version
+        name: Extract version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ inputs.version }}
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build lotus-qt Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -72,31 +335,79 @@ jobs:
             ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-qt:${{ steps.version.outputs.VERSION }}
             ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-qt:latest
 
-      - name: Create artifacts directory
-        run: mkdir -p artifacts
-
-      - name: Extract lotus core binaries
-        run: |
-          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus:${{ steps.version.outputs.VERSION }})
-          docker cp $container_id:/opt/lotus/bin/. artifacts/
-          docker rm $container_id
-
       - name: Extract lotus-qt binary
         run: |
+          mkdir -p artifacts/qt
           container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-qt:${{ steps.version.outputs.VERSION }})
-          docker cp $container_id:/opt/lotus/bin/lotus-qt artifacts/
+          docker cp $container_id:/opt/lotus/bin/lotus-qt artifacts/qt/
           docker rm $container_id
-
-      - name: Package lotus core
-        run: |
-          cd artifacts
-          tar -czvf ../lotus-$VERSION-linux-x86_64.tar.gz \
-            lotusd lotus-cli lotus-tx lotus-wallet lotus-seeder
 
       - name: Package lotus-qt
         run: |
-          cd artifacts
-          tar -czvf ../lotus-qt-$VERSION-linux-x86_64.tar.gz lotus-qt
+          cd artifacts/qt
+          tar -czvf ../../lotus-qt-$VERSION-x86_64-linux-gnu.tar.gz lotus-qt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-qt
+          path: lotus-qt-$VERSION-x86_64-linux-gnu.tar.gz
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────
+  # Release — collects all artifacts and publishes
+  # ──────────────────────────────────────────────
+  release:
+    name: Create release
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux
+      - build-win64
+      - build-osx
+      - build-qt
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: version
+        name: Extract version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ inputs.version }}
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - id: owner
+        name: Set repository owner (lowercase)
+        run: |
+          REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}
+          echo "REPO_OWNER_LC=$REPO_OWNER_LC" >> $GITHUB_ENV
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la release-artifacts/
+
+      - name: Create source tarball
+        run: |
+          git archive --prefix=lotus-$VERSION/ -o release-artifacts/lotus-$VERSION.tar.gz HEAD
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd release-artifacts
+          sha256sum * > ../SHA256SUMS
 
       - name: Generate release notes
         run: |
@@ -107,7 +418,7 @@ jobs:
             changelog=$(git log --pretty=format:"- %s" ${prev_tag}..HEAD)
           fi
 
-          cat > release_notes.md <<-EOF
+          cat > release_notes.md <<EOF
           ## Lotus v$VERSION
 
           This release brings the latest improvements to the Lotus daemon, command-line tools,
@@ -117,15 +428,41 @@ jobs:
           ${changelog}
 
           ### Docker Images
-          - \`ghcr.io/$REPO_OWNER_LC/lotus:$VERSION\` — lotus daemon and CLI tools (lotusd, lotus-cli, lotus-tx, lotus-wallet, lotus-seeder)
-          - \`ghcr.io/$REPO_OWNER_LC/lotus-qt:$VERSION\` — desktop GUI wallet
+          - \`ghcr.io/$REPO_OWNER_LC/lotus-x86_64-linux-gnu:$VERSION\` — Linux x86_64 daemon and CLI tools
+          - \`ghcr.io/$REPO_OWNER_LC/lotus-arm-linux-gnueabihf:$VERSION\` — Linux ARM daemon and CLI tools
+          - \`ghcr.io/$REPO_OWNER_LC/lotus-aarch64-linux-gnu:$VERSION\` — Linux AArch64 daemon and CLI tools
+          - \`ghcr.io/$REPO_OWNER_LC/lotus-win64:$VERSION\` — Windows daemon and CLI tools
+          - \`ghcr.io/$REPO_OWNER_LC/lotus-osx:$VERSION\` — macOS daemon and CLI tools
+          - \`ghcr.io/$REPO_OWNER_LC/lotus-qt:$VERSION\` — Linux desktop GUI wallet
 
           ### Binary Packages
-          - \`lotus-$VERSION-linux-x86_64.tar.gz\` — core binaries
-          - \`lotus-qt-$VERSION-linux-x86_64.tar.gz\` — desktop GUI wallet
+
+          **Linux:**
+          - \`lotus-$VERSION-x86_64-linux-gnu.tar.gz\` — x86_64 core binaries
+          - \`lotus-$VERSION-x86_64-linux-gnu-debug.tar.gz\` — x86_64 debug symbols
+          - \`lotus-$VERSION-arm-linux-gnueabihf.tar.gz\` — ARM core binaries
+          - \`lotus-$VERSION-arm-linux-gnueabihf-debug.tar.gz\` — ARM debug symbols
+          - \`lotus-$VERSION-aarch64-linux-gnu.tar.gz\` — AArch64 core binaries
+          - \`lotus-$VERSION-aarch64-linux-gnu-debug.tar.gz\` — AArch64 debug symbols
+          - \`lotus-qt-$VERSION-x86_64-linux-gnu.tar.gz\` — Linux desktop GUI wallet
+
+          **Windows:**
+          - \`lotus-$VERSION-win64-setup-unsigned.exe\` — x86_64 Windows NSIS installer (includes lotus-qt)
+          - \`lotus-$VERSION-x86_64-w64-mingw32.zip\` — x86_64 Windows binaries
+          - \`lotus-$VERSION-x86_64-w64-mingw32-debug.zip\` — x86_64 Windows debug symbols
+
+          **macOS:**
+          - \`lotus-$VERSION-osx-unsigned.dmg\` — x86_64 macOS disk image (unsigned)
+          - \`lotus-$VERSION-x86_64-apple-darwin16.tar.gz\` — x86_64 macOS binaries
+
+          **Source:**
+          - \`lotus-$VERSION.tar.gz\` — source code
+
+          ### Verifying
+          Checksums are available in \`SHA256SUMS\` attached to this release.
 
           ### Installing
-          Pull the Docker image, or download the tarball for your platform, extract it, and run \`./lotusd\`.
+          Pull the Docker image for your platform, or download the tarball, extract it, and run \`./lotusd\`.
           See the [repository README](https://github.com/${{ github.repository }}) for detailed instructions.
           EOF
 
@@ -136,7 +473,8 @@ jobs:
           name: Lotus v${{ steps.version.outputs.VERSION }}
           body_path: release_notes.md
           files: |
-            lotus-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz
-            lotus-qt-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz
+            release-artifacts/*
+            SHA256SUMS
           draft: ${{ github.event_name == 'workflow_dispatch' }}
           generate_release_notes: false
+          fail_on_unmatched_files: true
