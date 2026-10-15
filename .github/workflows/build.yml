@@ -359,6 +359,52 @@ jobs:
           if-no-files-found: error
 
   # ──────────────────────────────────────────────
+  # Functional tests (Linux x86_64) — gates release
+  # ──────────────────────────────────────────────
+  test:
+    name: Functional tests (Linux x86_64)
+    runs-on: ubuntu-latest
+    needs: [build-linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux x86_64 binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: lotus-x86_64-linux-gnu
+          path: binaries
+
+      - name: Extract and prepare binaries
+        run: |
+          tar -xzf binaries/lotus-*-x86_64-linux-gnu.tar.gz -C binaries
+          chmod +x binaries/lotusd binaries/lotus-cli binaries/lotus-tx binaries/lotus-wallet 2>/dev/null || true
+          ls -la binaries
+
+      - name: Write test config
+        run: |
+          cat > test/config.ini <<EOF
+          [environment]
+          PACKAGE_NAME=Lotus
+          SRCDIR=$PWD
+          BUILDDIR=$PWD/binaries
+          EXEEXT=
+          RPCAUTH=$PWD/share/rpcauth/rpcauth.py
+          EMULATOR=
+
+          [components]
+          ENABLE_WALLET=ON
+          ENABLE_WALLET_TOOL=ON
+          ENABLE_CLI=ON
+          ENABLE_BITCOIND=ON
+          ENABLE_FUZZ=OFF
+          ENABLE_ZMQ=OFF
+          ENABLE_NNG=OFF
+          EOF
+
+      - name: Run functional tests
+        run: python3 test/functional/test_runner.py --jobs="$(nproc)"
+
+  # ──────────────────────────────────────────────
   # Release — collects all artifacts and publishes
   # ──────────────────────────────────────────────
   release:
@@ -369,6 +415,7 @@ jobs:
       - build-win64
       - build-osx
       - build-qt
+      - test
     permissions:
       contents: write
       packages: read
