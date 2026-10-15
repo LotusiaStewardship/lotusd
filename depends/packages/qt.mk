@@ -133,11 +133,16 @@ $(package)_config_opts_mingw32 += -device-option CROSS_COMPILE="$(host)-"
 
 # Qt links its openssl tests from the OPENSSL_LIBS environment variable
 # (src/network/configure.pri); without it the -openssl-linked pre-condition fails and
-# configure aborts. The mingw entries are OpenSSL's own mingw64 ex_libs, from
-# Configurations/10-main.conf in the openssl 1.1.1 source.
-$(package)_config_env_linux = OPENSSL_LIBS='-L$(host_prefix)/lib -lssl -lcrypto'
-$(package)_config_env_mingw32 = OPENSSL_LIBS='-L$(host_prefix)/lib -lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32'
-$(package)_config_env_darwin = OPENSSL_LIBS='-L$(host_prefix)/lib -lssl -lcrypto'
+# configure aborts. It has to be exported inside _config_cmds rather than declared through
+# _config_env: depends prefixes _config_env to the first command of the recipe, and this
+# recipe's _config_cmds is a chain that starts with "export ... &&", so a prefix would only
+# apply to that export and never reach ./configure. The mingw entries are OpenSSL's own
+# mingw64 ex_libs, from Configurations/10-main.conf in the openssl 1.1.1 source.
+ifeq ($(host_os),mingw32)
+$(package)_openssl_libs = -L$(host_prefix)/lib -lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32
+else
+$(package)_openssl_libs = -L$(host_prefix)/lib -lssl -lcrypto
+endif
 $(package)_build_env  = QT_RCC_TEST=1
 $(package)_build_env += QT_RCC_SOURCE_DATE_OVERRIDE=1
 endef
@@ -204,6 +209,7 @@ define $(package)_config_cmds
   export PKG_CONFIG_SYSROOT_DIR=/ && \
   export PKG_CONFIG_LIBDIR=$(host_prefix)/lib/pkgconfig && \
   export PKG_CONFIG_PATH=$(host_prefix)/share/pkgconfig  && \
+  export OPENSSL_LIBS="$($(package)_openssl_libs)" && \
   ./configure $($(package)_config_opts) && \
   echo "host_build: QT_CONFIG ~= s/system-zlib/zlib" >> mkspecs/qconfig.pri && \
   echo "CONFIG += force_bootstrap" >> mkspecs/qconfig.pri && \

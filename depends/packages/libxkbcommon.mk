@@ -10,8 +10,12 @@ $(package)_dependencies=libxcb
 # when xcb-xkb is found, which is why libxcb keeps --enable-xkb). Built static
 # because contrib/devtools/symbol-check.py does not allow libxkbcommon.so in
 # lotus-qt's NEEDED entries.
+# --disable-maintainer-mode is required: the tarball's configure.ac enables maintainer
+# mode, and only with it off does automake's am__skipyacc guard ("test -f $@ ||") skip the
+# YACC rule. Leaving it on makes every build regenerate the shipped src/xkbcomp/parser.c
+# and fail with "yacc: command not found" (Error 127) because the image has no bison.
 define $(package)_set_vars
-$(package)_config_opts=--disable-shared --with-pic --disable-docs
+$(package)_config_opts=--disable-shared --with-pic --disable-docs --disable-maintainer-mode
 $(package)_config_opts+= --disable-dependency-tracking --enable-option-checking
 # libxkbcommon enables -Werror=array-bounds, which fails to build on GCC 12+.
 $(package)_cflags+=-Wno-error=array-bounds
