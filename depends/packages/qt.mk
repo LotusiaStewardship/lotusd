@@ -143,6 +143,18 @@ $(package)_openssl_libs = -L$(host_prefix)/lib -lssl -lcrypto -lws2_32 -lgdi32 -
 else
 $(package)_openssl_libs = -L$(host_prefix)/lib -lssl -lcrypto
 endif
+
+# mkspecs/features/mac/sdk.mk is included in every generated Makefile for app templates and
+# shells out to /usr/bin/xcrun to resolve the SDK version, aborting when that returns nothing
+# -- always the case when cross-compiling from Linux. Qt skips the check when this variable is
+# in the environment. It is exported at the start of each chained command instead of coming
+# through _config_env/_build_env, because depends prefixes those to the first command of a
+# recipe only, and every recipe here chains several makes.
+ifeq ($(host_os),darwin)
+$(package)_mac_sdk_env = export QT_MAC_SDK_NO_VERSION_CHECK=1;
+else
+$(package)_mac_sdk_env =
+endif
 $(package)_build_env  = QT_RCC_TEST=1
 $(package)_build_env += QT_RCC_SOURCE_DATE_OVERRIDE=1
 endef
@@ -206,7 +218,7 @@ define $(package)_preprocess_cmds
 endef
 
 define $(package)_config_cmds
-  export PKG_CONFIG_SYSROOT_DIR=/ && \
+  $($(package)_mac_sdk_env) export PKG_CONFIG_SYSROOT_DIR=/ && \
   export PKG_CONFIG_LIBDIR=$(host_prefix)/lib/pkgconfig && \
   export PKG_CONFIG_PATH=$(host_prefix)/share/pkgconfig  && \
   export OPENSSL_LIBS="$($(package)_openssl_libs)" && \
@@ -223,7 +235,7 @@ define $(package)_config_cmds
 endef
 
 define $(package)_build_cmds
-  $(MAKE) -j$(JOBS) && \
+  $($(package)_mac_sdk_env) $(MAKE) -j$(JOBS) && \
   $(MAKE) -j$(JOBS) -C ../qttools/src/linguist/lconvert && \
   $(MAKE) -j$(JOBS) -C ../qttools/src/linguist/lrelease && \
   $(MAKE) -j$(JOBS) -C ../qttools/src/linguist/lupdate && \
@@ -231,7 +243,7 @@ define $(package)_build_cmds
 endef
 
 define $(package)_stage_cmds
-  $(MAKE) INSTALL_ROOT=$($(package)_staging_dir) install && cd .. && \
+  $($(package)_mac_sdk_env) $(MAKE) INSTALL_ROOT=$($(package)_staging_dir) install && cd .. && \
   $(MAKE) -C qttools/src/linguist/lconvert INSTALL_ROOT=$($(package)_staging_dir) install && \
   $(MAKE) -C qttools/src/linguist/lrelease INSTALL_ROOT=$($(package)_staging_dir) install && \
   $(MAKE) -C qttools/src/linguist/lupdate INSTALL_ROOT=$($(package)_staging_dir) install && \
