@@ -1,11 +1,11 @@
 PACKAGE=qt
-$(package)_version=5.15.2
+$(package)_version=5.15.19
 $(package)_download_path=https://download.qt.io/archive/qt/5.15/$($(package)_version)/submodules
-$(package)_suffix=everywhere-src-$($(package)_version).tar.xz
+$(package)_suffix=everywhere-opensource-src-$($(package)_version).tar.xz
 $(package)_file_name=qtbase-$($(package)_suffix)
-$(package)_sha256_hash=909fad2591ee367993a75d7e2ea50ad4db332f05e1c38dd7a5a274e156a4e0f8
+$(package)_sha256_hash=51e91c73abacab81e64efd01bf95794e79c0e605ad80947a024769f0dd620a32
 $(package)_dependencies=openssl zlib
-$(package)_linux_dependencies=freetype fontconfig libxcb
+$(package)_linux_dependencies=freetype fontconfig libxcb libxkbcommon libxcb_util libxcb_util_image libxcb_util_keysyms libxcb_util_render libxcb_util_wm
 $(package)_build_subdir=qtbase
 $(package)_qt_libs=corelib network widgets gui plugins testlib
 $(package)_patches=mac-qmake.conf no-xlib.patch dont_hardcode_pwd.patch
@@ -14,10 +14,10 @@ $(package)_patches+= drop_lrelease_dependency.patch
 
 # Update OSX_QT_TRANSLATIONS when this is updated
 $(package)_qttranslations_file_name=qttranslations-$($(package)_suffix)
-$(package)_qttranslations_sha256_hash=d5788e86257b21d5323f1efd94376a213e091d1e5e03b45a95dd052b5f570db8
+$(package)_qttranslations_sha256_hash=967e0d259af13f47e853f183cffc9671cc054380188fee28402f6425132a2c7b
 
 $(package)_qttools_file_name=qttools-$($(package)_suffix)
-$(package)_qttools_sha256_hash=c189d0ce1ff7c739db9a3ace52ac3e24cb8fd6dbf234e49f075249b38f43c1cc
+$(package)_qttools_sha256_hash=2694af886130d63b8a42bcd138f4035fd8108273ebd16781f87300da352f1aa6
 
 $(package)_extra_sources  = $($(package)_qttranslations_file_name)
 $(package)_extra_sources += $($(package)_qttools_file_name)
@@ -117,8 +117,7 @@ $(package)_config_opts_darwin += -device-option MAC_MIN_VERSION=$(OSX_MIN_VERSIO
 $(package)_config_opts_darwin += -device-option MAC_TARGET=$(host)
 endif
 
-$(package)_config_opts_linux  = -qt-xkbcommon-x11
-$(package)_config_opts_linux += -qt-xcb
+$(package)_config_opts_linux  = -xcb
 $(package)_config_opts_linux += -no-xcb-xlib
 $(package)_config_opts_linux += -no-feature-xlib
 $(package)_config_opts_linux += -system-freetype
@@ -131,6 +130,14 @@ $(package)_config_opts_aarch64_linux = -xplatform linux-aarch64-gnu-g++
 $(package)_config_opts_mingw32 = -no-dbus
 $(package)_config_opts_mingw32 += -xplatform win32-g++
 $(package)_config_opts_mingw32 += -device-option CROSS_COMPILE="$(host)-"
+
+# Qt links its openssl tests from the OPENSSL_LIBS environment variable
+# (src/network/configure.pri); without it the -openssl-linked pre-condition fails and
+# configure aborts. The mingw entries are OpenSSL's own mingw64 ex_libs, from
+# Configurations/10-main.conf in the openssl 1.1.1 source.
+$(package)_config_env_linux = OPENSSL_LIBS='-L$(host_prefix)/lib -lssl -lcrypto'
+$(package)_config_env_mingw32 = OPENSSL_LIBS='-L$(host_prefix)/lib -lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32'
+$(package)_config_env_darwin = OPENSSL_LIBS='-L$(host_prefix)/lib -lssl -lcrypto'
 $(package)_build_env  = QT_RCC_TEST=1
 $(package)_build_env += QT_RCC_SOURCE_DATE_OVERRIDE=1
 endef
@@ -155,11 +162,19 @@ define $(package)_extract_cmds
   tar --no-same-owner --strip-components=1 -xf $($(package)_source_dir)/$($(package)_qttools_file_name) -C qttools
 endef
 
-# Qt 5.15.2's qfloat16.h/qendian.h use std::numeric_limits without including <limits>, which GCC 13
-# no longer pulls in transitively. The unguarded -include limits echo below is deliberate and must
-# stay separate from the !host_build: trio: configure() extracts the qmake bootstrap's compiler flags
-# from this mkspec with awk /^[_A-Z0-9.]+[ \t]*\+?=/ (qtbase/configure:168), which never matches a
-# !host_build:-prefixed line, so a guarded flag does not reach the bootstrap build that fails first.
+# Qt uses std::numeric_limits without including <limits> in a number of headers and sources
+# (5.15.19 fixed qfloat16.h/qendian.h/qbytearraymatcher.h, which is what broke the qmake
+# bootstrap, but several dozen more remain), and GCC 13 no longer pulls <limits> in
+# transitively. The unguarded -include limits echo below is deliberate and must stay separate
+# from the !host_build: trio: configure() extracts the qmake bootstrap's compiler flags from
+# this mkspec with awk /^[_A-Z0-9.]+[ \t]*\+?=/ (qtbase/configure:168), which never matches a
+# !host_build:-prefixed line, so a guarded flag does not reach the bootstrap build that fails
+# first.
+#
+# The two clang.conf seds at the end of _preprocess_cmds hand the macOS cross build the depends
+# toolchain: 5.15 spells those lines "QMAKE_CC = $${CROSS_COMPILE}clang", which resolves to
+# <triple>-clang++ -- a compiler that does not exist in the container -- so they are matched
+# structurally rather than by their exact text, which changed between 5.9 and 5.15.
 define $(package)_preprocess_cmds
   sed -i.old "s|updateqm.commands = \$$$$\$$$$LRELEASE|updateqm.commands = $($(package)_extract_dir)/qttools/bin/lrelease|" qttranslations/translations/translations.pro && \
   patch -p1 -i $($(package)_patch_dir)/drop_lrelease_dependency.patch && \
@@ -181,8 +196,8 @@ define $(package)_preprocess_cmds
   sed -i.old "s|QMAKE_CFLAGS            += |!host_build: QMAKE_CFLAGS            = $($(package)_cflags) $($(package)_cppflags) |" qtbase/mkspecs/win32-g++/qmake.conf && \
   sed -i.old "s|QMAKE_CXXFLAGS          += |!host_build: QMAKE_CXXFLAGS            = $($(package)_cxxflags) $($(package)_cppflags) |" qtbase/mkspecs/win32-g++/qmake.conf && \
   sed -i.old "0,/^QMAKE_LFLAGS_/s|^QMAKE_LFLAGS_|!host_build: QMAKE_LFLAGS            = $($(package)_ldflags)\n&|" qtbase/mkspecs/win32-g++/qmake.conf && \
-  sed -i.old "s|QMAKE_CC                = clang|QMAKE_CC                = $($(package)_cc)|" qtbase/mkspecs/common/clang.conf && \
-  sed -i.old "s|QMAKE_CXX               = clang++|QMAKE_CXX               = $($(package)_cxx)|" qtbase/mkspecs/common/clang.conf
+  sed -i.old "s|^QMAKE_CC .*=.*|QMAKE_CC = $($(package)_cc)|" qtbase/mkspecs/common/clang.conf && \
+  sed -i.old "s|^QMAKE_CXX .*=.*|QMAKE_CXX = $($(package)_cxx)|" qtbase/mkspecs/common/clang.conf
 endef
 
 define $(package)_config_cmds
