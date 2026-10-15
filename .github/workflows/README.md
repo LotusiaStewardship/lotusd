@@ -1,64 +1,51 @@
 # Lotus CI Workflow System
 
-This directory contains the GitHub Actions workflows for the Lotus project. The CI system has been designed to be modular, maintainable, and efficient.
+Two GitHub Actions workflows handle CI for Lotus: `ci.yml` validates pull
+requests, and `build.yml` builds and releases tagged versions.
 
-## Workflow Structure
+## `ci.yml` — pull-request validation
 
-The CI system is organized into the following workflows:
+Triggers on `pull_request` against `master`. It **does not build** any binaries;
+it only lints.
 
-### Main Orchestrator
+Two jobs:
 
-- **[lotus-main-ci.yml](./lotus-main-ci.yml)**: The main entry point that orchestrates all other workflows. This workflow triggers when code is pushed to main branches or when pull requests are created.
+- **`lint`** — runs the project's linters, scoped to the files changed in the PR
+  (diff against the PR base, not the whole tree):
+  - YAML lint (`yamllint`)
+  - shell syntax (`sh -n`)
+  - Python syntax (`py_compile`) and `%`-formatter lint (`lint-python-format.py`)
+  - C++ format-string lint (`lint-format-strings.py`)
+  - trailing-whitespace check on the PR diff
+  - two project-wide invariants: circular-dependency check and test-suite naming
+    check (`test/lint/`)
 
-### Version Management
+- **`dockerfile-check`** — validates the syntax of all four Dockerfiles
+  (`docker buildx build --check`) without building.
 
-- **[lotus-version-management.yml](./lotus-version-management.yml)**: Handles version checking and automatic version bumping based on the number of commits since the last tag.
-- **[lotus-version-revert.yml](./lotus-version-revert.yml)**: Reverts version bumps if any of the build jobs fail.
+## `build.yml` — tag-driven build and release
 
-### Build Workflows
+Triggers on a pushed tag matching `v*.*.*`, or manually via
+`workflow_dispatch` (with a `version` input). Five jobs:
 
-These workflows handle building different components of the Lotus project:
+| Job | Platform | Artifacts |
+|---|---|---|
+| `build-linux` | x86_64 / arm / aarch64 (matrix) | core binaries + debug symbols |
+| `build-win64` | Windows x86_64 | binaries, NSIS installer, debug symbols |
+| `build-osx` | macOS x86_64 | binaries, unsigned `.dmg` |
+| `build-qt` | Linux x86_64 GUI | `lotus-qt` |
+| `release` | — | aggregates all artifacts, generates `SHA256SUMS` + source tarball, publishes the release |
 
-- **[lotus-core-build.yml](./lotus-core-build.yml)**: Builds the core components (lotusd, lotus-cli, lotus-tx).
-- **[lotus-tools-build.yml](./lotus-tools-build.yml)**: Builds utility tools (lotus-seeder, lotus-wallet).
-- **[lotus-gui-build.yml](./lotus-gui-build.yml)**: Builds the GUI wallet (lotus-qt).
-- **[lotus-miner-build.yml](./lotus-miner-build.yml)**: Builds the GPU miner component.
+Each build job cross-compiles inside a Docker container via the corresponding
+`dockerfiles/Dockerfile.lotus*`, extracts the binaries, and packages them.
 
-### Release Management
+### Publishing behaviour
 
-- **[lotus-release.yml](./lotus-release.yml)**: Packages all artifacts, creates GitHub releases, and generates release notes.
+- **Tag push** (`v*.*.*`): images are pushed to `ghcr.io`, and the release job
+  **publishes** the GitHub release.
+- **Manual `workflow_dispatch`**: images are built and loaded locally (`load`),
+  **not pushed to `ghcr.io`**, and the release is created as a **draft** only.
+  Manual runs publish nothing — they exist to smoke-test the pipeline.
 
-## Workflow Dependencies
-
-```
-lotus-main-ci.yml
-  ├── lotus-version-management.yml
-  ├── lotus-core-build.yml
-  ├── lotus-tools-build.yml
-  ├── lotus-gui-build.yml
-  ├── lotus-miner-build.yml
-  ├── lotus-version-revert.yml (conditional)
-  └── lotus-release.yml
-```
-
-## How It Works
-
-1. When code is pushed to master, the main workflow first checks the current version and may bump it.
-2. Build workflows run in parallel to build all components.
-3. If any builds fail after a version bump, the version is automatically reverted.
-4. If all builds succeed, artifacts are packaged and a GitHub release is created.
-
-## Benefits of This Structure
-
-- **Modularity**: Each workflow focuses on a specific task, making them easier to understand and maintain.
-- **Parallelism**: The build workflows run in parallel, reducing the overall build time.
-- **Error Handling**: The system has robust error handling, including automatic version reversion if builds fail.
-- **Clean Outputs**: Each workflow produces clean, well-defined artifacts.
-
-## Contributing
-
-When making changes to the CI system:
-
-1. Test your changes on a branch before merging to master.
-2. Keep workflows focused on specific tasks.
-3. Document any new workflows or significant changes in this README. 
+See `RELEASE.md` at the repository root for the `make release` flow that drives
+this via tag pushes.
