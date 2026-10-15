@@ -18,21 +18,63 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends yamllint
 
-      - name: YAML lint (workflows and configs)
-        run: yamllint .
-
-      - name: Shell syntax check
+      - name: Determine changed files
+        id: changed
         run: |
-          find . -name '*.sh' -type f -exec sh -n {} \;
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA="$(git merge-base HEAD origin/master)"
+          fi
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          git diff --name-only --diff-filter=ACMR "$BASE_SHA" HEAD > changed_files.txt
+          echo "=== Changed files ==="
+          cat changed_files.txt
 
-      - name: Python syntax check
+      - name: YAML lint (changed files only)
         run: |
-          find . -name '*.py' -type f -exec python3 -m py_compile {} \;
+          mapfile -t files < <(grep -E '\.(ya?ml)$' changed_files.txt || true)
+          if [ ${#files[@]} -gt 0 ]; then
+            yamllint "${files[@]}"
+          else
+            echo "No YAML files changed"
+          fi
+
+      - name: Shell syntax check (changed files only)
+        run: |
+          mapfile -t files < <(grep -E '\.sh$' changed_files.txt || true)
+          for f in "${files[@]}"; do
+            sh -n "$f"
+          done
+          echo "Checked ${#files[@]} shell file(s)"
+
+      - name: Python syntax check (changed files only)
+        run: |
+          mapfile -t files < <(grep -E '\.py$' changed_files.txt || true)
+          for f in "${files[@]}"; do
+            python3 -m py_compile "$f"
+          done
+          echo "Checked ${#files[@]} python file(s)"
+
+      - name: C++ format-string lint (changed files only)
+        run: |
+          mapfile -t files < <(grep -E '\.(cpp|cc|c|h|hpp)$' changed_files.txt | grep -vE '^src/(leveldb|secp256k1|univalue)/' || true)
+          if [ ${#files[@]} -gt 0 ]; then
+            test/lint/lint-format-strings.py "${files[@]}"
+          else
+            echo "No C++ files changed"
+          fi
+
+      - name: Python %-format lint (changed files only)
+        run: |
+          mapfile -t files < <(grep -E '\.py$' changed_files.txt || true)
+          for f in "${files[@]}"; do
+            test/lint/lint-python-format.py "$f"
+          done
 
       - name: Check for trailing whitespace in diff
         run: |
-          if ! git diff --check HEAD~1 2>/dev/null; then
-            echo "::warning::Trailing whitespace found - run 'git diff --check' locally"
+          if ! git diff --check "${{ steps.changed.outputs.base_sha }}" HEAD; then
+            echo "::warning::Trailing whitespace found in diff - run 'git diff --check' locally"
           fi
 
       - name: Circular dependencies check
