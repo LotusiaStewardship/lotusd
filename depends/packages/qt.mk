@@ -156,6 +156,11 @@ define $(package)_extract_cmds
   tar --no-same-owner --strip-components=1 -xf $($(package)_source_dir)/$($(package)_qttools_file_name) -C qttools
 endef
 
+# Qt 5.15.2's qfloat16.h/qendian.h use std::numeric_limits without including <limits>, which GCC 13
+# no longer pulls in transitively. The unguarded -include limits echo below is deliberate and must
+# stay separate from the !host_build: trio: configure() extracts the qmake bootstrap's compiler flags
+# from this mkspec with awk /^[_A-Z0-9.]+[ \t]*\+?=/ (qtbase/configure:168), which never matches a
+# !host_build:-prefixed line, so a guarded flag does not reach the bootstrap build that fails first.
 define $(package)_preprocess_cmds
   sed -i.old "s|updateqm.commands = \$$$$\$$$$LRELEASE|updateqm.commands = $($(package)_extract_dir)/qttools/bin/lrelease|" qttranslations/translations/translations.pro && \
   patch -p1 -i $($(package)_patch_dir)/drop_lrelease_dependency.patch && \
@@ -169,6 +174,7 @@ define $(package)_preprocess_cmds
   sed -i.old "s/arm-linux-gnueabi-/$(host)-/g" qtbase/mkspecs/bitcoin-linux-g++/qmake.conf && \
   echo "!host_build: QMAKE_CFLAGS     += $($(package)_cflags) $($(package)_cppflags)" >> qtbase/mkspecs/common/gcc-base.conf && \
   echo "!host_build: QMAKE_CXXFLAGS   += $($(package)_cxxflags) $($(package)_cppflags)" >> qtbase/mkspecs/common/gcc-base.conf && \
+  echo "QMAKE_CXXFLAGS += -include limits" >> qtbase/mkspecs/common/gcc-base.conf && \
   echo "!host_build: QMAKE_LFLAGS     += $($(package)_ldflags)" >> qtbase/mkspecs/common/gcc-base.conf && \
   patch -p1 -i $($(package)_patch_dir)/no-xlib.patch &&\
   echo "QMAKE_LINK_OBJECT_MAX = 10" >> qtbase/mkspecs/win32-g++/qmake.conf &&\
