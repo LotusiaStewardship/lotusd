@@ -1,11 +1,16 @@
 # Build stage
 FROM debian:bookworm AS builder
 
+ARG HOST_TARGET=x86_64-linux-gnu
+ARG TOOLCHAIN_FILE=Linux64.cmake
+ARG CROSS_PACKAGES=""
+ARG EXTRA_CMAKE_FLAGS="-DBUILD_BITCOIN_QT=OFF -DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
+
 # Prevent interactive prompts during apt-get install (e.g., tzdata)
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install build prerequisites
+# Install build prerequisites including any cross-compiler packages
 RUN apt-get update && apt-get install -y \
     build-essential \
     autoconf \
@@ -19,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     patch \
     pkg-config \
     python3 \
+    $CROSS_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory for the source code
@@ -27,19 +33,16 @@ WORKDIR /lotus-source
 # Copy the source code
 COPY . .
 
-# Build dependencies using the depends system
-RUN make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
+# Build dependencies using the depends system for the target host
+RUN make -C depends HOST=$HOST_TARGET JOBS=$(nproc)
 
 # Build all binaries using the depends toolchain, then install and strip debug
 # symbols (matching gitian's install-debug target) to minimize binary size.
 RUN mkdir build && cd build && \
     cmake -GNinja .. \
       -DBASEPREFIX=/lotus-source/depends \
-      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
-      -DBUILD_BITCOIN_QT=OFF \
-      -DENABLE_REDUCE_EXPORTS=ON \
-      -DENABLE_STATIC_LIBSTDCXX=ON \
-      -DENABLE_GLIBC_BACK_COMPAT=ON \
+      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/$TOOLCHAIN_FILE \
+      $EXTRA_CMAKE_FLAGS \
       -DCLIENT_VERSION_IS_RELEASE=ON \
       -DENABLE_CLANG_TIDY=OFF \
       -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
@@ -49,6 +52,9 @@ RUN mkdir build && cd build && \
 
 # Runtime stage
 FROM debian:bookworm-slim
+
+ARG HOST_TARGET
+ARG TOOLCHAIN_FILE
 
 # Prevent interactive prompts during apt-get install
 ENV DEBIAN_FRONTEND=noninteractive
@@ -60,7 +66,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
-RUN mkdir -p /opt/lotus/bin /root/.lotus
+RUN mkdir -p /opt/lotus/bin /opt/lotus/debug /root/.lotus
 
 # Copy installed (stripped) binaries from builder stage.
 # Debug symbols were split out by ninja install-debug.
@@ -69,6 +75,13 @@ COPY --from=builder /opt/lotus/bin/lotus-cli /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-tx /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-seeder /opt/lotus/bin/
+
+# Copy debug symbol files from builder stage
+COPY --from=builder /opt/lotus/bin/lotusd.dbg /opt/lotus/debug/ 2>/dev/null || true
+COPY --from=builder /opt/lotus/bin/lotus-cli.dbg /opt/lotus/debug/ 2>/dev/null || true
+COPY --from=builder /opt/lotus/bin/lotus-tx.dbg /opt/lotus/debug/ 2>/dev/null || true
+COPY --from=builder /opt/lotus/bin/lotus-wallet.dbg /opt/lotus/debug/ 2>/dev/null || true
+COPY --from=builder /opt/lotus/bin/lotus-seeder.dbg /opt/lotus/debug/ 2>/dev/null || true
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*

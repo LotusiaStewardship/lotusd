@@ -1,0 +1,96 @@
+# Build stage
+FROM debian:bookworm AS builder
+
+ARG HOST_TARGET=x86_64-apple-darwin16
+ARG TOOLCHAIN_FILE=OSX.cmake
+
+# Prevent interactive prompts during apt-get install (e.g., tzdata)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# Install build prerequisites including clang, DMG/volname tooling
+RUN apt-get update && apt-get install -y \
+    autoconf \
+    automake \
+    build-essential \
+    ca-certificates \
+    clang \
+    clang-tidy \
+    cmake \
+    curl \
+    faketime \
+    fonts-tuffy \
+    git \
+    gperf \
+    imagemagick \
+    libbz2-dev \
+    libcap-dev \
+    librsvg2-bin \
+    libtiff-tools \
+    libtinfo5 \
+    libtool \
+    libz-dev \
+    lld \
+    ninja-build \
+    patch \
+    pkg-config \
+    python3 \
+    python3-dev \
+    python3-setuptools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory for the source code
+WORKDIR /lotus-source
+
+# Copy the source code
+COPY . .
+
+# Download and extract the macOS SDK
+RUN mkdir -p depends/SDKs && \
+    OSX_SDK="Xcode-11.3.1-11C505-extracted-SDK-with-libcxx-headers.tar.gz" && \
+    OSX_SDK_SHA256="436df6dfc7073365d12f8ef6c1fdb060777c720602cc67c2dcf9a59d94290e38" && \
+    curl -SLO "https://bitcoincore.org/depends-sources/sdks/${OSX_SDK}" && \
+    echo "${OSX_SDK_SHA256}  ${OSX_SDK}" | sha256sum -c && \
+    tar -C depends/SDKs -xf "${OSX_SDK}" && \
+    rm "${OSX_SDK}"
+
+# Build dependencies using the depends system (builds Qt, dmg, genisoimage, etc.)
+RUN make -C depends HOST=$HOST_TARGET JOBS=$(nproc)
+
+# Build all targets (including lotus-qt) using the depends toolchain, then create .dmg
+RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \
+    mkdir build && cd build && \
+    cmake -GNinja .. \
+      -DBASEPREFIX=/lotus-source/depends \
+      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/$TOOLCHAIN_FILE \
+      -DCLIENT_VERSION_IS_RELEASE=ON \
+      -DENABLE_CLANG_TIDY=OFF \
+      -DENABLE_REDUCE_EXPORTS=ON \
+      -DCCACHE=OFF \
+      -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
+    ninja && \
+    ninja security-check && \
+    ninja install/strip && \
+    export PYTHONPATH="/lotus-source/depends/${HOST_TARGET}/native/lib/python3/dist-packages:${PYTHONPATH}" && \
+    ninja osx-deploydir && \
+    ninja osx-dmg
+
+# Rename the .dmg to match gitian's output convention and copy to /opt/lotus
+RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \
+    OSX_VOLNAME="Lotus" && \
+    /lotus-source/depends/${HOST_TARGET}/native/bin/dmg dmg \
+      /lotus-source/build/"${OSX_VOLNAME}.dmg" \
+      /opt/lotus/lotus-unsigned.dmg
+
+# Runtime stage (used only as a transport container to extract binaries)
+FROM scratch
+
+# macOS binaries
+COPY --from=builder /opt/lotus/bin/lotusd /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-cli /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-tx /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-qt /opt/lotus/bin/
+
+# macOS .dmg disk image
+COPY --from=builder /opt/lotus/lotus-unsigned.dmg /opt/lotus/

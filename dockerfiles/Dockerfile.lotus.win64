@@ -1,0 +1,81 @@
+# Build stage
+FROM debian:bookworm AS builder
+
+ARG HOST_TARGET=x86_64-w64-mingw32
+
+# Prevent interactive prompts during apt-get install (e.g., tzdata)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# Install build prerequisites including mingw cross-compiler and NSIS
+RUN apt-get update && apt-get install -y \
+    autoconf \
+    automake \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    faketime \
+    g++ \
+    g++-mingw-w64 \
+    git \
+    gperf \
+    libtool \
+    mingw-w64 \
+    ninja-build \
+    nsis \
+    patch \
+    pkg-config \
+    python3 \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory for the source code
+WORKDIR /lotus-source
+
+# Copy the source code
+COPY . .
+
+# Build dependencies using the depends system for the target host
+RUN make -C depends HOST=$HOST_TARGET JOBS=$(nproc)
+
+# Use -posix variant for c++11 threading if available (matching gitian)
+RUN if update-alternatives --list ${HOST_TARGET}-gcc >/dev/null 2>&1; then \
+      update-alternatives --set ${HOST_TARGET}-gcc /usr/bin/${HOST_TARGET}-gcc-posix 2>/dev/null || true; \
+    fi && \
+    if update-alternatives --list ${HOST_TARGET}-g++ >/dev/null 2>&1; then \
+      update-alternatives --set ${HOST_TARGET}-g++ /usr/bin/${HOST_TARGET}-g++-posix 2>/dev/null || true; \
+    fi
+
+# Build all binaries (including Qt for NSIS installer) using the depends toolchain
+RUN mkdir build && cd build && \
+    cmake -GNinja .. \
+      -DBASEPREFIX=/lotus-source/depends \
+      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Win64.cmake \
+      -DBUILD_BITCOIN_SEEDER=OFF \
+      -DCLIENT_VERSION_IS_RELEASE=ON \
+      -DCPACK_STRIP_FILES=ON \
+      -DENABLE_CLANG_TIDY=OFF \
+      -DENABLE_REDUCE_EXPORTS=ON \
+      -DUSE_JEMALLOC=OFF \
+      -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
+    ninja && \
+    ninja security-check && \
+    ninja install-debug && \
+    ninja package
+
+# Runtime stage (used only as a transport container to extract binaries)
+FROM scratch
+
+# Windows executables
+COPY --from=builder /opt/lotus/bin/lotusd.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-cli.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-tx.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-wallet.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-qt.exe /opt/lotus/bin/
+
+# Debug symbols
+COPY --from=builder /opt/lotus/bin/*.dbg /opt/lotus/debug/
+
+# NSIS installer (built by ninja package, output in build directory)
+COPY --from=builder /lotus-source/build/lotus-*.exe /opt/lotus/
