@@ -13,7 +13,6 @@ define $(package)_config_cmds
   cmake -GNinja \
     -DCMAKE_INSTALL_PREFIX=$($(package)_staging_dir)/$(host_prefix) \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_FLAGS="-Wno-error=stringop-overflow" \
     -DFLATBUFFERS_BUILD_TESTS=off \
     -DFLATBUFFERS_BUILD_FLATC=off \
     -DFLATBUFFERS_BUILD_FLATHASH=off \
