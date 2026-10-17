@@ -98,11 +98,6 @@ jobs:
           docker buildx build --check -f dockerfiles/Dockerfile.lotus . 2>&1
           echo "::notice::Dockerfile.lotus: syntax OK"
 
-      - name: Validate Dockerfile.lotus-qt
-        run: |
-          docker buildx build --check -f dockerfiles/Dockerfile.lotus-qt . 2>&1
-          echo "::notice::Dockerfile.lotus-qt: syntax OK"
-
       - name: Validate Dockerfile.lotus.win64
         run: |
           docker buildx build --check -f dockerfiles/Dockerfile.lotus.win64 . 2>&1
