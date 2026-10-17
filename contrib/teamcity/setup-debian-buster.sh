@@ -13,6 +13,9 @@ TEAMCITY_DIR=$(dirname "$0")
 # do not: see contrib/utils/install-python-test-deps.sh.
 "${TEAMCITY_DIR}"/../utils/install-python-test-deps.sh
 
+# Node.js for the cashtab frontend jobs, likewise not needed to build lotusd.
+"${TEAMCITY_DIR}"/../utils/install-nodejs.sh
+
 # Python library for interacting with teamcity
 pip3 install teamcity-messages
 # Install Python dependencies for the build bot

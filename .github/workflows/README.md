@@ -54,10 +54,11 @@ Qt is 5.9.8 and there is no `NO_QT`. Every image builds the dependency set the r
 build builds, which includes the GUI for the Linux rows.
 
 The Python packages needed to *run* the test suites (`pytest`, `pynng`, `flatbuffers`) are
-installed by `contrib/utils/install-python-test-deps.sh`, which the TeamCity agent calls from
-`setup-debian-buster.sh`. Build images do not install them: the functional tests run after the
-build, on a runner with its own Python. That split also keeps the image off buster's pip 18.1,
-which predates `manylinux2014` and so turns any modern wheel into a broken source build.
+installed by `contrib/utils/install-python-test-deps.sh`, and Node.js for the cashtab frontend
+jobs by `contrib/utils/install-nodejs.sh`. The TeamCity agent calls both from
+`setup-debian-buster.sh`; build images call neither, because compiling and packaging lotusd
+needs no Python test framework and no Node. That split also keeps the image off buster's pip
+18.1, which predates `manylinux2014` and so turns any modern wheel into a broken source build.
 
 `ninja symbol-check` runs on the buster build, exactly as `gitian-linux.yml:167-168` runs
 it, and its `GLIBC` ceiling is calibrated to that base. A newer base image does not merely

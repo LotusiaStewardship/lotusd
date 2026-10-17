@@ -158,6 +158,5 @@ echo "export PATH=\"$(python3 -m site --user-base)/bin:\$PATH\"" >> ~/.bashrc
 # shellcheck source=/dev/null
 source ~/.bashrc
 
-# Install npm v7.x and nodejs v15.x
-curl -sL https://deb.nodesource.com/setup_15.x | bash -
-apt-get install -y nodejs
+# Node.js is installed by install-nodejs.sh instead. It is only needed by the cashtab frontend
+# jobs, and the build images compile and package lotusd without it.
