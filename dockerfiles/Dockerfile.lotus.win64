@@ -31,6 +31,14 @@ RUN apt-get update \
         ca-certificates ca-certificates-java default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
+# install-dependencies.sh runs `pip3 install pytest pynng flatbuffers` unpinned. pynng 0.9.0
+# was released after TeamCity's agent image was built and pins setuptools==75.3.2 in its build
+# requirements, which needs Python >= 3.9; buster ships 3.7, so the build environment cannot be
+# resolved and the script aborts. Constrain pynng below 0.8 -- the version the TeamCity image
+# actually has -- without editing the script.
+RUN printf 'pynng<0.8\n' > /tmp/teamcity-deps/constraints.txt
+ENV PIP_CONSTRAINT=/tmp/teamcity-deps/constraints.txt
+
 RUN /tmp/teamcity-deps/install-dependencies.sh
 
 # Set working directory for the source code
