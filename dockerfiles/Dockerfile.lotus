@@ -25,8 +25,19 @@ RUN sed -i \
         -e 's|deb.debian.org|archive.debian.org|g' \
         -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
         /etc/apt/sources.list \
-    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until \
-    && /tmp/teamcity-deps/install-dependencies.sh
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until
+
+# Debian's ca-certificates-java trigger runs `jks-keystore`, which loads the JRE's java.security
+# file. Installed in one apt transaction with the JRE itself, that trigger fires before openjdk
+# is configured and the whole batch dies with "Error loading java.security file", taking
+# default-jdk and the ca-certificates trigger down with it. A TeamCity agent is a long-lived VM
+# where the JRE is already configured; a bare container is not, so install it first.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates ca-certificates-java default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN /tmp/teamcity-deps/install-dependencies.sh
 
 # Set working directory for the source code
 WORKDIR /lotus-source
