@@ -6,12 +6,7 @@ FROM debian:buster AS builder
 
 ARG HOST_TARGET=x86_64-linux-gnu
 ARG TOOLCHAIN_FILE=Linux64.cmake
-ARG EXTRA_CMAKE_FLAGS="-DBUILD_BITCOIN_QT=OFF -DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
-
-# depends has its own Qt switch, independent of CMake's BUILD_BITCOIN_QT. Without NO_QT=1
-# this image still builds the whole Qt + X11 dependency stack for binaries that never link
-# it -- paying every Qt build failure before reaching the daemon and CLI tools it does ship.
-ARG NO_QT=1
+ARG EXTRA_CMAKE_FLAGS="-DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
 
 # Prevent interactive prompts during apt-get install (e.g., tzdata)
 ENV DEBIAN_FRONTEND=noninteractive
@@ -39,8 +34,19 @@ WORKDIR /lotus-source
 # Copy the source code
 COPY . .
 
-# Build dependencies using the depends system for the target host
-RUN make -C depends HOST=$HOST_TARGET NO_QT=$NO_QT JOBS=$(nproc)
+# Build dependencies using the depends system for the target host.
+#
+# CMAKE_TOOLCHAIN_FILE and BASEPREFIX are not optional: depends/packages/nng.mk:18 and
+# Flatbuffers.mk:20 pass -DCMAKE_TOOLCHAIN_FILE=$(CMAKE_TOOLCHAIN_FILE) to CMake, and nothing
+# in depends/ defines it. Left unset, CMake discards the empty argument and compiles those
+# packages with the build machine's compiler -- which looks fine natively and produces x86-64
+# objects in a cross prefix (Relocations in generic ELF (EM: 62)). This is gitian's invocation
+# verbatim (contrib/gitian-descriptors/gitian-linux.yml:111-115), which is the build that
+# produces the release artifacts.
+RUN make -C depends HOST=$HOST_TARGET \
+      CMAKE_TOOLCHAIN_FILE=/lotus-source/cmake/platforms/$TOOLCHAIN_FILE \
+      BASEPREFIX=/lotus-source/depends \
+      JOBS=$(nproc)
 
 # Build all binaries using the depends toolchain, then install and strip debug
 # symbols (matching gitian's install-debug target) to minimize binary size.
@@ -81,6 +87,7 @@ COPY --from=builder /opt/lotus/bin/lotus-cli /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-tx /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-seeder /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-qt /opt/lotus/bin/
 
 # Copy debug symbol files from builder stage
 COPY --from=builder /opt/lotus/bin/lotusd.dbg /opt/lotus/debug/ 2>/dev/null || true

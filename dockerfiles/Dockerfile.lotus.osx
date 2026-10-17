@@ -38,8 +38,15 @@ RUN mkdir -p depends/SDKs && \
     tar -C depends/SDKs -xf "${OSX_SDK}" && \
     rm "${OSX_SDK}"
 
-# Build dependencies using the depends system (builds Qt, dmg, genisoimage, etc.)
-RUN make -C depends HOST=$HOST_TARGET JOBS=$(nproc)
+# Build dependencies using the depends system (builds Qt, dmg, genisoimage, etc.).
+# CMAKE_TOOLCHAIN_FILE and BASEPREFIX are required: depends/packages/nng.mk:18 and
+# Flatbuffers.mk:20 read $(CMAKE_TOOLCHAIN_FILE) for CMake, and nothing in depends/ defines
+# it -- unset, they compile with the build machine's compiler. Same invocation as gitian
+# (contrib/gitian-descriptors/gitian-linux.yml:111-115).
+RUN make -C depends HOST=$HOST_TARGET \
+      CMAKE_TOOLCHAIN_FILE=/lotus-source/cmake/platforms/$TOOLCHAIN_FILE \
+      BASEPREFIX=/lotus-source/depends \
+      JOBS=$(nproc)
 
 # Build all targets (including lotus-qt) using the depends toolchain, then create .dmg
 RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \

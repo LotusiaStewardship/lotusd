@@ -29,8 +29,16 @@ WORKDIR /lotus-source
 # Copy the source code
 COPY . .
 
-# Build dependencies using the depends system for the target host
-RUN make -C depends HOST=$HOST_TARGET JOBS=$(nproc)
+# Build dependencies using the depends system for the target host.
+# CMAKE_TOOLCHAIN_FILE and BASEPREFIX are required: depends/packages/nng.mk:18 and
+# Flatbuffers.mk:20 read $(CMAKE_TOOLCHAIN_FILE) for CMake, and nothing in depends/ defines
+# it -- unset, they compile with the build machine's compiler, which is invisible natively and
+# fatal for a cross target. Same invocation as gitian
+# (contrib/gitian-descriptors/gitian-linux.yml:111-115).
+RUN make -C depends HOST=$HOST_TARGET \
+      CMAKE_TOOLCHAIN_FILE=/lotus-source/cmake/platforms/Win64.cmake \
+      BASEPREFIX=/lotus-source/depends \
+      JOBS=$(nproc)
 
 # Use -posix variant for c++11 threading: handled by install-dependencies.sh:119-120, which
 # runs `update-alternatives --set` for both ${HOST_TARGET}-gcc and -g++ during image setup.
