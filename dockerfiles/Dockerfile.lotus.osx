@@ -1,5 +1,7 @@
-# Build stage
-FROM debian:bookworm AS builder
+# Build stage -- Debian buster, the environment TeamCity builds in
+# (contrib/teamcity/setup-debian-buster.sh). The depends/ pins are validated against this
+# toolchain; a newer base image changes the artefacts and fails symbol-check.
+FROM debian:buster AS builder
 
 ARG HOST_TARGET=x86_64-apple-darwin16
 ARG TOOLCHAIN_FILE=OSX.cmake
@@ -8,36 +10,18 @@ ARG TOOLCHAIN_FILE=OSX.cmake
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install build prerequisites including clang, DMG/volname tooling
-RUN apt-get update && apt-get install -y \
-    autoconf \
-    automake \
-    build-essential \
-    ca-certificates \
-    clang \
-    clang-tidy \
-    cmake \
-    curl \
-    faketime \
-    fonts-tuffy \
-    git \
-    gperf \
-    imagemagick \
-    libbz2-dev \
-    libcap-dev \
-    librsvg2-bin \
-    libtiff-tools \
-    libtinfo5 \
-    libtool \
-    libz-dev \
-    lld \
-    ninja-build \
-    patch \
-    pkg-config \
-    python3 \
-    python3-dev \
-    python3-setuptools \
-    && rm -rf /var/lib/apt/lists/*
+# Dependencies come from the tree rather than a hand-maintained list: this is the script
+# contrib/teamcity/setup-debian-buster.sh:10 calls, and it is what the TeamCity macOS cross
+# agent runs. buster is EOL, so its packages live on archive.debian.org and the archive's
+# Release files are past Valid-Until; the script runs `apt-get update` at line 90 but only
+# writes the Check-Valid-Until override at line 99, so both must precede it.
+COPY contrib/utils/install-dependencies.sh contrib/utils/llvm.pub /tmp/teamcity-deps/
+RUN sed -i \
+        -e 's|deb.debian.org|archive.debian.org|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until \
+    && /tmp/teamcity-deps/install-dependencies.sh
 
 # Set working directory for the source code
 WORKDIR /lotus-source

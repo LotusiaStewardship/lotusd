@@ -1,5 +1,7 @@
-# Build stage
-FROM debian:bookworm AS builder
+# Build stage -- Debian buster, the environment TeamCity builds in
+# (contrib/teamcity/setup-debian-buster.sh). The depends/ pins are validated against this
+# toolchain; a newer base image changes the artefacts and fails symbol-check.
+FROM debian:buster AS builder
 
 ARG HOST_TARGET=x86_64-w64-mingw32
 
@@ -7,28 +9,19 @@ ARG HOST_TARGET=x86_64-w64-mingw32
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install build prerequisites including mingw cross-compiler and NSIS
-RUN apt-get update && apt-get install -y \
-    autoconf \
-    automake \
-    build-essential \
-    ca-certificates \
-    cmake \
-    curl \
-    faketime \
-    g++ \
-    g++-mingw-w64 \
-    git \
-    gperf \
-    libtool \
-    mingw-w64 \
-    ninja-build \
-    nsis \
-    patch \
-    pkg-config \
-    python3 \
-    zip \
-    && rm -rf /var/lib/apt/lists/*
+# Dependencies come from the tree rather than a hand-maintained list: this is the script
+# contrib/teamcity/setup-debian-buster.sh:10 calls. It installs mingw-w64 and selects the posix
+# variant with update-alternatives (:119-120), which the tree needs for C++11 threading.
+# buster is EOL, so its packages live on archive.debian.org and the archive's Release files are
+# past Valid-Until; the script runs `apt-get update` at line 90 but only writes the
+# Check-Valid-Until override at line 99, so both must precede it.
+COPY contrib/utils/install-dependencies.sh contrib/utils/llvm.pub /tmp/teamcity-deps/
+RUN sed -i \
+        -e 's|deb.debian.org|archive.debian.org|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until \
+    && /tmp/teamcity-deps/install-dependencies.sh
 
 # Set working directory for the source code
 WORKDIR /lotus-source
@@ -39,13 +32,8 @@ COPY . .
 # Build dependencies using the depends system for the target host
 RUN make -C depends HOST=$HOST_TARGET JOBS=$(nproc)
 
-# Use -posix variant for c++11 threading if available (matching gitian)
-RUN if update-alternatives --list ${HOST_TARGET}-gcc >/dev/null 2>&1; then \
-      update-alternatives --set ${HOST_TARGET}-gcc /usr/bin/${HOST_TARGET}-gcc-posix 2>/dev/null || true; \
-    fi && \
-    if update-alternatives --list ${HOST_TARGET}-g++ >/dev/null 2>&1; then \
-      update-alternatives --set ${HOST_TARGET}-g++ /usr/bin/${HOST_TARGET}-g++-posix 2>/dev/null || true; \
-    fi
+# Use -posix variant for c++11 threading: handled by install-dependencies.sh:119-120, which
+# runs `update-alternatives --set` for both ${HOST_TARGET}-gcc and -g++ during image setup.
 
 # Build all binaries (including Qt for NSIS installer) using the depends toolchain
 RUN mkdir build && cd build && \

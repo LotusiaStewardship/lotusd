@@ -1,9 +1,11 @@
-# Build stage
-FROM debian:bookworm AS builder
+# Build stage -- Debian buster (GCC 8.3, glibc 2.28), the environment TeamCity builds in
+# (contrib/teamcity/setup-debian-buster.sh). The depends/ pins are validated against this
+# toolchain and contrib/devtools/symbol-check.py expects the glibc surface it produces, so a
+# newer base image does not merely build differently -- it fails the release gate.
+FROM debian:buster AS builder
 
 ARG HOST_TARGET=x86_64-linux-gnu
 ARG TOOLCHAIN_FILE=Linux64.cmake
-ARG CROSS_PACKAGES=""
 ARG EXTRA_CMAKE_FLAGS="-DBUILD_BITCOIN_QT=OFF -DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
 
 # depends has its own Qt switch, independent of CMake's BUILD_BITCOIN_QT. Without NO_QT=1
@@ -15,22 +17,21 @@ ARG NO_QT=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install build prerequisites including any cross-compiler packages
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    autoconf \
-    automake \
-    cmake \
-    curl \
-    gperf \
-    git \
-    libtool \
-    ninja-build \
-    patch \
-    pkg-config \
-    python3 \
-    $CROSS_PACKAGES \
-    && rm -rf /var/lib/apt/lists/*
+# Dependencies come from the tree rather than a hand-maintained list: this is the script
+# contrib/teamcity/setup-debian-buster.sh:10 calls. It brings GCC 8, the aarch64 and armhf
+# cross toolchains, mingw-w64 (posix variant selected at :119-120), qemu-user-static, nsis,
+# wine, and cmake >= 3.16 from buster-backports.
+#
+# buster is EOL, so its packages live on archive.debian.org and the archive's Release files are
+# past Valid-Until. The script runs `apt-get update` at line 90 but only writes the
+# Check-Valid-Until override at line 99, so both fixes have to be in place before it is called.
+COPY contrib/utils/install-dependencies.sh contrib/utils/llvm.pub /tmp/teamcity-deps/
+RUN sed -i \
+        -e 's|deb.debian.org|archive.debian.org|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until \
+    && /tmp/teamcity-deps/install-dependencies.sh
 
 # Set working directory for the source code
 WORKDIR /lotus-source
