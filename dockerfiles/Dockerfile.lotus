@@ -6,6 +6,11 @@ ARG TOOLCHAIN_FILE=Linux64.cmake
 ARG CROSS_PACKAGES=""
 ARG EXTRA_CMAKE_FLAGS="-DBUILD_BITCOIN_QT=OFF -DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
 
+# depends has its own Qt switch, independent of CMake's BUILD_BITCOIN_QT. Without NO_QT=1
+# this image still builds the whole Qt + X11 dependency stack for binaries that never link
+# it -- paying every Qt build failure before reaching the daemon and CLI tools it does ship.
+ARG NO_QT=1
+
 # Prevent interactive prompts during apt-get install (e.g., tzdata)
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
@@ -34,7 +39,7 @@ WORKDIR /lotus-source
 COPY . .
 
 # Build dependencies using the depends system for the target host
-RUN make -C depends HOST=$HOST_TARGET JOBS=$(nproc)
+RUN make -C depends HOST=$HOST_TARGET NO_QT=$NO_QT JOBS=$(nproc)
 
 # Build all binaries using the depends toolchain, then install and strip debug
 # symbols (matching gitian's install-debug target) to minimize binary size.

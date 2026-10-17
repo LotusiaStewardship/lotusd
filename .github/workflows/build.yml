@@ -86,6 +86,39 @@ jobs:
           tags: |
             ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-${{ matrix.target.arch }}:${{ steps.version.outputs.VERSION }}
 
+      # These images drop the GUI (NO_QT=1 in Dockerfile.lotus), never RPC or the wallet.
+      # Boot the built daemon on regtest and prove both are live. No -disablewallet flag is
+      # passed: this asserts the default is wallet-on, so flipping that default or compiling
+      # the wallet out fails the build instead of shipping a crippled daemon.
+      - name: Smoke test RPC and wallet
+        if: matrix.target.arch == 'x86_64-linux-gnu'
+        run: |
+          IMAGE=ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-${{ matrix.target.arch }}:${{ steps.version.outputs.VERSION }}
+          docker run --rm --entrypoint sh "$IMAGE" -c '
+            set -eu
+            D=/tmp/smoke
+            CLI="lotus-cli -regtest -datadir=$D -rpcuser=smoke -rpcpassword=smoke -rpcport=18999"
+            lotusd -regtest -datadir=$D -server=1 -listen=0 -dnsseed=0 \
+              -rpcuser=smoke -rpcpassword=smoke -rpcport=18999 -port=18998 -daemon
+            i=0
+            until $CLI getblockcount >/dev/null 2>&1; do
+              i=$((i + 1))
+              if [ "$i" -ge 60 ]; then
+                echo "ERROR: lotusd did not answer JSON-RPC within 60s"
+                tail -n 40 "$D/regtest/debug.log" 2>/dev/null || true
+                exit 1
+              fi
+              sleep 1
+            done
+            $CLI help > /tmp/rpc-help.txt
+            grep -q getnewaddress /tmp/rpc-help.txt || { echo "ERROR: wallet RPC getnewaddress missing"; exit 1; }
+            grep -q sendtoaddress /tmp/rpc-help.txt || { echo "ERROR: wallet RPC sendtoaddress missing"; exit 1; }
+            $CLI createwallet smoke >/dev/null
+            test -n "$($CLI getnewaddress)"
+            echo "OK: JSON-RPC up, wallet created by default, address issued"
+            $CLI stop >/dev/null 2>&1 || true
+          '
+
       - name: Extract binaries
         run: |
           mkdir -p artifacts/${{ matrix.target.arch }}
