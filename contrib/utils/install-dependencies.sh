@@ -149,8 +149,9 @@ tar -zxf v1.5.2.tar.gz
 
 # Python library for merging nested structures
 pip3 install deepmerge
-# For running Python test suites
-pip3 install pytest pynng flatbuffers
+# Test-suite packages (pytest, pynng, flatbuffers) are installed by
+# install-python-test-deps.sh instead: they are only needed to run the tests, and the test
+# suites run after the build rather than inside the build image.
 # Up-to-date mypy and isort packages are required python linters
 pip3 install isort==5.6.4 mypy==0.780
 echo "export PATH=\"$(python3 -m site --user-base)/bin:\$PATH\"" >> ~/.bashrc

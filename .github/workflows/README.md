@@ -53,6 +53,12 @@ for armhf). Gitian passes it on the command line; so do we.
 Qt is 5.9.8 and there is no `NO_QT`. Every image builds the dependency set the release
 build builds, which includes the GUI for the Linux rows.
 
+The Python packages needed to *run* the test suites (`pytest`, `pynng`, `flatbuffers`) are
+installed by `contrib/utils/install-python-test-deps.sh`, which the TeamCity agent calls from
+`setup-debian-buster.sh`. Build images do not install them: the functional tests run after the
+build, on a runner with its own Python. That split also keeps the image off buster's pip 18.1,
+which predates `manylinux2014` and so turns any modern wheel into a broken source build.
+
 `ninja symbol-check` runs on the buster build, exactly as `gitian-linux.yml:167-168` runs
 it, and its `GLIBC` ceiling is calibrated to that base. A newer base image does not merely
 build differently — it fails that gate on symbols no source change can remove.
