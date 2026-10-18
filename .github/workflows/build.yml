@@ -204,7 +204,9 @@ jobs:
       - name: Extract Windows binaries and installer
         run: |
           mkdir -p artifacts/win64
-          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-win64:${{ steps.version.outputs.VERSION }})
+          # These Dockerfiles end in a `FROM scratch` transport stage with no CMD, so
+          # `docker create` needs an explicit (never executed) command to succeed.
+          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-win64:${{ steps.version.outputs.VERSION }} true)
           docker cp $container_id:/opt/lotus/bin/. artifacts/win64/
           docker cp $container_id:/opt/lotus/debug/. artifacts/win64/ 2>/dev/null || true
           # Extract NSIS installer and rename to gitian-convention name
@@ -295,7 +297,8 @@ jobs:
       - name: Extract macOS binaries and disk image
         run: |
           mkdir -p artifacts/osx
-          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-osx:${{ steps.version.outputs.VERSION }})
+          # `FROM scratch` transport stage with no CMD: docker create needs a command.
+          container_id=$(docker create ghcr.io/${{ steps.owner.outputs.REPO_OWNER_LC }}/lotus-osx:${{ steps.version.outputs.VERSION }} true)
           docker cp $container_id:/opt/lotus/bin/. artifacts/osx/
           docker cp $container_id:/opt/lotus/lotus-unsigned.dmg artifacts/osx/ 2>/dev/null && \
             mv artifacts/osx/lotus-unsigned.dmg artifacts/osx/lotus-$VERSION-osx-unsigned.dmg || true
