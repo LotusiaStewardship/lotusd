@@ -100,12 +100,11 @@ COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-seeder /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-qt /opt/lotus/bin/
 
-# Copy debug symbol files from builder stage
-COPY --from=builder /opt/lotus/bin/lotusd.dbg /opt/lotus/debug/ 2>/dev/null || true
-COPY --from=builder /opt/lotus/bin/lotus-cli.dbg /opt/lotus/debug/ 2>/dev/null || true
-COPY --from=builder /opt/lotus/bin/lotus-tx.dbg /opt/lotus/debug/ 2>/dev/null || true
-COPY --from=builder /opt/lotus/bin/lotus-wallet.dbg /opt/lotus/debug/ 2>/dev/null || true
-COPY --from=builder /opt/lotus/bin/lotus-seeder.dbg /opt/lotus/debug/ 2>/dev/null || true
+# Copy debug symbol files from builder stage. ninja install-debug splits them out next to the
+# stripped binaries. COPY is not a shell command, so the `2>/dev/null || true` these lines used
+# to carry was parsed as extra source paths and failed the runtime stage with
+# `failed to compute cache key: "/||": not found`.
+COPY --from=builder /opt/lotus/bin/*.dbg /opt/lotus/debug/
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*
