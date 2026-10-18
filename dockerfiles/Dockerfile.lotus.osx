@@ -58,7 +58,10 @@ RUN make -C depends HOST=$HOST_TARGET \
       BASEPREFIX=/lotus-source/depends \
       JOBS=$(nproc)
 
-# Build all targets (including lotus-qt) using the depends toolchain, then create .dmg
+# Build all targets (including lotus-qt) using the depends toolchain, then create .dmg.
+# No security-check here: contrib/devtools/security-check.py reads ELF via readelf and PE via
+# objdump, and has no Mach-O path, so it can only ever report "unknown format" on these
+# binaries. gitian-osx does not run it either (gitian-linux.yml:167 and gitian-win.yml:176 do).
 RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \
     mkdir build && cd build && \
     cmake -GNinja .. \
@@ -70,7 +73,6 @@ RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \
       -DCCACHE=OFF \
       -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
     ninja && \
-    ninja security-check && \
     ninja install/strip && \
     export PYTHONPATH="/lotus-source/depends/${HOST_TARGET}/native/lib/python3/dist-packages:${PYTHONPATH}" && \
     ninja osx-deploydir && \
