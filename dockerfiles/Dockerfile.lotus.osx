@@ -88,12 +88,14 @@ RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \
 # Runtime stage (used only as a transport container to extract binaries)
 FROM scratch
 
-# macOS binaries
+# macOS bundles
 COPY --from=builder /opt/lotus/bin/lotusd /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-cli /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-tx /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
-COPY --from=builder /opt/lotus/bin/lotus-qt /opt/lotus/bin/
+# The GUI is not copied: macOS installs it as a bundle (bin/Lotus-QT.app), and the .dmg built
+# from that bundle is the macOS GUI artifact -- the workflow takes only the four CLI binaries
+# from this transport image and ships the dmg alongside them.
 
 # macOS .dmg disk image
 COPY --from=builder /opt/lotus/lotus-unsigned.dmg /opt/lotus/
