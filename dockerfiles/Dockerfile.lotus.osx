@@ -1,0 +1,101 @@
+# Build stage -- Debian buster, the environment TeamCity builds in
+# (contrib/teamcity/setup-debian-buster.sh). The depends/ pins are validated against this
+# toolchain; a newer base image changes the artefacts and fails symbol-check.
+FROM debian:buster AS builder
+
+ARG HOST_TARGET=x86_64-apple-darwin16
+ARG TOOLCHAIN_FILE=OSX.cmake
+
+# Prevent interactive prompts during apt-get install (e.g., tzdata)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# Dependencies come from the tree rather than a hand-maintained list: this is the script
+# contrib/teamcity/setup-debian-buster.sh:10 calls, and it is what the TeamCity macOS cross
+# agent runs. buster is EOL, so its packages live on archive.debian.org and the archive's
+# Release files are past Valid-Until; the script runs `apt-get update` at line 90 but only
+# writes the Check-Valid-Until override at line 99, so both must precede it.
+COPY contrib/utils/install-dependencies.sh contrib/utils/llvm.pub /tmp/teamcity-deps/
+RUN sed -i \
+        -e 's|deb.debian.org|archive.debian.org|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until
+
+# Debian's ca-certificates-java trigger runs `jks-keystore`, which loads the JRE's java.security
+# file. Installed in one apt transaction with the JRE itself, that trigger fires before openjdk
+# is configured and the whole batch dies with "Error loading java.security file". Install the
+# JRE and the keystore package first, in their own transaction.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates ca-certificates-java default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN /tmp/teamcity-deps/install-dependencies.sh
+
+# Set working directory for the source code
+WORKDIR /lotus-source
+
+# Copy the source code
+COPY . .
+
+# Download and extract the macOS SDK
+RUN mkdir -p depends/SDKs && \
+    OSX_SDK="Xcode-11.3.1-11C505-extracted-SDK-with-libcxx-headers.tar.gz" && \
+    OSX_SDK_SHA256="436df6dfc7073365d12f8ef6c1fdb060777c720602cc67c2dcf9a59d94290e38" && \
+    curl -SLO "https://bitcoincore.org/depends-sources/sdks/${OSX_SDK}" && \
+    echo "${OSX_SDK_SHA256}  ${OSX_SDK}" | sha256sum -c && \
+    tar -C depends/SDKs -xf "${OSX_SDK}" && \
+    rm "${OSX_SDK}"
+
+# Build dependencies using the depends system (builds Qt, dmg, genisoimage, etc.).
+# CMAKE_TOOLCHAIN_FILE and BASEPREFIX are required: depends/packages/nng.mk:18 and
+# Flatbuffers.mk:20 read $(CMAKE_TOOLCHAIN_FILE) for CMake, and nothing in depends/ defines
+# it -- unset, they compile with the build machine's compiler. Same invocation as gitian
+# (contrib/gitian-descriptors/gitian-linux.yml:111-115).
+RUN make -C depends HOST=$HOST_TARGET \
+      CMAKE_TOOLCHAIN_FILE=/lotus-source/cmake/platforms/$TOOLCHAIN_FILE \
+      BASEPREFIX=/lotus-source/depends \
+      JOBS=$(nproc)
+
+# Build all targets (including lotus-qt) using the depends toolchain, then create .dmg.
+# No security-check here: contrib/devtools/security-check.py reads ELF via readelf and PE via
+# objdump, and has no Mach-O path, so it can only ever report "unknown format" on these
+# binaries. gitian-osx does not run it either (gitian-linux.yml:167 and gitian-win.yml:176 do).
+RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \
+    mkdir build && cd build && \
+    cmake -GNinja .. \
+      -DBASEPREFIX=/lotus-source/depends \
+      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/$TOOLCHAIN_FILE \
+      -DCLIENT_VERSION_IS_RELEASE=ON \
+      -DENABLE_CLANG_TIDY=OFF \
+      -DENABLE_REDUCE_EXPORTS=ON \
+      -DCCACHE=OFF \
+      -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
+    ninja && \
+    ninja install/strip && \
+    export PYTHONPATH="/lotus-source/depends/${HOST_TARGET}/native/lib/python3/dist-packages:${PYTHONPATH}" && \
+    ninja osx-deploydir && \
+    ninja osx-dmg
+
+# Rename the .dmg to match gitian's output convention and copy to /opt/lotus
+RUN export PATH=/lotus-source/depends/${HOST_TARGET}/native/bin:${PATH} && \
+    OSX_VOLNAME="Lotus" && \
+    /lotus-source/depends/${HOST_TARGET}/native/bin/dmg dmg \
+      /lotus-source/build/"${OSX_VOLNAME}.dmg" \
+      /opt/lotus/lotus-unsigned.dmg
+
+# Runtime stage (used only as a transport container to extract binaries)
+FROM scratch
+
+# macOS bundles
+COPY --from=builder /opt/lotus/bin/lotusd /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-cli /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-tx /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
+# The GUI is not copied: macOS installs it as a bundle (bin/Lotus-QT.app), and the .dmg built
+# from that bundle is the macOS GUI artifact -- the workflow takes only the four CLI binaries
+# from this transport image and ships the dmg alongside them.
+
+# macOS .dmg disk image
+COPY --from=builder /opt/lotus/lotus-unsigned.dmg /opt/lotus/

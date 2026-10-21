@@ -8,6 +8,10 @@ define $(package)_set_vars
   $(package)_cxxflags=-std=c++11
 endef
 
+# This is a build-host tool, so no CMAKE_TOOLCHAIN_FILE is passed -- and flatbuffers only adds
+# -Werror when no toolchain file is present (its CMakeLists.txt:218), which makes this build
+# warning-strict. It previously carried -Wno-error=stringop-overflow for a GCC 12+ false
+# positive on flatc; GCC 8 does not emit that diagnostic.
 define $(package)_config_cmds
   cmake -GNinja \
     -DCMAKE_INSTALL_PREFIX=$(build_prefix) \

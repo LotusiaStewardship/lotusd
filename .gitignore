@@ -82,3 +82,12 @@ contrib/devtools/split-debug.sh
 
 # Ignore node_modules at every level
 node_modules/
+
+# Fusion/Hercules agent artifacts
+.worktrees/
+
+# Agent tooling artifacts (Fusion, OpenCode, clangd)
+.fusion/
+.opencode/
+.clangd
+.cache/

@@ -9,6 +9,13 @@ TEAMCITY_DIR=$(dirname "$0")
 # Install all the build dependencies
 "${TEAMCITY_DIR}"/../utils/install-dependencies.sh
 
+# The agent runs the functional tests, so it also needs their Python packages. Build images
+# do not: see contrib/utils/install-python-test-deps.sh.
+"${TEAMCITY_DIR}"/../utils/install-python-test-deps.sh
+
+# Node.js for the cashtab frontend jobs, likewise not needed to build lotusd.
+"${TEAMCITY_DIR}"/../utils/install-nodejs.sh
+
 # Python library for interacting with teamcity
 pip3 install teamcity-messages
 # Install Python dependencies for the build bot

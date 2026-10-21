@@ -1,0 +1,87 @@
+# Build stage -- Debian buster, the environment TeamCity builds in
+# (contrib/teamcity/setup-debian-buster.sh). The depends/ pins are validated against this
+# toolchain; a newer base image changes the artefacts and fails symbol-check.
+FROM debian:buster AS builder
+
+ARG HOST_TARGET=x86_64-w64-mingw32
+
+# Prevent interactive prompts during apt-get install (e.g., tzdata)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# Dependencies come from the tree rather than a hand-maintained list: this is the script
+# contrib/teamcity/setup-debian-buster.sh:10 calls. It installs mingw-w64 and selects the posix
+# variant with update-alternatives (:119-120), which the tree needs for C++11 threading.
+# buster is EOL, so its packages live on archive.debian.org and the archive's Release files are
+# past Valid-Until; the script runs `apt-get update` at line 90 but only writes the
+# Check-Valid-Until override at line 99, so both must precede it.
+COPY contrib/utils/install-dependencies.sh contrib/utils/llvm.pub /tmp/teamcity-deps/
+RUN sed -i \
+        -e 's|deb.debian.org|archive.debian.org|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until
+
+# Debian's ca-certificates-java trigger runs `jks-keystore`, which loads the JRE's java.security
+# file. Installed in one apt transaction with the JRE itself, that trigger fires before openjdk
+# is configured and the whole batch dies with "Error loading java.security file". Install the
+# JRE and the keystore package first, in their own transaction.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates ca-certificates-java default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN /tmp/teamcity-deps/install-dependencies.sh
+
+# Set working directory for the source code
+WORKDIR /lotus-source
+
+# Copy the source code
+COPY . .
+
+# Build dependencies using the depends system for the target host.
+# CMAKE_TOOLCHAIN_FILE and BASEPREFIX are required: depends/packages/nng.mk:18 and
+# Flatbuffers.mk:20 read $(CMAKE_TOOLCHAIN_FILE) for CMake, and nothing in depends/ defines
+# it -- unset, they compile with the build machine's compiler, which is invisible natively and
+# fatal for a cross target. Same invocation as gitian
+# (contrib/gitian-descriptors/gitian-linux.yml:111-115).
+RUN make -C depends HOST=$HOST_TARGET \
+      CMAKE_TOOLCHAIN_FILE=/lotus-source/cmake/platforms/Win64.cmake \
+      BASEPREFIX=/lotus-source/depends \
+      JOBS=$(nproc)
+
+# Use -posix variant for c++11 threading: handled by install-dependencies.sh:119-120, which
+# runs `update-alternatives --set` for both ${HOST_TARGET}-gcc and -g++ during image setup.
+
+# Build all binaries (including Qt for NSIS installer) using the depends toolchain
+RUN mkdir build && cd build && \
+    cmake -GNinja .. \
+      -DBASEPREFIX=/lotus-source/depends \
+      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Win64.cmake \
+      -DBUILD_BITCOIN_SEEDER=OFF \
+      -DCLIENT_VERSION_IS_RELEASE=ON \
+      -DCPACK_STRIP_FILES=ON \
+      -DENABLE_CLANG_TIDY=OFF \
+      -DENABLE_REDUCE_EXPORTS=ON \
+      -DUSE_JEMALLOC=OFF \
+      -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
+    ninja && \
+    ninja security-check && \
+    ninja install-debug && \
+    ninja package
+
+# Runtime stage (used only as a transport container to extract binaries)
+FROM scratch
+
+# Windows executables
+COPY --from=builder /opt/lotus/bin/lotusd.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-cli.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-tx.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-wallet.exe /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-qt.exe /opt/lotus/bin/
+
+# Debug symbols
+COPY --from=builder /opt/lotus/bin/*.dbg /opt/lotus/debug/
+
+# NSIS installer (built by ninja package, output in build directory)
+COPY --from=builder /lotus-source/build/lotus-*.exe /opt/lotus/
