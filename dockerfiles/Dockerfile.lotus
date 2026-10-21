@@ -1,25 +1,43 @@
-# Build stage
-FROM debian:bookworm AS builder
+# Build stage -- Debian buster (GCC 8.3, glibc 2.28), the environment TeamCity builds in
+# (contrib/teamcity/setup-debian-buster.sh). The depends/ pins are validated against this
+# toolchain and contrib/devtools/symbol-check.py expects the glibc surface it produces, so a
+# newer base image does not merely build differently -- it fails the release gate.
+FROM debian:buster AS builder
+
+ARG HOST_TARGET=x86_64-linux-gnu
+ARG TOOLCHAIN_FILE=Linux64.cmake
+ARG EXTRA_CMAKE_FLAGS="-DENABLE_REDUCE_EXPORTS=ON -DENABLE_STATIC_LIBSTDCXX=ON -DENABLE_GLIBC_BACK_COMPAT=ON"
 
 # Prevent interactive prompts during apt-get install (e.g., tzdata)
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install build prerequisites
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    autoconf \
-    automake \
-    cmake \
-    curl \
-    gperf \
-    git \
-    libtool \
-    ninja-build \
-    patch \
-    pkg-config \
-    python3 \
+# Dependencies come from the tree rather than a hand-maintained list: this is the script
+# contrib/teamcity/setup-debian-buster.sh:10 calls. It brings GCC 8, the aarch64 and armhf
+# cross toolchains, mingw-w64 (posix variant selected at :119-120), qemu-user-static, nsis,
+# wine, and cmake >= 3.16 from buster-backports.
+#
+# buster is EOL, so its packages live on archive.debian.org and the archive's Release files are
+# past Valid-Until. The script runs `apt-get update` at line 90 but only writes the
+# Check-Valid-Until override at line 99, so both fixes have to be in place before it is called.
+COPY contrib/utils/install-dependencies.sh contrib/utils/llvm.pub /tmp/teamcity-deps/
+RUN sed -i \
+        -e 's|deb.debian.org|archive.debian.org|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid-until
+
+# Debian's ca-certificates-java trigger runs `jks-keystore`, which loads the JRE's java.security
+# file. Installed in one apt transaction with the JRE itself, that trigger fires before openjdk
+# is configured and the whole batch dies with "Error loading java.security file", taking
+# default-jdk and the ca-certificates trigger down with it. A TeamCity agent is a long-lived VM
+# where the JRE is already configured; a bare container is not, so install it first.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates ca-certificates-java default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
+
+RUN /tmp/teamcity-deps/install-dependencies.sh
 
 # Set working directory for the source code
 WORKDIR /lotus-source
@@ -27,19 +45,27 @@ WORKDIR /lotus-source
 # Copy the source code
 COPY . .
 
-# Build dependencies using the depends system
-RUN make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
+# Build dependencies using the depends system for the target host.
+#
+# CMAKE_TOOLCHAIN_FILE and BASEPREFIX are not optional: depends/packages/nng.mk:18 and
+# Flatbuffers.mk:20 pass -DCMAKE_TOOLCHAIN_FILE=$(CMAKE_TOOLCHAIN_FILE) to CMake, and nothing
+# in depends/ defines it. Left unset, CMake discards the empty argument and compiles those
+# packages with the build machine's compiler -- which looks fine natively and produces x86-64
+# objects in a cross prefix (Relocations in generic ELF (EM: 62)). This is gitian's invocation
+# verbatim (contrib/gitian-descriptors/gitian-linux.yml:111-115), which is the build that
+# produces the release artifacts.
+RUN make -C depends HOST=$HOST_TARGET \
+      CMAKE_TOOLCHAIN_FILE=/lotus-source/cmake/platforms/$TOOLCHAIN_FILE \
+      BASEPREFIX=/lotus-source/depends \
+      JOBS=$(nproc)
 
 # Build all binaries using the depends toolchain, then install and strip debug
 # symbols (matching gitian's install-debug target) to minimize binary size.
 RUN mkdir build && cd build && \
     cmake -GNinja .. \
       -DBASEPREFIX=/lotus-source/depends \
-      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
-      -DBUILD_BITCOIN_QT=OFF \
-      -DENABLE_REDUCE_EXPORTS=ON \
-      -DENABLE_STATIC_LIBSTDCXX=ON \
-      -DENABLE_GLIBC_BACK_COMPAT=ON \
+      -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/$TOOLCHAIN_FILE \
+      $EXTRA_CMAKE_FLAGS \
       -DCLIENT_VERSION_IS_RELEASE=ON \
       -DENABLE_CLANG_TIDY=OFF \
       -DCMAKE_INSTALL_PREFIX=/opt/lotus && \
@@ -50,17 +76,24 @@ RUN mkdir build && cd build && \
 # Runtime stage
 FROM debian:bookworm-slim
 
+ARG HOST_TARGET
+ARG TOOLCHAIN_FILE
+
 # Prevent interactive prompts during apt-get install
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Install minimal runtime dependencies (depends system statically links most libs)
+# Install minimal runtime dependencies (depends system statically links most libs).
+# libatomic is not one of them: GCC emits __atomic_* calls for 16-byte operations and links
+# -latomic, so the daemon needs libatomic.so.1 at run time. bookworm-slim does not ship it, and
+# without it the binary dies at exec with "cannot open shared object file".
 RUN apt-get update && apt-get install -y \
     ca-certificates \
+    libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
-RUN mkdir -p /opt/lotus/bin /root/.lotus
+RUN mkdir -p /opt/lotus/bin /opt/lotus/debug /root/.lotus
 
 # Copy installed (stripped) binaries from builder stage.
 # Debug symbols were split out by ninja install-debug.
@@ -69,6 +102,13 @@ COPY --from=builder /opt/lotus/bin/lotus-cli /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-tx /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-wallet /opt/lotus/bin/
 COPY --from=builder /opt/lotus/bin/lotus-seeder /opt/lotus/bin/
+COPY --from=builder /opt/lotus/bin/lotus-qt /opt/lotus/bin/
+
+# Copy debug symbol files from builder stage. ninja install-debug splits them out next to the
+# stripped binaries. COPY is not a shell command, so the `2>/dev/null || true` these lines used
+# to carry was parsed as extra source paths and failed the runtime stage with
+# `failed to compute cache key: "/||": not found`.
+COPY --from=builder /opt/lotus/bin/*.dbg /opt/lotus/debug/
 
 # Set permissions
 RUN chmod +x /opt/lotus/bin/*

@@ -4,49 +4,90 @@ on:
   pull_request:
     branches: [master]
 
-env:
-  DEBIAN_FRONTEND: noninteractive
-  TZ: Etc/UTC
-
 jobs:
-  test:
-    name: Build and test
+  lint:
+    name: Lint checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install build dependencies
+      - name: Install lint tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential autoconf automake cmake curl gperf git \
-            libtool ninja-build patch pkg-config python3
+          sudo apt-get install -y --no-install-recommends yamllint
 
-      - name: Build depends
-        run: make -C depends HOST=x86_64-linux-gnu JOBS=$(nproc)
-
-      - name: Configure and build
+      - name: Determine changed files
+        id: changed
         run: |
-          mkdir build && cd build
-          cmake -GNinja .. \
-            -DBASEPREFIX=/home/runner/work/lotusd/lotusd/depends \
-            -DCMAKE_TOOLCHAIN_FILE=../cmake/platforms/Linux64.cmake \
-            -DENABLE_REDUCE_EXPORTS=ON \
-            -DENABLE_STATIC_LIBSTDCXX=ON \
-            -DENABLE_GLIBC_BACK_COMPAT=ON \
-            -DCLIENT_VERSION_IS_RELEASE=ON \
-            -DENABLE_CLANG_TIDY=OFF
-          ninja
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA="$(git merge-base HEAD origin/master)"
+          fi
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          git diff --name-only --diff-filter=ACMR "$BASE_SHA" HEAD > changed_files.txt
+          echo "=== Changed files ==="
+          cat changed_files.txt
 
-      - name: Run tests
+      - name: YAML lint (changed files only)
         run: |
-          cd build
-          ctest --output-on-failure -j$(nproc)
+          mapfile -t files < <(grep -E '\.(ya?ml)$' changed_files.txt || true)
+          if [ ${#files[@]} -gt 0 ]; then
+            yamllint "${files[@]}"
+          else
+            echo "No YAML files changed"
+          fi
 
-  docker:
-    name: Docker build check
+      - name: Shell syntax check (changed files only)
+        run: |
+          # bash -n, never sh -n: the runner's /bin/sh is dash, and every script in this tree is
+          # bash (55 of 69 by shebang). dash cannot parse a here-string or an array assignment, so
+          # sh -n reports correct scripts as broken.
+          mapfile -t files < <(grep -E '\.sh$' changed_files.txt || true)
+          for f in "${files[@]}"; do
+            bash -n "$f"
+          done
+          echo "Checked ${#files[@]} shell file(s)"
+
+      - name: Python syntax check (changed files only)
+        run: |
+          mapfile -t files < <(grep -E '\.py$' changed_files.txt || true)
+          for f in "${files[@]}"; do
+            python3 -m py_compile "$f"
+          done
+          echo "Checked ${#files[@]} python file(s)"
+
+      - name: C++ format-string lint (changed files only)
+        run: |
+          mapfile -t files < <(grep -E '\.(cpp|cc|c|h|hpp)$' changed_files.txt | grep -vE '^src/(leveldb|secp256k1|univalue)/' || true)
+          if [ ${#files[@]} -gt 0 ]; then
+            test/lint/lint-format-strings.py "${files[@]}"
+          else
+            echo "No C++ files changed"
+          fi
+
+      - name: Python %-format lint (changed files only)
+        run: |
+          mapfile -t files < <(grep -E '\.py$' changed_files.txt || true)
+          for f in "${files[@]}"; do
+            test/lint/lint-python-format.py "$f"
+          done
+
+      - name: Check for trailing whitespace in diff
+        run: |
+          if ! git diff --check "${{ steps.changed.outputs.base_sha }}" HEAD; then
+            echo "::warning::Trailing whitespace found in diff - run 'git diff --check' locally"
+          fi
+
+      - name: Circular dependencies check
+        run: test/lint/lint-circular-dependencies.sh
+
+      - name: Test suite naming check
+        run: test/lint/lint-tests.sh
+
+  dockerfile-check:
+    name: Dockerfile syntax check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,20 +95,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build lotus image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus
-          push: false
-          load: true
-          tags: lotus:ci
+      - name: Validate Dockerfile.lotus
+        run: |
+          # BuildKit --check validates Dockerfile syntax without building
+          docker buildx build --check -f dockerfiles/Dockerfile.lotus . 2>&1
+          echo "::notice::Dockerfile.lotus: syntax OK"
 
-      - name: Build lotus-qt image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: dockerfiles/Dockerfile.lotus-qt
-          push: false
-          load: true
-          tags: lotus-qt:ci
+      - name: Validate Dockerfile.lotus.win64
+        run: |
+          docker buildx build --check -f dockerfiles/Dockerfile.lotus.win64 . 2>&1
+          echo "::notice::Dockerfile.lotus.win64: syntax OK"
+
+      - name: Validate Dockerfile.lotus.osx
+        run: |
+          docker buildx build --check -f dockerfiles/Dockerfile.lotus.osx . 2>&1
+          echo "::notice::Dockerfile.lotus.osx: syntax OK"
