@@ -41,9 +41,12 @@ jobs:
 
       - name: Shell syntax check (changed files only)
         run: |
+          # bash -n, never sh -n: the runner's /bin/sh is dash, and every script in this tree is
+          # bash (55 of 69 by shebang). dash cannot parse a here-string or an array assignment, so
+          # sh -n reports correct scripts as broken.
           mapfile -t files < <(grep -E '\.sh$' changed_files.txt || true)
           for f in "${files[@]}"; do
-            sh -n "$f"
+            bash -n "$f"
           done
           echo "Checked ${#files[@]} shell file(s)"
 

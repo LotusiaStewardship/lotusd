@@ -69,7 +69,7 @@ build differently — it fails that gate on symbols no source change can remove.
 Triggers on `pull_request` against `master`. It does not build; it lints.
 
 - **`lint`** — project linters scoped to the files the PR changed:
-  yamllint, `sh -n`, `py_compile` + `lint-python-format.py`, `lint-format-strings.py`,
+  yamllint, `bash -n`, `py_compile` + `lint-python-format.py`, `lint-format-strings.py`,
   a diff-scoped trailing-whitespace check, and the two project-wide invariants
   (`lint-circular-dependencies.sh`, `lint-tests.sh`).
 - **`dockerfile-check`** — `docker buildx build --check` on each Dockerfile in

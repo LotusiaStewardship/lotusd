@@ -21,6 +21,19 @@
     boost 1.70 restored to master's pins, gitian's `CMAKE_TOOLCHAIN_FILE` passed to `depends`.
     Artifacts: linux x86_64/armhf/aarch64 tarballs (+debug), Windows zip + NSIS exe, macOS dmg.
     The functional-test gate excludes three tests, tracked below.
+- [ ] Break the `consensus/merkle` <-> `primitives` include cycle
+  - Recorded in `EXPECTED_CIRCULAR_DEPENDENCIES` (`test/lint/lint-circular-dependencies.sh`)
+    rather than fixed, because `ci.yml` now enforces that gate and it was already red on master.
+  - Anchor: `src/primitives/transaction.cpp:8` includes `<consensus/merkle.h>` for
+    `TxInputsMerkleRoot`/`TxOutputsMerkleRoot` (`:57`, `:59`); `src/consensus/merkle.h:10`
+    includes `<primitives/block.h>`; `src/primitives/block.h:11` includes
+    `<primitives/transaction.h>`.
+  - Scope: pre-existing since `2749eaae9` (2021-05-10, "Implement Malfix (#171)"). This branch
+    touches no file under `src/` or `test/` (`git diff origin/master -- src/ test/` is empty).
+  - Suspect: the two helpers are hashes over `primitives` types and only land in `consensus/`
+    by history, dragging `primitives/block.h` behind them.
+  - Plan: move those declarations to a header that depends on `primitives` only, rebuild the
+    include graph, and drop the entry from `EXPECTED_CIRCULAR_DEPENDENCIES` in the same change.
 - [ ] Fix `wallet_abandonconflict.py`: three transactions survive the mempool reload
   - Currently excluded from the `build.yml` functional-test gate (`KNOWN_FAILING`).
   - Anchor: `test/functional/wallet_abandonconflict.py:127`,

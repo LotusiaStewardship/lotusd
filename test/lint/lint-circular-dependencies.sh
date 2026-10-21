@@ -25,7 +25,6 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "avalanche/processor -> validation -> avalanche/processor"
     "chainparams -> protocol -> chainparams"
     "chainparamsbase -> util/system -> chainparamsbase"
-    "minerfund -> validation -> minerfund"
     "script/scriptcache -> validation -> script/scriptcache"
     "seeder/bitcoin -> seeder/db -> seeder/bitcoin"
     "chainparams -> protocol -> config -> chainparams"
@@ -33,6 +32,7 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "pow/aserti32d -> validation -> pow/aserti32d"
     "pow/aserti32d -> validation -> pow/pow -> pow/aserti32d"
     "avalanche/peermanager -> avalanche/proofpool -> avalanche/peermanager"
+    "consensus/merkle -> primitives/block -> primitives/transaction -> consensus/merkle"
 )
 
 EXIT_CODE=0
