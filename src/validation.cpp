@@ -284,7 +284,7 @@ bool CheckSequenceLocks(const CTxMemPool &pool, const CTransaction &tx,
 // replay-protected SigHash ForkID value.
 //
 // If the command-line argument is not set, the function defaults to using
-// the consensus-defined secondKingsActivationTime parameter.
+// the consensus-defined firstChroniclesActivationTime parameter.
 //
 // @param params The consensus parameters containing default activation times.
 // @param nMedianTimePast The median time past of the previous 11 blocks.
@@ -292,7 +292,7 @@ bool CheckSequenceLocks(const CTxMemPool &pool, const CTransaction &tx,
 static bool IsReplayProtectionEnabled(const Consensus::Params &params,
                                       int64_t nMedianTimePast) {
     return nMedianTimePast >= gArgs.GetArg("-replayprotectionactivationtime",
-                                           params.secondKingsActivationTime);
+                                           params.firstChroniclesActivationTime);
 }
 
 // Check if replay protection is enabled based on the previous block index.
