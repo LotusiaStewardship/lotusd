@@ -113,3 +113,13 @@ bool IsFirstKingsEnabled(const Consensus::Params &params,
            gArgs.GetArg("-firstkingsactivationtime",
                         params.firstKingsActivationTime);
 }
+
+bool IsSecondKingsEnabled(const Consensus::Params &params,
+                          const CBlockIndex *pindexPrev) {
+    if (pindexPrev == nullptr) {
+        return false;
+    }
+    return pindexPrev->GetMedianTimePast() >=
+           gArgs.GetArg("-secondkingsactivationtime",
+                        params.secondKingsActivationTime);
+}

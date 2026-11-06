@@ -284,7 +284,7 @@ bool CheckSequenceLocks(const CTxMemPool &pool, const CTransaction &tx,
 // replay-protected SigHash ForkID value.
 //
 // If the command-line argument is not set, the function defaults to using
-// the consensus-defined secondKingsActivationTime parameter.
+// the consensus-defined firstChroniclesActivationTime parameter.
 //
 // @param params The consensus parameters containing default activation times.
 // @param nMedianTimePast The median time past of the previous 11 blocks.
@@ -292,7 +292,7 @@ bool CheckSequenceLocks(const CTxMemPool &pool, const CTransaction &tx,
 static bool IsReplayProtectionEnabled(const Consensus::Params &params,
                                       int64_t nMedianTimePast) {
     return nMedianTimePast >= gArgs.GetArg("-replayprotectionactivationtime",
-                                           params.secondKingsActivationTime);
+                                           params.firstChroniclesActivationTime);
 }
 
 // Check if replay protection is enabled based on the previous block index.
@@ -4026,6 +4026,27 @@ static bool ContextualCheckBlock(const CBlock &block,
     // Note: This rule was added after some blocks were already mined, so we need
     // to be flexible with validation for older blocks.
     if (nHeight > 0) {
+        // From the Second Kings activation onward, the coinbase's first output
+        // must match the canonical form emitted by the miner:
+        // OP_RETURN <COINBASE_PREFIX> <nHeight>. This restores the strict
+        // pre-8.3.4 rule behind an MTP gate, so that blocks mined under the
+        // loosened vanity-prefix rule before activation are not retroactively
+        // rejected. A prefix match (not equality) is used so trailing data
+        // after the height remains accepted.
+        if (IsSecondKingsEnabled(params, pindexPrev)) {
+            const CScript expect =
+                CScript() << OP_RETURN << COINBASE_PREFIX << nHeight;
+            if (block.vtx[0]->vout[0].scriptPubKey.size() < expect.size() ||
+                !std::equal(expect.begin(), expect.end(),
+                            block.vtx[0]->vout[0].scriptPubKey.begin())) {
+                return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                     "bad-cb-height",
+                                     "block height mismatch in coinbase");
+            }
+            // Canonical form verified; the loosened check below is superseded.
+            return true;
+        }
+
         // Get the coinbase transaction's first output scriptPubKey
         const CScript &scriptPubKey = block.vtx[0]->vout[0].scriptPubKey;
         std::string scriptHex = HexStr(scriptPubKey);

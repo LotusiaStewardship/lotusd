@@ -428,7 +428,8 @@ void SetupServerArgs(NodeContext &node) {
         "-numbersactivationtime", "-deuteronomyactivationtime",
         "-joshuaactivationtime", "-judgesactivationtime", "-ruthactivationtime",
         "-firstsamuelactivationtime", "-secondsamuelactivationtime",
-        "-firstkingsactivationtime", "-secondkingsactivationtime"};
+        "-firstkingsactivationtime", "-secondkingsactivationtime",
+        "-firstchroniclesactivationtime"};
 
     // Set all of the args and their help
     // When adding new options to the categories, please keep and ensure

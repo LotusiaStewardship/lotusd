@@ -36,8 +36,9 @@ FIRST_SAMUEL_ACTIVATION_TIME = 2070000000
 SECOND_SAMUEL_ACTIVATION_TIME = 2080000000
 FIRST_KINGS_ACTIVATION_TIME = 2090000000
 SECOND_KINGS_ACTIVATION_TIME = 2100000000
+FIRST_CHRONICLES_ACTIVATION_TIME = 2110000000
 
-REPLAYPROTECTION_ACTIVATION_TIME = SECOND_KINGS_ACTIVATION_TIME
+REPLAYPROTECTION_ACTIVATION_TIME = FIRST_CHRONICLES_ACTIVATION_TIME
 
 # see consensus/addresses.h, use getaddressinfo to get the scriptPubKey
 GENESIS_SCRIPTS = [
@@ -146,12 +147,8 @@ SECOND_SAMUEL_SCRIPTS = [
 FIRST_KINGS_SCRIPTS = [
     "76a9148f47c5d3e8a936ab6bf9baeb6a53c4c6a0d4b35088ac",
 ]
-# TODO: fix these with mainnet scripts from src/consensus/addresses.h
 SECOND_KINGS_SCRIPTS = [
-    # hash turtle
-    "76a914909cc083a65426d53479751738f44cc50ec64b8c88ac",
-    # faithful turtle
-    "76a914053d4d0c28d299dc5c2be1ce5d29bf00cdb61b4088ac",
+    "76a914d03a7e6b979b705c931d137762582b27b10f442c88ac",
 ]
 
 
@@ -171,6 +168,7 @@ class MinerFundActivationTest(BitcoinTestFramework):
             f'-firstsamuelactivationtime={FIRST_SAMUEL_ACTIVATION_TIME}',
             f'-secondsamuelactivationtime={SECOND_SAMUEL_ACTIVATION_TIME}',
             f'-firstkingsactivationtime={FIRST_KINGS_ACTIVATION_TIME}',
+            f'-secondkingsactivationtime={SECOND_KINGS_ACTIVATION_TIME}',
             f'-replayprotectionactivationtime={REPLAYPROTECTION_ACTIVATION_TIME}',
         ]]
 
@@ -579,8 +577,52 @@ class MinerFundActivationTest(BitcoinTestFramework):
         #
         #   End Summer 2026 Upgrade Test
         #
+        #   Begin Winter 2026 Upgrade Test
+        #
+        # Using the second kings addresses before upgrade fails
+        block = make_block_cb_post_numbers(SECOND_KINGS_SCRIPTS)
+        prepare_block(block)
+        assert_equal(node.submitblock(ToHex(block)), "bad-cb-minerfund")
+        node.setmocktime(SECOND_KINGS_ACTIVATION_TIME)
+        # Mine 11 blocks with SECOND_KINGS_ACTIVATION in the middle
+        # That moves MTP exactly to SECOND_KINGS_ACTIVATION
+        for i in range(-6, 6):
+            block = make_block_cb_post_numbers(FIRST_KINGS_SCRIPTS)
+            block.nTime = SECOND_KINGS_ACTIVATION_TIME + i
+            prepare_block(block)
+            assert_equal(node.submitblock(ToHex(block)), None)
+        assert_equal(
+            node.getblockchaininfo()["mediantime"], SECOND_KINGS_ACTIVATION_TIME
+        )
 
-        # Check replay protection is not enabled yet (activates at Second Kings)
+        # Now using all previous addresses fails
+        for block in [
+            make_block_with_cb_scripts(GENESIS_SCRIPTS),
+            make_block_with_cb_scripts(EXODUS_SCRIPTS),
+            make_block_with_cb_scripts(LEVITICUS_SCRIPTS),
+            make_block_cb_post_numbers(NUMBERS_SCRIPTS),
+            make_block_cb_post_numbers(DEUTERONOMY_SCRIPTS),
+            make_block_cb_post_numbers(JOSHUA_SCRIPTS),
+            make_block_cb_post_numbers(JUDGES_SCRIPTS),
+            make_block_cb_post_numbers(RUTH_SCRIPTS),
+            make_block_cb_post_numbers(FIRST_SAMUEL_SCRIPTS),
+            make_block_cb_post_numbers(SECOND_SAMUEL_SCRIPTS),
+            make_block_cb_post_numbers(FIRST_KINGS_SCRIPTS),
+        ]:
+            prepare_block(block)
+            assert_equal(node.submitblock(ToHex(block)), "bad-cb-minerfund")
+
+        # Using the second kings scripts now works
+        for i in range(0, 12):
+            block = make_block_cb_post_numbers(SECOND_KINGS_SCRIPTS)
+            prepare_block(block)
+            assert_equal(node.submitblock(ToHex(block)), None)
+        #
+        #   End Winter 2026 Upgrade Test
+        #
+
+        # Check replay protection is not enabled yet (activates at First
+        # Chronicles)
         tx = CTransaction()
         tx.vin = [CTxIn(COutPoint(int(cointxid, 16), 1))]
         tx.vout = [CTxOut(int(SUBSIDY * COIN) // 2 - 1000,

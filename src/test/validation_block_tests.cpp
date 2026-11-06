@@ -408,4 +408,43 @@ BOOST_AUTO_TEST_CASE(mempool_locks_reorg) {
         rpc_thread.join();
     }
 }
+
+BOOST_AUTO_TEST_CASE(coinbase_height_second_kings_gate) {
+    GlobalConfig config;
+    const CChainParams &chainParams = config.GetChainParams();
+
+    bool ignored;
+    auto ProcessBlock = [&](std::shared_ptr<const CBlock> block) -> bool {
+        return Assert(m_node.chainman)
+            ->ProcessNewBlock(config, block, /* fForceProcessing */ true,
+                              /* fNewBlock */ &ignored);
+    };
+
+    BOOST_REQUIRE(
+        ProcessBlock(std::make_shared<CBlock>(chainParams.GenesisBlock())));
+    auto tip = GoodBlock(config, chainParams.GenesisBlock().GetHash(), 1);
+    BOOST_REQUIRE(ProcessBlock(tip));
+
+    // From the Second Kings activation onward, the coinbase's first output
+    // must carry the canonical "logos" prefix.
+    gArgs.ForceSetArg("-secondkingsactivationtime", "0");
+
+    // A canonical coinbase remains accepted.
+    auto good = GoodBlock(config, ::ChainActive().Tip()->GetBlockHash(),
+                          ::ChainActive().Tip()->nHeight + 1);
+    BOOST_CHECK(ProcessBlock(good));
+
+    // A vanity (non-"logos") coinbase is rejected.
+    auto block = Block(config, ::ChainActive().Tip()->GetBlockHash(),
+                       ::ChainActive().Tip()->nHeight + 1);
+    CMutableTransaction coinbase(*block->vtx[0]);
+    coinbase.vout[0].scriptPubKey =
+        CScript() << OP_RETURN << std::vector<uint8_t>{'F', 'R', 'B', 'T', 'C'}
+                  << block->nHeight;
+    block->vtx[0] = MakeTransactionRef(std::move(coinbase));
+    auto vanity =
+        FinalizeBlock(config.GetChainParams().GetConsensus(), block);
+    BOOST_CHECK(!ProcessBlock(vanity));
+}
+
 BOOST_AUTO_TEST_SUITE_END()

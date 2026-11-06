@@ -55,4 +55,8 @@ bool IsSecondSamuelEnabled(const Consensus::Params &params,
 bool IsFirstKingsEnabled(const Consensus::Params &params,
                          const CBlockIndex *pindexPrev);
 
+/** Check if December 21st, 2026 protocol upgrade has activated. */
+bool IsSecondKingsEnabled(const Consensus::Params &params,
+                          const CBlockIndex *pindexPrev);
+
 #endif // BITCOIN_CONSENSUS_ACTIVATION_H
