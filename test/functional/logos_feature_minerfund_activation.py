@@ -171,6 +171,7 @@ class MinerFundActivationTest(BitcoinTestFramework):
             f'-firstsamuelactivationtime={FIRST_SAMUEL_ACTIVATION_TIME}',
             f'-secondsamuelactivationtime={SECOND_SAMUEL_ACTIVATION_TIME}',
             f'-firstkingsactivationtime={FIRST_KINGS_ACTIVATION_TIME}',
+            f'-secondkingsactivationtime={SECOND_KINGS_ACTIVATION_TIME}',
             f'-replayprotectionactivationtime={REPLAYPROTECTION_ACTIVATION_TIME}',
         ]]
 
