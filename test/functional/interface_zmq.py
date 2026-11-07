@@ -300,7 +300,13 @@ class ZMQTest (BitcoinTestFramework):
         """Create a transaction that is initially added to node0's mempool
         and is then rejected by a transaction created and included into a
         block by node1."""
-        utxo = self.nodes[1].listunspent()[0]
+        # listunspent() returns coins in mapWallet (txid-lexicographic) order,
+        # not by amount, so [0] can be a small coin left by an earlier call of
+        # this helper ({address: 5} back into node1's own wallet) and the change
+        # output goes negative. Pick a coin that can fund the 5-XPI output plus
+        # the 0.1 fee and a non-dust change.
+        utxo = next(u for u in self.nodes[1].listunspent()
+                    if u["amount"] > Decimal("5.1"))
 
         def send_conflicting_transaction(send_node):
             """Send a transaction using an identical utxo as input and
