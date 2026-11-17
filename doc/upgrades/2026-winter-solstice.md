@@ -98,9 +98,10 @@ validation change had loosened.
 - Restores the strict canonical coinbase check (`OP_RETURN` followed by
   the `logos` prefix and the serialized block height) that a prior
   coinbase validation change loosened.
-- Gated behind the 2nd Kings MTP activation so that blocks mined under
-  the loosened vanity-prefix rule before activation are not
-  retroactively rejected.
+- Applies at every height after genesis, not from the 2nd Kings
+  activation: every block on the chain from height 1 already carries the
+  canonical form, so the restored rule rejects no historical block. The
+  2nd Kings gate does not apply to this check.
 - The loosened check returned `true` for any non-`logos` prefix past
   height 1,018,000, skipping the height commitment — the only mechanism
   keeping coinbase transaction IDs unique. This re-opened a
@@ -108,7 +109,7 @@ validation change had loosened.
 
 **Benefits:**
 
-- Closes a consensus-level coinbase uniqueness hole at the boundary.
+- Closes the coinbase uniqueness hole at the upgrade, not at activation.
 - Restores the invariant that a coinbase's height is part of its
   transaction ID.
 
