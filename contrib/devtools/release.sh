@@ -25,7 +25,7 @@ Usage:
   contrib/devtools/release.sh --bump patch|minor|major
   contrib/devtools/release.sh --version x.y.z
 
-Bumps the version in CMakeLists.txt and contrib/aur/lotus/PKGBUILD, commits it as
+Bumps the version in CMakeLists.txt and both AUR PKGBUILDs, commits it as
 "Bump version to X.Y.Z", creates tag vX.Y.Z and pushes both to origin/master.
 
 Preconditions: on master, no uncommitted changes to tracked files.
@@ -91,15 +91,57 @@ if [ "$current" = "$new" ]; then
     exit 1
 fi
 
+# Checked before anything is written: `git tag` would otherwise abort *after* the bump commit
+# landed, leaving master with an unpushed version commit, no tag, and a tree the script refuses
+# to bump again ("version unchanged").
+if git rev-parse --verify --quiet "refs/tags/v$new" >/dev/null; then
+    echo "error: tag v$new already exists locally" >&2
+    exit 1
+fi
+if [ -n "$(git ls-remote --tags origin "refs/tags/v$new" 2>/dev/null)" ]; then
+    echo "error: tag v$new already exists on origin" >&2
+    exit 1
+fi
+
 echo "Bumping version: $current -> $new"
 
 # -i.bak works on both GNU sed and BSD sed; the backup is removed on success.
 sed -i.bak "s/^\\([[:space:]]*\\)VERSION $current\$/\\1VERSION $new/" CMakeLists.txt
 rm -f CMakeLists.txt.bak
-sed -i.bak "s/pkgver=$current/pkgver=$new/" contrib/aur/lotus/PKGBUILD
-rm -f contrib/aur/lotus/PKGBUILD.bak
+tree_version=$(awk '/^[[:space:]]*VERSION/{print $2; exit}' CMakeLists.txt)
+if [ "$tree_version" != "$new" ]; then
+    echo "error: CMakeLists.txt declares '$tree_version' after the bump, expected '$new'" >&2
+    exit 1
+fi
 
-git add CMakeLists.txt contrib/aur/lotus/PKGBUILD
+# Both AUR packages pin their source tarball by tag (`archive/v$pkgver.tar.gz`), so a PKGBUILD
+# left behind ships an older tree: for lotus-qt that is a node without the current consensus
+# rules. pkgver is therefore set from $new rather than $current, so a PKGBUILD that drifted out
+# of sync catches up here instead of silently keeping its version. pkgrel counts re-packages of
+# the same pkgver and resets on every version bump (contrib/aur/README.md).
+for pkgbuild in contrib/aur/lotus/PKGBUILD contrib/aur/lotus-qt/PKGBUILD; do
+    if [ ! -f "$pkgbuild" ]; then
+        echo "error: $pkgbuild is missing" >&2
+        exit 1
+    fi
+    was=$(sed -n 's/^pkgver=//p' "$pkgbuild")
+    sed -i.bak -e "s/^pkgver=.*/pkgver=$new/" -e "s/^pkgrel=.*/pkgrel=0/" "$pkgbuild"
+    rm -f "$pkgbuild.bak"
+    now=$(sed -n 's/^pkgver=//p' "$pkgbuild")
+    if [ "$now" != "$new" ]; then
+        echo "error: $pkgbuild declares pkgver='$now' after the bump, expected '$new'" >&2
+        exit 1
+    fi
+    if [ "$was" != "$current" ]; then
+        echo "note: $pkgbuild was at '$was', catching it up to $new" >&2
+    fi
+done
+
+# -u stages the tracked copies only. `.gitignore` carries a bare `lotus-qt` rule from the
+# autotools era that also matches contrib/aur/lotus-qt/, and a plain `git add` on that path
+# exits non-zero even though the file is tracked -- which, under `set -e`, would leave the tree
+# bumped but uncommitted.
+git add -u CMakeLists.txt contrib/aur/lotus/PKGBUILD contrib/aur/lotus-qt/PKGBUILD
 git commit -m "Bump version to $new"
 git tag "v$new"
 

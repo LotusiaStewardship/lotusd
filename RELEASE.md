@@ -3,13 +3,13 @@
 Releases are cut from `master` by a tracked script:
 
 ```bash
-contrib/devtools/release.sh --bump patch      # 11.5.1 -> 11.5.2
-contrib/devtools/release.sh --bump minor      # 11.5.1 -> 11.6.0
-contrib/devtools/release.sh --bump major      # 11.5.1 -> 12.0.0
-contrib/devtools/release.sh --version 11.5.2  # explicit
+contrib/devtools/release.sh --bump patch      # 12.0.1 -> 12.0.2
+contrib/devtools/release.sh --bump minor      # 12.0.1 -> 12.1.0
+contrib/devtools/release.sh --bump major      # 12.0.1 -> 13.0.0
+contrib/devtools/release.sh --version 12.0.2  # explicit
 ```
 
-`make release bump=patch` and `make release VERSION=11.5.2` still work as a local convenience,
+`make release bump=patch` and `make release VERSION=12.0.2` still work as a local convenience,
 but the root `Makefile` is **not in version control** (`.gitignore` carries a `Makefile` rule
 from the autotools era), so the script is the procedure — it is what a fresh clone has.
 
@@ -25,17 +25,44 @@ from the autotools era), so the script is the procedure — it is what a fresh c
 
 1. Reads the current version from `CMakeLists.txt` (the `VERSION` field in `project()`).
 2. Bumps it, or applies `--version`.
-3. Updates `CMakeLists.txt` and `contrib/aur/lotus/PKGBUILD`.
-4. Commits as `Bump version to X.Y.Z`.
-5. Tags that commit as `vX.Y.Z`.
-6. Pushes `master` and **only** that tag to `origin`. It does not use `--tags`, which would
+3. Refuses to continue if `vX.Y.Z` already exists locally or on `origin`. Checking there rather
+   than at `git tag` avoids the alternative: a bump commit on `master` with no tag, and a tree
+   the script then declines to bump again.
+4. Updates every file that carries the version (see below) and fails if any of them does not end
+   up carrying the new one.
+5. Commits as `Bump version to X.Y.Z`.
+6. Tags that commit as `vX.Y.Z`.
+7. Pushes `master` and **only** that tag to `origin`. It does not use `--tags`, which would
    publish every local tag — this repository carries `archive/*` and `backup/*` refs that must
    never be pushed.
+
+## Version-carrying files
+
+Three tracked files hold the version, and the script is their only writer:
+
+| File | Field | What consumes it |
+| --- | --- | --- |
+| `CMakeLists.txt` | `project(VERSION ...)` | `CLIENT_VERSION_*`, `--version` output, the Windows resource, the macOS bundle, CPack's installer name |
+| `contrib/aur/lotus/PKGBUILD` | `pkgver` | source tarball `archive/v$pkgver.tar.gz` |
+| `contrib/aur/lotus-qt/PKGBUILD` | `pkgver` | source tarball `archive/v$pkgver.tar.gz` |
+
+Everything else derives from `CMakeLists.txt`, so no other file needs editing for a release.
+
+The PKGBUILDs are not cosmetic. Each builds from the tag named by its own `pkgver`, so one left
+behind publishes an older tree to AUR users without any build failure: a `lotus-qt` that predates
+the current consensus rules is a node that forks. The script writes `pkgver` from the new version
+instead of incrementing the old one, so a PKGBUILD that has drifted out of sync catches up in the
+same bump rather than keeping its version. `pkgrel` resets to 0 on every bump — it counts
+re-packages of an unchanged `pkgver` (`contrib/aur/README.md`).
+
+Bumping these files is not the same as publishing them. `contrib/aur/update-aur.sh` regenerates
+the checksums and `.SRCINFO` and pushes to `aur.archlinux.org`; it is a manual step after a
+release, and nothing in CI runs it.
 
 ## Version rules
 
 Versions are `x.y.z`, numeric only. `project(VERSION ...)` in `CMakeLists.txt` rejects suffixes,
-so `11.6.0-rc1` is not a valid release version.
+so `12.1.0-rc1` is not a valid release version.
 
 The tag and the tree must agree. `project(VERSION ...)` drives `CLIENT_VERSION_*`, the binaries'
 `--version` output, the Windows resource and CPack's installer name, while the tag drives the
