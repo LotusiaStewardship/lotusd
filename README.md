@@ -174,6 +174,21 @@ Do not open a public issue for a vulnerability. See [`DISCLOSURE_POLICY.md`](DIS
 report privately, do not exploit on mainnet or testnet, and allow time for a coordinated fix.
 Regtest is the only acceptable place to build a proof of concept.
 
+## Attribution
+
+Three layers of work are in this tree:
+
+- **[Bitcoin Core](https://github.com/bitcoin/bitcoin)** — the original Bitcoin node.
+- **[Bitcoin ABC](https://github.com/Bitcoin-ABC/bitcoin-abc)** — the Bitcoin Cash implementation
+  this fork is based on.
+- **[GiveLotus](https://github.com/givelotus/lotusd)** (2021–2024) — Shammah Chancellor
+  ([@schancel](https://github.com/schancel)) and Tobias Ruck
+  ([@EyeOfPython](https://github.com/EyeOfPython)) wrote the Lotus consensus layer: the 160-byte
+  header and its three-layer hash, 5040-block epochs, ASERT difficulty, difficulty-based subsidy,
+  the miner fund, `SIGHASH_LOTUS` and the `lotus_` address format.
+
+The copyright headers in the source record this history and are kept intact.
+
 ## License
 
 MIT — see [`COPYING`](COPYING), which carries the Bitcoin Core and Bitcoin ABC copyright notices.
