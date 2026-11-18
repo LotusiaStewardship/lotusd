@@ -1,0 +1,35 @@
+# check=skip=InvalidDefaultArgInFrom
+# Seeder-only runtime image.
+#
+# lotus-seeder ships inside the daemon image, but that image also carries the GUI, the
+# wallet and ~275 MB of debug symbols -- payload the seeding host never uses. This image
+# copies the one binary out of the published release image, so the seeder host pulls a
+# ~90 MB image instead of ~340 MB and there is no daemon entrypoint to override at run
+# time.
+#
+# The base and the binary must be the same release, so VERSION is mandatory:
+#   docker build -f dockerfiles/Dockerfile.lotus-seeder --build-arg VERSION=12.0.1 .
+ARG VERSION
+FROM ghcr.io/lotusiastewardship/lotus-x86_64-linux-gnu:${VERSION} AS src
+
+FROM debian:bookworm-slim
+
+# Same runtime base as the daemon image: the depends build links most libraries
+# statically, and libatomic is one of the few that is not.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=src /opt/lotus/bin/lotus-seeder /usr/local/bin/lotus-seeder
+RUN chmod +x /usr/local/bin/lotus-seeder
+
+ARG VERSION
+LABEL org.opencontainers.image.version="${VERSION}"
+
+# dnsseed.dat, dnsseed.dat.new and dnsseed.dump are opened relative to the working
+# directory (src/seeder/main.cpp), so the working directory is where the peer database
+# lives. A container started with a different workdir silently starts from an empty db.
+WORKDIR /data
+VOLUME /data
+
+ENTRYPOINT ["lotus-seeder"]
