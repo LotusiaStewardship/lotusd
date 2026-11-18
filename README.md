@@ -1,167 +1,190 @@
 <p align="center">
   <a href="https://lotusia.org">
-    <img src="share/pixmaps/lotuslogo.png" alt="Lotus" title="Lotus" width="60%" style="max-width: 500px; height: auto;">
-  </a>
-</p>
- 
-<p align="center">
-  <a href="https://github.com/LotusiaStewardship/lotusd">
-    <img src="https://img.shields.io/badge/Main%20Fork-LotusiaStewardship-blue" alt="Main Fork: LotusiaStewardship">
-  </a>
-</p>
-<p align="center">
-  <a href="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml">
-    <img src="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml/badge.svg?branch=master" alt="CI Status">
-  </a>
-  <a href="https://github.com/LotusiaStewardship/lotusd/releases/latest">
-    <img src="https://img.shields.io/github/v/release/LotusiaStewardship/lotusd" alt="Latest Release">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/LotusiaStewardship/lotusd" alt="License">
-  </a>
-  <a href="https://github.com/LotusiaStewardship/lotusd/issues">
-    <img src="https://img.shields.io/github/issues/LotusiaStewardship/lotusd" alt="Issues">
-  </a>
-  <a href="https://github.com/LotusiaStewardship/lotusd/network/members">
-    <img src="https://img.shields.io/github/forks/LotusiaStewardship/lotusd" alt="Forks">
-  </a>
-  <a href="https://github.com/LotusiaStewardship/lotusd/stargazers">
-    <img src="https://img.shields.io/github/stars/LotusiaStewardship/lotusd" alt="Stars">
+    <img src="share/pixmaps/lotuslogo.png" alt="Lotus" width="340">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Boblepointu/lotusd">
-    <img src="https://img.shields.io/badge/Development-Boblepointu-orange" alt="Development: Boblepointu">
-  </a>
+  <a href="https://github.com/LotusiaStewardship/lotusd/actions/workflows/build.yml"><img src="https://github.com/LotusiaStewardship/lotusd/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
+  <a href="https://github.com/LotusiaStewardship/lotusd/releases/latest"><img src="https://img.shields.io/github/v/release/LotusiaStewardship/lotusd" alt="Latest release"></a>
+  <a href="https://github.com/LotusiaStewardship/lotusd/tags"><img src="https://img.shields.io/github/v/tag/LotusiaStewardship/lotusd?label=version" alt="Version of this tree"></a>
+  <a href="COPYING"><img src="https://img.shields.io/github/license/LotusiaStewardship/lotusd" alt="License: MIT"></a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml">
-    <img src="https://github.com/Boblepointu/lotusd/actions/workflows/lotus-main-ci.yml/badge.svg?branch=master" alt="CI Status">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/releases/latest">
-    <img src="https://img.shields.io/github/v/release/Boblepointu/lotusd" alt="Latest Release">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/Boblepointu/lotusd" alt="License">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/issues">
-    <img src="https://img.shields.io/github/issues/Boblepointu/lotusd" alt="Issues">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/network/members">
-    <img src="https://img.shields.io/github/forks/Boblepointu/lotusd" alt="Forks">
-  </a>
-  <a href="https://github.com/Boblepointu/lotusd/stargazers">
-    <img src="https://img.shields.io/github/stars/Boblepointu/lotusd" alt="Stars">
-  </a>
-</p>
+`lotusd` is the core full node for the Lotusia network: the reference implementation of Lotus
+consensus. It validates and relays blocks, maintains the UTXO set, serves RPC, REST, ZMQ and NNG
+interfaces, builds block templates for miners, and ships a wallet and desktop GUI.
 
-<div align="center">
-  
-  # 🌸Lotus: Digital Currency for Human Relationships🌸
-  
-  <hr>
-  
-  > *"Cultivating connections, growing prosperity, blooming together."*
-  
-</div>
+Lotus (ticker **XPI**) is a proof-of-work currency whose issuance follows difficulty rather than a
+halving schedule, and whose rules change only at scheduled upgrades. This repository is where
+those rules are defined.
 
-## ✨ What is Lotus?
+`lotusd` is a fork of [Bitcoin ABC](https://github.com/Bitcoin-ABC/bitcoin-abc), which descends
+from Bitcoin Core. The transaction, script, mempool, P2P, wallet and RPC layers are ABC's work,
+carried forward and modified; the consensus layer — 160-byte header, week-long epochs, ASERT
+difficulty, difficulty-based subsidy, miner fund, `SIGHASH_LOTUS`, `lotus_` addresses — is Lotus's
+own. [`doc/chain-mechanics.md`](doc/chain-mechanics.md) documents each rule against the source.
 
-[Lotus](https://lotusia.org/) is a digital currency that enables instant payments to anyone, anywhere in the world. It uses peer-to-peer technology to operate with no central authority: managing transactions and issuing money are carried out collectively by the network. Lotus combines the best qualities of the modern monetary system and the new generation of digital cryptocurrencies, resulting in an ethical currency that is economically viable.
+**Mainnet genesis:** 2021-06-21. Consensus changes activate by median time past on a solstice
+cadence; the [activation table](doc/chain-mechanics.md#protocol-upgrades) lists every epoch with
+its timestamp.
 
-### 🌟 Key Features:
-- **💯 Debt-free**: Issued through Proof-of-Work mining
-- **📈 Inflationary**: No arbitrary issuance cap, removing incentives to hoard
-- **🌊 Abundant**: Issuance of new Lotus is adjusted to demand of the Lotusia economy
-- **📊 Stabilizing**: Lotus can be removed from circulation through voluntary destructive use to stabilize volatility
+## Binaries
 
-## 🧠 Core Principles
+| Binary | Role |
+| --- | --- |
+| `lotusd` | Full node daemon |
+| `lotus-cli` | RPC client |
+| `lotus-tx` | Offline transaction utility |
+| `lotus-wallet` | Wallet tool |
+| `lotus-qt` | Desktop wallet |
+| `lotus-seeder` | DNS seeder |
 
-Reciprocity is the core of all human relationships. The Lotus currency facilitates and symbolizes the value we see in each other, allowing us to build a more connected and prosperous society.
+## Install
 
-## 🔧 Technology
+**Release binaries:** Linux `x86_64`, `arm-linux-gnueabihf` and `aarch64` tarballs with debug
+symbols, a macOS `.dmg` and tarball, a Windows zip and installer, the source tarball, and
+`SHA256SUMS`. Take them from the
+[releases page](https://github.com/LotusiaStewardship/lotusd/releases) and verify:
 
-Lotus is a fork of Bitcoin ABC that has been enhanced and modified to support the Lotusia vision. The blockchain is highly scalable, permissionless, and designed to adapt to the growing needs of the ecosystem.
-
-## ⛏️ Mining Lotus
-
-Lotus uses Proof-of-Work for issuance. You can participate in securing the network and earn newly minted Lotus through mining.
-
-### 🖥️ GPU Mining
-
-For optimal mining performance, we provide a dedicated GPU miner that utilizes OpenCL to efficiently mine Lotus blocks on your graphics card. Our GPU miner supports both solo mining and pool mining configurations.
-
-#### 💎 Key Features:
-- 🚀 OpenCL-based for high-performance mining
-- 🔄 Compatible with both AMD and NVIDIA GPUs
-- 🏊‍♂️ Supports both solo and pool mining
-- ⚙️ Easy configuration through command line or config file
-
-For detailed instructions on setting up and using the GPU miner, see the [GPU Mining Documentation](gpuminer/README.md).
-
-## 🚀 Quick Start Examples
-
-### 📦 Available Binary Packages
-
-You can download the latest Lotus Root binaries from the [Releases page](https://github.com/LotusiaStewardship/lotusd/releases):
-
-#### Package Options
-- **Combined Packages**:
-  - `lotus-binaries-[VERSION].tar.gz` - All Lotus binaries in a single tarball
-  - `lotus-binaries-[VERSION].zip` - All Lotus binaries in a single zip file
-
-- **Individual Component Packages**:
-  - `lotus-gpu-miner-[VERSION].tar.gz` - GPU miner with required kernels (tar.gz format)
-  - `lotus-gpu-miner-[VERSION].zip` - GPU miner with required kernels (zip format)
-  - `lotus-node-[VERSION].tar.gz` - Lotus full node daemon (tar.gz format)
-  - `lotus-node-[VERSION].zip` - Lotus full node daemon (zip format)
-  - `lotus-qt-[VERSION].tar.gz` - Lotus desktop wallet (tar.gz format)
-  - `lotus-qt-[VERSION].zip` - Lotus desktop wallet (zip format)
-  - `lotus-cli-[VERSION].tar.gz` - Lotus command-line tools (tar.gz format)
-  - `lotus-cli-[VERSION].zip` - Lotus command-line tools (zip format)
-
-> **Note:** The GPU miner now includes embedded OpenCL kernel code, making it a completely self-contained binary.
-
-For detailed GPU miner documentation, see the [GPU Mining Documentation](gpuminer/README.md).
-
-#### 🏊‍♂️ Example: Mining on a Pool
-##### Using the CLI Miner
 ```bash
-# Replace with your own mining pool details and address
-# Note: For pool mining, username and password can be any dummy values
-lotus-miner-cli --rpc-password password --rpc-poll-interval 1 --rpc-url https://burnlotus.org --rpc-user miner --mine-to-address lotus_16PSJPZTD2aXDZJSkCYfdSC4jzkVzHk1JQGojw2BN --kernel-size 21 --poolmining
+sha256sum -c SHA256SUMS
 ```
 
-##### Using the Docker Miner
+**From source:** a C++17 compiler, CMake ≥ 3.16, Python ≥ 3.6, plus Boost, libevent and OpenSSL.
+
 ```bash
-docker run --gpus all -it --rm ghcr.io/boblepointu/lotus-gpu-miner:latest --gpu-index 0 --kernel-size 22 --mine-to-address lotus_16PSJLkXR2zHXC4JCFmLcY6Tpxb9qLbP9rzcsGSgo --rpc-url https://burnlotus.org --poolmining
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j"$(nproc)"
+cmake --install build --prefix "$HOME/.local"   # optional
 ```
 
-## 🌐 Community Resources
+A system-library build is the fast path, but the **supported** build is the pinned dependency tree.
+Known failures on distributions that ship newer libraries than this codebase targets:
 
-- 🏠 Website: [https://lotusia.org/](https://lotusia.org/)
-- 🔍 Block Explorer: [https://explorer.lotusia.org/](https://explorer.lotusia.org/)
-- 💬 Telegram Airdrop Channel: [https://t.me/LotusiaStewardship](https://t.me/LotusiaStewardship)
-- 💬 Telegram Talk Channel: [https://t.me/LotusiaDiscourse](https://t.me/LotusiaDiscourse)
-- 📚 Documentation: [https://docs.lotusia.org/](https://docs.lotusia.org/)
-- 🌐 Pool: [https://burnlotus.org/](https://burnlotus.org/)
+- **GCC 16 + binutils 2.42** — the assembler rejects the `.base64` directive; the build dies in
+  `src/crypto/sha256.cpp`.
+- **Boost 1.92** — `src/wallet` uses Filesystem APIs that release removed (`fs::copy_option`,
+  `recursive_directory_iterator::level()`).
+- **Qt 6** — the GUI requires Qt 5.
 
-## 📜 License
+Use `depends/` for the pinned toolchain, or disable the affected component:
 
-Lotus is released under the terms of the MIT license. See [COPYING](COPYING) for more information or see <https://opensource.org/licenses/MIT>.
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+      -DBUILD_BITCOIN_WALLET=OFF -DBUILD_BITCOIN_QT=OFF
+```
 
-## 👨‍💻 Development Process
+Platform notes: [unix](doc/build-unix.md) · [macOS](doc/build-osx.md) ·
+[Windows](doc/build-windows.md) · [containers](dockerfiles).
 
-This Github repository contains the source code of Lotus. If you would like to contribute, please read [CONTRIBUTING](CONTRIBUTING.md).
+## Run a node
 
-## 🔐 Disclosure Policy
+```bash
+lotusd -daemon
+lotus-cli -rpcwait getblockchaininfo
+lotus-cli stop
+```
 
-See [DISCLOSURE_POLICY](DISCLOSURE_POLICY.md)
+The data directory is `~/.lotus` on Linux (`-datadir` to change it); RPC authenticates with the
+cookie file there unless you set `-rpcuser` / `-rpcpassword`. A minimal `~/.lotus/lotus.conf`:
+
+```ini
+listen=1
+maxconnections=64
+# prune=550        # keep ~550 MiB of blocks instead of the full chain
+```
+
+`-testnet` and `-regtest` select the other chains. **Do not expose the RPC port (10604) to the
+internet** — it can spend wallet funds.
+
+## Consensus at a glance
+
+- **Header:** 160 bytes, not Bitcoin's 80. It commits to height, its own size, an epoch anchor and
+  a metadata hash, and hashes in three SHA-256 layers.
+- **Epochs:** 5040 blocks (~1 week); every block commits to the last block of the previous epoch.
+- **Proof of work:** ASERT difficulty, 120 s spacing, 2-day half-life, retargeted every block.
+- **Issuance:** `R = 260 XPI × (1 + log₂ D)`. No halving, no supply cap; bounded at 57,460 XPI per
+  block by construction.
+- **Miner fund:** half of every block reward must pay the epoch's consensus address set, either to
+  one address per block (cycling) or split across all of them (fan-out).
+- **Coinbase:** first output must be `OP_RETURN "logos" <height>` from height 1 up; that commitment
+  keeps coinbase txids unique.
+- **Scripts:** `SIGHASH_FORKID` on every input; `SIGHASH_LOTUS` for Taproot spends, enabled at the
+  2nd Samuel activation.
+- **Upgrades:** MTP-gated hard forks on a solstice cadence, each behind an `Is...Enabled`
+  predicate that switches the rule set at its activation time.
+
+Details, edge cases and source references: [`doc/chain-mechanics.md`](doc/chain-mechanics.md).
+
+## Network
+
+| | Mainnet | Testnet | Regtest |
+| --- | --- | --- | --- |
+| Data directory | `~/.lotus` | `~/.lotus/testnet3` | `~/.lotus/regtest` |
+| P2P / RPC port | 10605 / 10604 | 11605 / 11604 | 12605 / 12604 |
+| Genesis | `000000000abc0cde…89d958f470` | `00000000080a6c96…d18ca7bad1` | `106050de…7bba9c9f` |
+
+Indexers, pools and other out-of-process consumers read blocks, undo data, mempool contents and
+mining templates over the NNG interface (`src/nng_interface/nng_interface.fbs`), or subscribe to
+ZMQ topics.
+
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| [Chain mechanics](doc/chain-mechanics.md) | Every consensus rule, with file references |
+| [Upgrades](doc/upgrades/) | Per-epoch consensus change notes |
+| [Configuration](doc/lotus-conf.md) | `lotus.conf` format and options |
+| [RPC](doc/JSON-RPC-interface.md) | RPC and REST interfaces; per-command docs in [doc/rpc](doc/rpc) |
+| [Data directory](doc/files.md) | Block files, chainstate, wallets, logs |
+| [Release process](RELEASE.md) | How a version is cut, tagged and published |
+
+`lotus-cli help` lists every command a running node exposes.
+
+## Testing
+
+Unit tests (not part of the default build) and the functional suite that drives real nodes over RPC
+and P2P:
+
+```bash
+cmake --build build --target check
+./build/test/functional/test_runner.py
+./build/test/functional/test_runner.py --extended
+```
+
+`check-upgrade-activated` runs the same suite with activation timestamps forced into the past, so
+post-upgrade code paths are exercised. CI runs lint on every pull request and the functional suite
+for every tagged release. See [doc/unit-tests.md](doc/unit-tests.md) and
+[doc/functional-tests.md](doc/functional-tests.md).
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the long version. In short: branch from `master`, keep
+diffs small, do not mix renames with behaviour changes, and add tests with the change. Consensus
+changes must state their activation point and cover both sides of the boundary. Contributions are
+MIT-licensed.
+
+Discussion: [Telegram](https://t.me/givelotus).
+
+## Security
+
+Do not open a public issue for a vulnerability. See [`DISCLOSURE_POLICY.md`](DISCLOSURE_POLICY.md):
+report privately, do not exploit on mainnet or testnet, and allow time for a coordinated fix.
+Regtest is the only acceptable place to build a proof of concept.
+
+## License
+
+MIT — see [`COPYING`](COPYING), which carries the Bitcoin Core and Bitcoin ABC copyright notices.
+Those attributions must be preserved in redistributions.
 
 ---
 
 <p align="center">
-  <strong>🌸 Join us in creating a more connected and prosperous world! 🌸</strong>
+  <a href="https://lotusia.org">Website</a> ·
+  <a href="https://lotusia.org/blog">Blog</a> ·
+  <a href="https://explorer.lotusia.org">Block explorer</a> ·
+  <a href="https://app.lotusia.org">Web wallet</a> ·
+  <a href="https://t.me/givelotus">Telegram</a>
 </p>
