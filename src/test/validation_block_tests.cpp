@@ -409,7 +409,7 @@ BOOST_AUTO_TEST_CASE(mempool_locks_reorg) {
     }
 }
 
-BOOST_AUTO_TEST_CASE(coinbase_height_second_kings_gate) {
+BOOST_AUTO_TEST_CASE(coinbase_height_commitment_enforced) {
     GlobalConfig config;
     const CChainParams &chainParams = config.GetChainParams();
 
@@ -425,9 +425,8 @@ BOOST_AUTO_TEST_CASE(coinbase_height_second_kings_gate) {
     auto tip = GoodBlock(config, chainParams.GenesisBlock().GetHash(), 1);
     BOOST_REQUIRE(ProcessBlock(tip));
 
-    // From the Second Kings activation onward, the coinbase's first output
-    // must carry the canonical "logos" prefix.
-    gArgs.ForceSetArg("-secondkingsactivationtime", "0");
+    // The canonical coinbase form is required at every height; no activation
+    // gate stands between a block and the check.
 
     // A canonical coinbase remains accepted.
     auto good = GoodBlock(config, ::ChainActive().Tip()->GetBlockHash(),
@@ -445,6 +444,17 @@ BOOST_AUTO_TEST_CASE(coinbase_height_second_kings_gate) {
     auto vanity =
         FinalizeBlock(config.GetChainParams().GetConsensus(), block);
     BOOST_CHECK(!ProcessBlock(vanity));
+
+    // A canonical prefix carrying the wrong height is rejected too.
+    auto wrong_height = Block(config, ::ChainActive().Tip()->GetBlockHash(),
+                              ::ChainActive().Tip()->nHeight + 1);
+    CMutableTransaction wrong_coinbase(*wrong_height->vtx[0]);
+    wrong_coinbase.vout[0].scriptPubKey = CScript()
+        << OP_RETURN << COINBASE_PREFIX << (wrong_height->nHeight - 1);
+    wrong_height->vtx[0] = MakeTransactionRef(std::move(wrong_coinbase));
+    auto wrong =
+        FinalizeBlock(config.GetChainParams().GetConsensus(), wrong_height);
+    BOOST_CHECK(!ProcessBlock(wrong));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

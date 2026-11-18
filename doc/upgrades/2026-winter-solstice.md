@@ -98,9 +98,17 @@ validation change had loosened.
 - Restores the strict canonical coinbase check (`OP_RETURN` followed by
   the `logos` prefix and the serialized block height) that a prior
   coinbase validation change loosened.
-- Gated behind the 2nd Kings MTP activation so that blocks mined under
-  the loosened vanity-prefix rule before activation are not
-  retroactively rejected.
+- Applies at every height after genesis, not from the 2nd Kings
+  activation: every block on the chain from height 1 already carries the
+  canonical form, so the restored rule rejects no historical block. The
+  2nd Kings gate does not apply to this check.
+- Enforced as soon as this change is deployed. 12.0.0 checked the
+  commitment only from the 2nd Kings activation, so until activation a
+  node running this change rejects a coinbase that an older node accepts.
+  Every block on the chain commits its height, so no block that exists is
+  affected.
+- Mining software that builds its own coinbase must emit this form;
+  `getblocktemplate` and the built-in miner already do.
 - The loosened check returned `true` for any non-`logos` prefix past
   height 1,018,000, skipping the height commitment — the only mechanism
   keeping coinbase transaction IDs unique. This re-opened a
@@ -108,7 +116,8 @@ validation change had loosened.
 
 **Benefits:**
 
-- Closes a consensus-level coinbase uniqueness hole at the boundary.
+- Closes the coinbase uniqueness hole as soon as the change is deployed,
+  rather than waiting for the 2nd Kings activation.
 - Restores the invariant that a coinbase's height is part of its
   transaction ID.
 
@@ -297,7 +306,7 @@ static bool IsReplayProtectionEnabled(const Consensus::Params &params,
 ### Validation and Testing
 
 - Extends functional coverage to the Winter Solstice 2026 boundary.
-- Adds native regression coverage for the coinbase height gate.
+- Adds native regression coverage for the coinbase height commitment.
 
 ## References
 
