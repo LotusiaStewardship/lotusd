@@ -117,16 +117,23 @@ RUN chmod +x /opt/lotus/bin/*
 ENV PATH="/opt/lotus/bin:${PATH}"
 
 # Expose commonly used ports
-# P2P network
-EXPOSE 9333
-# RPC interface
-EXPOSE 9332
-# RPC port from docker-compose
-EXPOSE 58525
+# P2P network (Lotus mainnet)
+EXPOSE 10605
+# RPC interface (Lotus mainnet)
+EXPOSE 10604
 
 # Set working directory
 WORKDIR /root
 
-# Default command to run the node daemon
+# Default command to run the node daemon.
+#
+# There is deliberately no -reindex: a plain `docker run` must not throw away the
+# datadir. RPC stays on the default 127.0.0.1:10604 with cookie authentication --
+# pass -rpcuser/-rpcpassword/-rpcbind/-rpcallowip yourself (behind published
+# ports) if the node has to serve RPC to another container. Only the two operator
+# nodes stay as explicit addnodes; everything else comes from seed.lotusia.org
+# (vSeeds) and the fixed seeds compiled in from contrib/seeds/nodes_main.txt.
 ENTRYPOINT ["/opt/lotus/bin/lotusd"]
-CMD ["-reindex", "-printtoconsole", "-datadir=/root/.lotus", "-addnode=116.103.232.62", "-addnode=69.234.67.246", "-addnode=146.70.211.96", "-addnode=70.92.25.116", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", "-addnode=45.119.84.253:10605", "-addnode=35.184.152.63:10605", "-rpcuser=lotus", "-rpcpassword=lkdjflheoiueiiir", "-rpcallowip=10.128.0.0/16", "-rpcbind=0.0.0.0:58525", "-rpcport=58525", "-rpcallowip=127.0.0.1", "-rpcthreads=8", "-disablewallet=0"]
+CMD ["-printtoconsole", "-datadir=/root/.lotus", \
+     "-addnode=147.135.88.232:10605", "-addnode=147.135.88.233:10605", \
+     "-rpcthreads=8", "-disablewallet=0"]
