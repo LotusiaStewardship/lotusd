@@ -21,9 +21,10 @@ those rules are defined.
 
 `lotusd` is a fork of [Bitcoin ABC](https://github.com/Bitcoin-ABC/bitcoin-abc), which descends
 from Bitcoin Core. The transaction, script, mempool, P2P, wallet and RPC layers are ABC's work,
-carried forward and modified; the consensus layer — 160-byte header, week-long epochs, ASERT
-difficulty, difficulty-based subsidy, miner fund, `SIGHASH_LOTUS`, `lotus_` addresses — is Lotus's
-own. [`doc/chain-mechanics.md`](doc/chain-mechanics.md) documents each rule against the source.
+carried forward and modified, as are ASERT difficulty and the miner fund. Lotus's own changes are
+the header format and its epoch anchor, the difficulty-based subsidy, `SIGHASH_LOTUS` and Taproot,
+and the `lotus_` address encoding. [`doc/chain-mechanics.md`](doc/chain-mechanics.md) documents each
+rule against the source.
 
 **Mainnet genesis:** 2021-06-21. Consensus changes activate by median time past on a solstice
 cadence; the [activation table](doc/chain-mechanics.md#protocol-upgrades) lists every epoch with
@@ -180,12 +181,13 @@ Three layers of work are in this tree:
 
 - **[Bitcoin Core](https://github.com/bitcoin/bitcoin)** — the original Bitcoin node.
 - **[Bitcoin ABC](https://github.com/Bitcoin-ABC/bitcoin-abc)** — the Bitcoin Cash implementation
-  this fork is based on.
+  this fork is based on. That includes the ASERT difficulty algorithm (Bitcoin Cash, November 2020)
+  and the miner fund, which comes from Bitcoin Cash's 2020 Infrastructure Funding Proposal.
 - **[GiveLotus](https://github.com/givelotus/lotusd)** (2021–2024) — Shammah Chancellor
   ([@schancel](https://github.com/schancel)) and Tobias Ruck
-  ([@EyeOfPython](https://github.com/EyeOfPython)) wrote the Lotus consensus layer: the 160-byte
-  header and its three-layer hash, 5040-block epochs, ASERT difficulty, difficulty-based subsidy,
-  the miner fund, `SIGHASH_LOTUS` and the `lotus_` address format.
+  ([@EyeOfPython](https://github.com/EyeOfPython)) wrote the Lotus changes on top: the 160-byte
+  header and its three-layer hash, the 5040-block epoch anchor, the difficulty-based subsidy,
+  `SIGHASH_LOTUS` and Taproot support, and the `lotus_` address format.
 
 The copyright headers in the source record this history and are kept intact.
 

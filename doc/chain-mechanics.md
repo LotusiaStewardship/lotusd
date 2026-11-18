@@ -99,8 +99,9 @@ schedule. That is a design choice of this fork, not an inherited Bitcoin ABC rul
 
 ## Miner fund
 
-**Half of every block reward** (subsidy plus fees) must be paid to the miner-fund address set of
-the epoch in force at that height. The value is split in one of two modes:
+**Half of every block reward** must be paid to the miner-fund address set of the epoch in force at
+that height. Half of each block's fees is burned before the reward is computed, so the reward is the
+subsidy plus the remaining half of the fees. The value is split in one of two modes:
 
 - **cycling** — one output, to `addresses[height % n]`, worth 50% of the block reward;
 - **fan-out** — one output per address, each worth `blockReward / (2 * n)`.
@@ -127,8 +128,9 @@ reproduce these outputs exactly or its blocks are invalid.
   the commitment are rejected with `bad-cb-height`.
 - The coinbase input script must be between 2 and 100 bytes (`MAX_COINBASE_SCRIPTSIG_SIZE`).
 - Coinbase outputs mature after **100 blocks** (`COINBASE_MATURITY`).
-- The coinbase may not claim more than subsidy + fees (`bad-cb-amount`), and the miner fund is
-  taken out of that same budget, not added on top of it.
+- The coinbase may not claim more than the subsidy plus the unburned half of the fees
+  (`bad-cb-amount`); the other half of the fees is burned. The miner fund comes out of that same
+  budget, not on top of it.
 - Every transaction after the coinbase must be strictly ordered by transaction ID, ascending, with
   no duplicates (`tx-ordering`, `tx-duplicate`). Block templates built by `getblocktemplate` and
   `generatetoaddress` already satisfy this; hand-built blocks must sort.
