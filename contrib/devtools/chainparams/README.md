@@ -1,10 +1,11 @@
 # Chainparams Constants
 
 Utilities to generate chainparams constants that are compiled into the client
-(see [src/chainparamsconstants.h](/src/chainparamsconstants.h).
+(see [src/networks/abc/chainparamsconstants.cpp](/src/networks/abc/chainparamsconstants.cpp).
 
 The chainparams constants are fetched from lotusd, dumped to intermediate
-files, and then compiled into [src/chainparamsconstants.h](/src/chainparamsconstants.h).
+files, and then compiled into
+[src/networks/abc/chainparamsconstants.cpp](/src/networks/abc/chainparamsconstants.cpp).
 If you're running lotusd locally, the following instructions will work
 out-of-the-box:
 
@@ -22,7 +23,7 @@ make_chainparams -a 127.0.0.1:11604 > chainparams_test.txt
 
 ## Build C++ Header File
 ```
-generate_chainparams_constants.py . > ../../../src/chainparamsconstants.h
+generate_chainparams_constants.py . > ../../../src/networks/abc/chainparamsconstants.cpp
 ```
 
 ## Testing
