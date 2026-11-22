@@ -5,6 +5,7 @@
 #ifndef BITCOIN_RPC_RAWTRANSACTION_UTIL_H
 #define BITCOIN_RPC_RAWTRANSACTION_UTIL_H
 
+#include <cstdint>
 #include <map>
 #include <string>
 
@@ -28,7 +29,8 @@ class UniValue;
  */
 void SignTransaction(CMutableTransaction &mtx, const SigningProvider *keystore,
                      const std::map<COutPoint, Coin> &coins,
-                     const UniValue &hashType, UniValue &result);
+                     const UniValue &hashType, UniValue &result,
+                     uint32_t chainForkId = 0);
 void SignTransactionResultToJSON(CMutableTransaction &mtx, bool complete,
                                  const std::map<COutPoint, Coin> &coins,
                                  std::map<int, std::string> &input_errors,

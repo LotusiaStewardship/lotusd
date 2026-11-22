@@ -114,6 +114,10 @@ public:
     //! contain any blocks)
     virtual std::optional<int> getHeight() = 0;
 
+    //! The fork id signatures for the next block must commit to, or 0 when
+    //! replay protection is not active.
+    virtual uint32_t getChainForkId() = 0;
+
     //! Get block height above genesis block. Returns 0 for genesis block,
     //! 1 for following block, and so on. Returns std::nullopt for a block not
     //! included in the current chain.
