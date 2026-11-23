@@ -42,6 +42,14 @@ from test_framework.util import assert_equal, assert_raises_rpc_error
 # far into the future
 REPLAY_PROTECTION_START_TIME = 2000000000
 
+# The chain-specific fork id committed by the replay-protection transform.
+# Must match CHAIN_FORK_ID in src/script/sighashtype.h.
+CHAIN_FORK_ID = 0x4C4F54
+
+# The global transform used before the chain id was introduced. It must no
+# longer validate once the chain id is active.
+LEGACY_REPLAY_PROTECTION_FORK_VALUE = 0xFFDEAD
+
 # Error due to invalid signature
 RPC_INVALID_SIGNATURE_ERROR = "mandatory-script-verify-flag-failed (Signature must be zero for failed CHECK(MULTI)SIG operation)"
 
@@ -188,8 +196,8 @@ class ReplayProtectionTest(BitcoinTestFramework):
         update_block(1, txns)
         peer.send_blocks_and_test([self.tip], node)
 
-        # Replay protected transactions are rejected.
-        replay_txns = create_fund_and_spend_tx(out[1], 0xffdead)
+        # Replay protected transactions are rejected before activation.
+        replay_txns = create_fund_and_spend_tx(out[1], CHAIN_FORK_ID)
         send_transaction_to_mempool(replay_txns[0])
         assert_raises_rpc_error(-26, RPC_INVALID_SIGNATURE_ERROR,
                                 node.sendrawtransaction, ToHex(replay_txns[1]))
@@ -268,6 +276,19 @@ class ReplayProtectionTest(BitcoinTestFramework):
         # The replay protected transaction is now valid
         replay_tx0_id = send_transaction_to_mempool(replay_txns[0])
         replay_tx1_id = send_transaction_to_mempool(replay_txns[1])
+
+        # A signature made with the old global transform is not valid here.
+        legacy_txns = create_fund_and_spend_tx(
+            out[3], LEGACY_REPLAY_PROTECTION_FORK_VALUE)
+        send_transaction_to_mempool(legacy_txns[0])
+        assert_raises_rpc_error(-26, RPC_INVALID_SIGNATURE_ERROR,
+                                node.sendrawtransaction, ToHex(legacy_txns[1]))
+
+        # A signature made with an unrelated fork id is not valid either.
+        wrong_txns = create_fund_and_spend_tx(out[4], 0x123456)
+        send_transaction_to_mempool(wrong_txns[0])
+        assert_raises_rpc_error(-26, RPC_INVALID_SIGNATURE_ERROR,
+                                node.sendrawtransaction, ToHex(wrong_txns[1]))
 
         # Make sure the transaction are ready to be mined.
         tmpl = node.getblocktemplate()
