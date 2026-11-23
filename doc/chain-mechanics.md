@@ -145,10 +145,13 @@ reproduce these outputs exactly or its blocks are invalid.
   it is the only algorithm accepted for taproot spends.
 - **Taproot** outputs carry a 33-byte commitment and support key-path spends and tapscript leaf
   spends. Taproot and `SIGHASH_LOTUS` are gated on the 2nd Samuel activation (2025-12-21).
-- **Replay protection** changes the fork-id value (`^0xdead`, `0xff0000`) when MTP reaches the
+- **Replay protection** commits every signature to the Lotus chain fork id
+  (`CHAIN_FORK_ID = 0x4c4f54` in `src/script/sighashtype.h`) when MTP reaches the
   activation point given by `-replayprotectionactivationtime`, which defaults to
-  `firstChroniclesActivationTime`. Signatures made for the old value are invalid once it is in
-  force.
+  `secondKingsActivationTime`. The transform covers legacy, BIP143 and
+  `SIGHASH_LOTUS` signatures. Signatures made for another chain's fork id, including
+  the old `0xffdead` value, are invalid here, and signatures made here are invalid
+  there.
 - **SigChecks:** signature-check operations are metered. A block may contain at most one sigcheck
   per 141 bytes of the configured maximum block size (`BLOCK_MAXBYTES_MAXSIGCHECKS_RATIO`), and
   sigchecks are counted at execution, not estimated from script bytes.
