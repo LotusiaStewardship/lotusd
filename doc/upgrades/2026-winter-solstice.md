@@ -12,11 +12,11 @@ upgrade cadence by introducing the **2nd Kings** epoch.
 
 This branch implements the 2nd Kings activation on mainnet, testnet,
 and regtest; updates the miner fund payout rules and required addresses
-for the new epoch; and prepares the next scheduled epoch by adding a
-`firstChroniclesActivationTime` consensus parameter. It also defers
-replay protection activation from 2nd Kings to 1st Chronicles, and
-restores the strict coinbase-height commitment that an earlier coinbase
-validation change had loosened.
+for the new epoch; prepares the next scheduled epoch by adding a
+`firstChroniclesActivationTime` consensus parameter; replaces the global
+replay-protection transform with the chain-specific `CHAIN_FORK_ID` and
+activates it at 2nd Kings; and restores the strict coinbase-height
+commitment that an earlier coinbase validation change had loosened.
 
 ## Key Changes
 
@@ -70,7 +70,7 @@ validation change had loosened.
 - Keeps the required coinbase structure explicit for the new epoch.
 - Matches the immediately preceding 1st Kings single-address payout.
 
-### 4. 1st Chronicles Pre-Scheduling and Replay Protection Deferral
+### 4. 1st Chronicles Pre-Scheduling
 
 **Technical Details:**
 
@@ -81,15 +81,43 @@ validation change had loosened.
 - Extends `Consensus::CoinbaseAddresses` with a `firstChronicles` field.
 - Adds `-firstchroniclesactivationtime` as a hidden command-line
   override.
-- Changes replay protection's default activation point from
-  `secondKingsActivationTime` to `firstChroniclesActivationTime`.
 
 **Benefits:**
 
 - Prepares the next biannual upgrade in the same branch that activates
   2nd Kings.
-- Preserves the existing replay protection mechanism while deferring its
-  default activation to the next epoch.
+- Keeps the next epoch's activation parameter in place without changing
+  the replay-protection boundary, which section 4a sets at 2nd Kings.
+
+**Superseded for the activation point:** the chain-specific replay
+protection in section 4a restores the default to `secondKingsActivationTime`.
+The `firstChroniclesActivationTime` parameter remains in place for the epoch
+boundary.
+
+### 4a. Chain-Specific Replay Protection (2nd Kings)
+
+**Technical Details:**
+
+- Introduces `CHAIN_FORK_ID = 0x4c4f54` in `src/script/sighashtype.h`.
+- `SignatureHash` commits that value whenever
+  `SCRIPT_ENABLE_REPLAY_PROTECTION` is set, replacing the global
+  `forkValue ^ 0xdead | 0xff0000` transform.
+- The default activation point returns to `secondKingsActivationTime`
+  (MTP `1797886200`, 2026-12-21 20:50 UTC). `-replayprotectionactivationtime`
+  remains the testnet/regtest override.
+- Signing surfaces apply the active fork id to the sighash type
+  (`GetChainForkId()` / `interfaces::Chain::getChainForkId()`).
+- The transform runs before algorithm dispatch, so it covers legacy, BIP143
+  and `SIGHASH_LOTUS` signatures, including taproot spends.
+- The old `0xffdead` value is no longer valid once the chain id is active.
+
+**Benefits:**
+
+- Two-way, unilateral separation: a signature made for Lotus is invalid on
+  Napoleon, and a signature made for Napoleon is invalid on Lotus.
+- Remains effective if the other chain later activates the stock ABC
+  transform, because the constants differ.
+- Does not require the other chain to implement any replay protection.
 
 ### 5. Coinbase Height Commitment Re-tightening
 
@@ -129,13 +157,13 @@ validation change had loosened.
   cover the Winter Solstice 2026 transition.
 - Re-derives `SECOND_KINGS_SCRIPTS` from the finalized 2nd Kings
   address.
-- Adds `FIRST_CHRONICLES_ACTIVATION_TIME` and moves the replay
-  protection activation constant to it.
+- Adds `FIRST_CHRONICLES_ACTIVATION_TIME` for the epoch boundary;
+  replay protection stays at 2nd Kings (section 4a).
 - Verifies that pre-2nd-Kings address sets fail once 2nd Kings has
   activated.
 - Verifies that 2nd Kings coinbase outputs succeed after activation.
-- Confirms replay protection is still not enabled at the 2nd Kings
-  boundary.
+- Confirms replay protection activates at the 2nd Kings boundary and
+  commits `CHAIN_FORK_ID`.
 
 ## Implementation Details
 
@@ -165,10 +193,11 @@ validation change had loosened.
      `IsSecondKingsEnabled()` is true
    - The pre-activation path is unchanged
 
-5. **Replay Protection Timing**
+5. **Replay Protection**
 
-   - Default replay protection activation now references
-     `params.firstChroniclesActivationTime`
+   - Default activation references `params.secondKingsActivationTime`
+   - `SignatureHash` commits `CHAIN_FORK_ID = 0x4c4f54` instead of the
+     global `^0xdead` transform (section 4a)
    - Command-line override remains available through
      `-replayprotectionactivationtime`
 
@@ -204,8 +233,8 @@ Upgrade-specific verification in this branch includes:
 - miner fund activation checks across the 2nd Kings boundary
 - rejection of all prior epoch address sets after 2nd Kings activates
 - acceptance of 2nd Kings-required coinbase outputs after activation
-- confirmation that replay protection remains disabled at 2nd Kings
-  and is deferred to 1st Chronicles by default
+- confirmation that replay protection activates at 2nd Kings and commits
+  `CHAIN_FORK_ID`
 - native regression coverage that a non-`logos` coinbase is rejected
   after 2nd Kings activation
 
@@ -227,10 +256,10 @@ Upgrade-specific verification in this branch includes:
 
 ### For Developers
 
-1. Update any code that assumes replay protection activates at
-   2nd Kings.
-2. Use `firstChroniclesActivationTime` as the default future replay
-   protection boundary.
+1. Update any code that assumes replay protection is deferred to
+   1st Chronicles; it activates at 2nd Kings.
+2. Use `secondKingsActivationTime` and `CHAIN_FORK_ID` (`0x4c4f54`)
+   as the replay-protection boundary and committed value.
 3. Verify tools that inspect miner fund outputs account for the single
    address fan-out payout in 2nd Kings.
 
@@ -275,7 +304,7 @@ static bool IsReplayProtectionEnabled(const Consensus::Params &params,
                                       int64_t nMedianTimePast) {
     return nMedianTimePast >=
            gArgs.GetArg("-replayprotectionactivationtime",
-                        params.firstChroniclesActivationTime);
+                        params.secondKingsActivationTime);
 }
 ```
 
