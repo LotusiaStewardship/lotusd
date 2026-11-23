@@ -228,8 +228,9 @@ bool SignPSBTInput(const SigningProvider &provider,
         const PrecomputedTransactionData txdata(tx, std::move(spent_outputs));
         MutableTransactionSignatureCreator creator(&tx, index, utxo.nValue,
                                                    sighash, txdata);
-        sig_complete =
-            ProduceSignature(provider, creator, utxo.scriptPubKey, sigdata);
+        sig_complete = ProduceSignature(provider, creator, utxo.scriptPubKey,
+                                        sigdata,
+                                        GetSigningVerifyFlags(sighash));
     }
     input.FromSignatureData(sigdata);
 

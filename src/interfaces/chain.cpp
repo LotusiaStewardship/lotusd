@@ -177,6 +177,7 @@ namespace {
             }
             return std::nullopt;
         }
+        uint32_t getChainForkId() override { return ::GetChainForkId(); }
         std::optional<int> getBlockHeight(const BlockHash &hash) override {
             LOCK(::cs_main);
             CBlockIndex *block = LookupBlockIndex(hash);

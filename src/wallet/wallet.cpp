@@ -2892,6 +2892,10 @@ bool CWallet::SignTransaction(CMutableTransaction &tx,
                               const std::map<COutPoint, Coin> &coins,
                               SigHashType sighash,
                               std::map<int, std::string> &input_errors) const {
+    // The fork id is implicit in the signature. Commit to the active chain's
+    // value so the signature verifies after the replay-protection boundary.
+    sighash = sighash.withForkValue(chain().getChainForkId());
+
     // Try to sign with all ScriptPubKeyMans
     for (ScriptPubKeyMan *spk_man : GetAllScriptPubKeyMans()) {
         // spk_man->SignTransaction will return true if the transaction is
@@ -2946,6 +2950,10 @@ bool CWallet::SignTransaction(CMutableTransaction &tx,
 TransactionError CWallet::FillPSBT(PartiallySignedTransaction &psbtx,
                                    bool &complete, SigHashType sighash_type,
                                    bool sign, bool bip32derivs) const {
+    // The fork id is implicit in the signature. Commit to the active chain's
+    // value so the signature verifies after the replay-protection boundary.
+    sighash_type = sighash_type.withForkValue(chain().getChainForkId());
+
     LOCK(cs_wallet);
     // Get all of the previous transactions
     for (size_t i = 0; i < psbtx.tx->vin.size(); ++i) {
