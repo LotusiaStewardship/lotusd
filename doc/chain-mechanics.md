@@ -151,7 +151,9 @@ reproduce these outputs exactly or its blocks are invalid.
   `secondKingsActivationTime`. The transform covers legacy, BIP143 and
   `SIGHASH_LOTUS` signatures. Signatures made for another chain's fork id, including
   the old `0xffdead` value, are invalid here, and signatures made here are invalid
-  there.
+  there. Offline signers that have no median time past select the value explicitly:
+  `lotus-tx -forkid=0x4c4f54` commits the chain id, and the default `-forkid=0`
+  preserves pre-activation signatures.
 - **SigChecks:** signature-check operations are metered. A block may contain at most one sigcheck
   per 141 bytes of the configured maximum block size (`BLOCK_MAXBYTES_MAXSIGCHECKS_RATIO`), and
   sigchecks are counted at execution, not estimated from script bytes.
